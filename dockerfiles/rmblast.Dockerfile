@@ -44,9 +44,10 @@ RUN  wget ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.6.0/ncbi-blast-2
   && ./configure \
        --with-mt \
        --prefix="${RMBLAST_PREFIX}" \
-       -j $(grep -c ^processor /proc/cpuinfo) \
        --without-debug \
-  && make \
+  && make -j $(grep -c ^processor /proc/cpuinfo) \
+  && sed -i '/$(INSTALL) -m 644 $(incdir)\/\* $(pincludedir)/ i \\t$(INSTALL) -m 644 $(incdir)/common/* $(pincludedir)/common' Makefile \
+  && sed -i '/$(INSTALL) -m 644 $(incdir)\/\* $(pincludedir)/ s/\*/\*.h/' Makefile \
   && make install
 
 
@@ -62,6 +63,7 @@ RUN  apt-get update \
        libcurl3-gnutls \
        libgmp10 \
        libgnutlsxx28 \
+       libgomp1 \
        liblapack3 \
        libstdc++6 \
        libxml2 \
@@ -72,3 +74,6 @@ RUN  apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="${RMBLAST_PREFIX}/bin:${PATH}"
+ENV CPATH="${RMBLAST_PREFIX}/include"
+ENV LIBRARY_PATH="${RMBLAST_PREFIX}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${RMBLAST_PREFIX}/lib:${LD_LIBRARY_PATH}"
