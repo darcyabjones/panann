@@ -1,7 +1,7 @@
 PWD=$(shell pwd)
 
 
-docker: .repeatmasker .minimap .red .star .spaln .velvet
+docker: .repeatmasker .minimap .red .star .spaln .velvet .mitefinder
 
 .rmblast: rmblast.Dockerfile
 	docker build --file $< -t darcyabjones/rmblast .
@@ -31,6 +31,13 @@ docker: .repeatmasker .minimap .red .star .spaln .velvet
 	docker build --file $< -t darcyabjones/velvet .
 	touch $@
 
+.jellyfish: jellyfish.Dockerfile
+	docker build --file $< -t darcyabjones/jellyfish .
+	touch $@
+
+.mitefinder: mitefinder.Dockerfile
+	docker build --file $< -t darcyabjones/mitefinder .
+	touch $@
 
 downloads/RepeatMaskerMetaData-20181026.tar.gz:
 	mkdir -p downloads
