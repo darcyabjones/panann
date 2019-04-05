@@ -131,7 +131,8 @@ RUN  cp RepeatMaskerConfig.tmpl RepeatMaskerConfig.pm \
   && sed -i 's/DEFAULT_SEARCH_ENGINE\s*=\s*"crossmatch"/DEFAULT_SEARCH_ENGINE = "ncbi"/' RepeatMaskerConfig.pm \
   && sed -i 's~HMMER_DIR\s*=\s*"/usr/local/hmmer"~HMMER_DIR = "/usr/bin"~' RepeatMaskerConfig.pm \
   && sed -i "s~RMBLAST_DIR\s*=\s*\"/usr/local/rmblast\"~RMBLAST_DIR = \"${RMBLAST_PREFIX}/bin\"~" RepeatMaskerConfig.pm \
-  && sed -i 's~"$REPEATMASKER_DIR/Libraries"~$ENV{'RM_LIB'}~' RepeatMaskerConfig.pm \
+  && sed -i 's~"$REPEATMASKER_DIR/Libraries"~"$ENV{'RM_LIB'}"~' RepeatMaskerConfig.pm \
+  && sed -i 's~"REPEATMASKER_DIR/Libraries"~"REPEATMASKER_LIB_DIR"~' RepeatMasker \
   && mv "${RMASK_PREFIX}/Libraries/RepeatPeps.lib" "${RMASK_PREFIX}" \
   && rm -rf -- "${RMASK_PREFIX}/Libraries" \
   && perl -i -0pe 's/^#\!.*perl.*/#\!\/usr\/bin\/env perl/g' \

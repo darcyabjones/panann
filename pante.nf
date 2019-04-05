@@ -62,7 +62,14 @@ if ( params.genomes ) {
 }
 
 
+reads.set { reads4Repdenovo }
 
+
+genomes.into {
+    genomes4Red;
+    genomes4RepeatModeller;
+    genomes4MiteFinder;
+}
 
 
 /*
@@ -78,21 +85,58 @@ if ( params.genomes ) {
 
 /*
  * RED
+ * Runs denovo repeat finding.
+ * Doesn't distinguish between TRs and TEs.
+ * -gau, -thr and -min might be good params to fiddle with
+ */
 process runRed {
     label "red"
+    tag { name }
 
     input:
-    set val(name), file(genome) from ..
+    set val(name), file(genome) from genomes4Red
 
     output:
-    ...
+    set val(name), file("red.bed") into redResults
 
     """
+
+    mkdir -p indir
+    mkdir -p outdir
+
+    # Annoyingly, RED requires .fa extension
+    ln -s ${genome} indir/red.fa
+
+    Red \
+      -cor ${task.cpus} \
+      -gnm indir \
+      -frm 2 \
+      -rpt outdir
+
+    mv outdir/* ./
+
+    rm -rf -- indir outdir
     """
 }
-*/
 
 // Repeat modeller
+
+process runRepeatModeller {
+    label "repeatmasker"
+
+    input:
+    set val(name), file(genome) from genomes4RepeatModeller
+
+
+    """
+    # Where will this be placed?
+    BuildDatabase -name ${name} -engine ncbi ${genome}
+
+    # Can we split this over scaffolds?
+    RepeatModeler -engine ncbi -pa ${task.cpus} -database ${name} >& run.out
+    """
+}
+
 // CARP ? Might need to pipeline this myself, currently exists as separate tools and description of workflow.
 // MGEScan-non-ltr
 
@@ -122,7 +166,39 @@ process runRed {
  * MITE finders
  */
 
-// MITEfinderII
+/*
+ * MITEfinderII
+ *
+ * TODO: Factor out "pattern_scoring.txt" as input parameter.
+ * Can't see a way to make default to environment variable in docker image.
+ * Possibly redistribute with pipeline?
+ */
+process runMiteFinder {
+    label "mitefinder"
+    tag { name }
+
+    input:
+    set val(name), file(genome) from genomes4MiteFinder
+
+    output:
+    set val(name), file("mf.fasta") into miteFinderFasta
+
+    """
+    miteFinder \
+      -input ${genome} \
+      -output mf.fasta \
+      -pattern_scoring /opt/mitefinder/profile/pattern_scoring.txt \
+      -threshold 0.5
+    """
+}
+
+process processMiteFinder {
+    label "python3"
+    tag { name }
+
+    // Convert fasta into bed or gff.
+}
+
 // MITEHunter
 
 /*
