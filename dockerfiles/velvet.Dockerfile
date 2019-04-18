@@ -15,7 +15,7 @@ RUN  apt-get update \
   && wget ${VELVET_URL} \
   && tar zxf ${VELVET_VERSION}.tar.gz \
   && cd velvet* \
-  && make 'OPENMP=1' 'MAXKMERLENGTH=31' 'CATEGORIES=5' \
+  && make 'OPENMP=1' 'MAXKMERLENGTH=81' 'CATEGORIES=5' \
   && mkdir ${VELVET_PREFIX} \
   && cp velveth velvetg ${VELVET_PREFIX}
 

@@ -33,21 +33,22 @@ RUN  apt-get update \
 ENV RMBLAST_PREFIX="/opt/rmblast"
 
 WORKDIR "/tmp/blast"
-RUN  wget ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.6.0/ncbi-blast-2.6.0+-src.tar.gz \
-  && wget http://www.repeatmasker.org/isb-2.6.0+-changes-vers2.patch.gz \
-  && tar zxf ncbi-blast-2.6.0+-src.tar.gz \
-  && rm ncbi-blast-2.6.0+-src.tar.gz \
-  && gunzip isb-2.6.0+-changes-vers2.patch.gz \
-  && cd ncbi-blast-2.6.0+-src \
-  && patch -p1 < ../isb-2.6.0+-changes-vers2.patch \
+RUN  wget ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.9.0/ncbi-blast-2.9.0+-src.tar.gz \
+  && wget http://www.repeatmasker.org/isb-2.9.0+-rmblast.patch.gz \
+  && tar zxf ncbi-blast-2.9.0+-src.tar.gz \
+  && rm ncbi-blast-2.9.0+-src.tar.gz \
+  && gunzip isb-2.9.0+-rmblast.patch.gz \
+  && cd ncbi-blast-2.9.0+-src \
+  && patch -p1 <  ../isb-2.9.0+-rmblast.patch \
   && cd "c++" \
   && ./configure \
        --with-mt \
-       --prefix="${RMBLAST_PREFIX}" \
        --without-debug \
+       --without-krb5 \
+       --without-openssl \
+       --with-projects=scripts/projects/rmblastn/project.lst \
+       --prefix="${RMBLAST_PREFIX}" \
   && make -j $(grep -c ^processor /proc/cpuinfo) \
-  && sed -i '/$(INSTALL) -m 644 $(incdir)\/\* $(pincludedir)/ i \\t$(INSTALL) -m 644 $(incdir)/common/* $(pincludedir)/common' Makefile \
-  && sed -i '/$(INSTALL) -m 644 $(incdir)\/\* $(pincludedir)/ s/\*/\*.h/' Makefile \
   && make install
 
 

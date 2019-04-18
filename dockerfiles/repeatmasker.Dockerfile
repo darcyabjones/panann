@@ -78,7 +78,7 @@ COPY --from=reconbuilder "${RECON_PREFIX}" "${RECON_PREFIX}"
 ENV RM_LIB="/opt/rmlib"
 
 ENV RMASK_PREFIX="/opt/repeatmasker"
-ARG RMASK_VERSION="4-0-8"
+ARG RMASK_VERSION="4-0-9"
 ARG RMASK_URL="http://www.repeatmasker.org/RepeatMasker-open-${RMASK_VERSION}.tar.gz"
 
 ENV RMOD_PREFIX="/opt/repeatmodeller"
@@ -132,7 +132,10 @@ RUN  cp RepeatMaskerConfig.tmpl RepeatMaskerConfig.pm \
   && sed -i 's~HMMER_DIR\s*=\s*"/usr/local/hmmer"~HMMER_DIR = "/usr/bin"~' RepeatMaskerConfig.pm \
   && sed -i "s~RMBLAST_DIR\s*=\s*\"/usr/local/rmblast\"~RMBLAST_DIR = \"${RMBLAST_PREFIX}/bin\"~" RepeatMaskerConfig.pm \
   && sed -i 's~"$REPEATMASKER_DIR/Libraries"~"$ENV{'RM_LIB'}"~' RepeatMaskerConfig.pm \
-  && sed -i 's~"REPEATMASKER_DIR/Libraries"~"REPEATMASKER_LIB_DIR"~' RepeatMasker \
+  && sed -i 's~REPEATMASKER_DIR/Libraries~REPEATMASKER_LIB_DIR~' RepeatMasker \
+  && sed -i '/use strict;$/a use lib $ENV{RM_LIB};' RepeatMasker \
+  && sed -i '/use strict;$/a use lib $ENV{RM_LIB};' ProcessRepeats \
+  && sed -i 's~\$DIRECTORY/Libraries~$ENV{RM_LIB}~g' ProcessRepeats \
   && mv "${RMASK_PREFIX}/Libraries/RepeatPeps.lib" "${RMASK_PREFIX}" \
   && rm -rf -- "${RMASK_PREFIX}/Libraries" \
   && perl -i -0pe 's/^#\!.*perl.*/#\!\/usr\/bin\/env perl/g' \

@@ -39,6 +39,14 @@ docker: .repeatmasker .minimap .red .star .spaln .velvet .mitefinder
 	docker build --file $< -t darcyabjones/mitefinder .
 	touch $@
 
+.bwa: bwa.Dockerfile
+	docker build --file $< -t darcyabjones/bwa .
+	touch $@
+
+.htslib: htslib.Dockerfile
+	docker build --file $< -t darcyabjones/htslib .
+	touch $@
+
 downloads/RepeatMaskerMetaData-20181026.tar.gz:
 	mkdir -p downloads
 	cd downloads \
