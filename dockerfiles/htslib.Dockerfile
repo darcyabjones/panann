@@ -1,4 +1,4 @@
-RG DEBIAN_VERSION="stretch-20190228-slim"
+ARG DEBIAN_VERSION="stretch-20190228-slim"
 
 FROM debian:${DEBIAN_VERSION} as builder
 

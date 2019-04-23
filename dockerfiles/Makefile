@@ -15,6 +15,10 @@ docker: .repeatmasker .minimap .red .star .spaln .velvet .mitefinder
 	docker build --file $< -t darcyabjones/red .
 	touch $@
 
+.ltrdetector: ltrdetector.Dockerfile
+	docker build --file $< -t darcyabjones/ltrdetector .
+	touch $@
+
 .minimap: minimap2.Dockerfile
 	docker build --file $< -t darcyabjones/minimap2 .
 	touch $@
@@ -45,6 +49,22 @@ docker: .repeatmasker .minimap .red .star .spaln .velvet .mitefinder
 
 .htslib: htslib.Dockerfile
 	docker build --file $< -t darcyabjones/htslib .
+	touch $@
+
+.bamtools: bamtools.Dockerfile
+	docker build --file $< -t darcyabjones/bamtools .
+	touch $@
+
+.repdenovo: repdenovo.Dockerfile .bamtools .bwa .htslib .velvet .jellyfish
+	docker build --file $< -t darcyabjones/repdenovo .
+	touch $@
+
+.helitronscanner: helitronscanner.Dockerfile
+	docker build --file $< -t darcyabjones/helitronscanner .
+	touch $@
+
+.genometools: genometools.Dockerfile
+	docker build --file $< -t darcyabjones/genometools .
 	touch $@
 
 downloads/RepeatMaskerMetaData-20181026.tar.gz:

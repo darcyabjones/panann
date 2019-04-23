@@ -27,7 +27,8 @@ if (params.help) {
 params.genomes = false
 params.reads = false
 params.repbase = false
-
+params.helitronscanner_heads = "$baseDir/data/helitronscanner_head.lcvs"
+params.helitronscanner_tails = "$baseDir/data/helitronscanner_tail.lcvs"
 
 /*
  * Sanitise the input
@@ -151,9 +152,34 @@ process runRepeatModeller {
  */
 
 
-// LTR_retriever
 // LTR_harvest + digest // See ltr_retriever paper for "good" parameters
+// LTR_retriever post-processor for ltr_harvest. Possibly need to exclude
+// because of dependence on RepeatMasker? Might be tricky to get running.
+
 // LTR_detector
+// Doesn't seem to find many in stago?
+process runLtrDetector {
+    label "ltrdetector"
+
+    """
+    # Split multifasta into directory with one chrom per file
+
+    LtrDetector \
+        -fasta fasta_dir/ \
+        -destDir output_dir \
+        -id 70 \
+        -nThreads ${task.cpus} \
+        -nested
+    """
+}
+
+
+process processLtrDetectorResults {
+
+    """
+    Combine bed-like files.
+    """
+}
 
 /*
  * SINE finders
@@ -205,8 +231,100 @@ process processMiteFinder {
  * Helitron finders
  */
 
-// HELsearch
+// HelitronScanner
+// Todo, parse outputs into gff or bed-like file.
+// look at adding new regular expressions to lcvs files.
+// Figure out how to specify path of .jar archive
+// (probably set environment variable?)
+process runHelitronScanner {
+    label "helitronscanner"
 
+    input:
+    set val(name), file(genome) from genomes4HelitronScanner
+    set file("heads.lcvs"), file("tails.lcvs") from 
+
+    output:
+    set val(name), file("${genome.baseName}_fwd_pairs.txt"),
+        file("${genome.baseName}_rev_pairs.txt") into helitronScannerLocations
+    set val(name), file("${genome.baseName}_helitrons.fasta") into helitronScannerSeqs
+
+    script:
+    threshold = 5
+    min_size = 200
+    max_size = 50000
+    """
+    java -jar HelitronScanner.jar scanHead \
+      -threads_LCV ${task.cpus} \
+      -buffer_size 0 \
+      -lcv_filepath heads.lcvs \
+      -genome ${genome} \
+      -output fwd_head_positions.txt \
+      -overlap 50 \
+      -threshold 1
+
+    java -jar HelitronScanner.jar scanTail \
+      -threads_LCV ${task.cpus} \
+      -buffer_size 0 \
+      -lcv_filepath tails.lcvs \
+      -genome ${genome} \
+      -output fwd_tail_positions.txt \
+      -overlap 50 \
+      -threshold 1
+
+    java -jar HelitronScanner.jar pairends \
+      -head_score fwd_head_positions.txt \
+      -tail_score fwd_tail_positions.txt \
+      -output "${genome.baseName}_fwd_pairs.txt" \
+      -head_threshold ${threshold} \
+      -tail_threshold ${threshold} \
+      -helitron_len_range ${min_size}:${max_size}
+
+    java -jar HelitronScanner.jar draw \
+      -pscore "${genome.baseName}_fwd_pairs.txt" \
+      -genome ${genome} \
+      -output "${genome.baseName}_fwd" \
+      --pure
+
+    # Get rc matches
+    java -jar HelitronScanner.jar scanHead \
+      -threads_LCV ${task.cpus} \
+      -buffer_size 0 \
+      -lcv_filepath heads.lcvs \
+      -genome ${genome} \
+      -output rev_head_positions.txt \
+      -overlap 50 \
+      -threshold 1 \
+      --rc_mode
+
+    java -jar HelitronScanner.jar scanTail \
+      -threads_LCV ${task.cpus} \
+      -buffer_size 0 \
+      -lcv_filepath tails.lcvs \
+      -genome ${genome} \
+      -output rev_tail_positions.txt \
+      -overlap 50 \
+      -threshold 1 \
+      --rc_mode
+
+    java -jar HelitronScanner.jar pairends \
+      -head_score rev_head_positions.txt \
+      -tail_score rev_tail_positions.txt \
+      -output ${genome.baseName}_rev_pairs.txt \
+      -head_threshold ${threshold} \
+      -tail_threshold ${threshold} \
+      -helitron_len_range ${min_size}:${max_size} \
+      --rc_mode
+
+    java -jar HelitronScanner.jar draw \
+      -pscore ${genome.baseName}_rev_pairs.txt \
+      -genome ${genome} \
+      -output "${genome.baseName}_rev" \
+      --pure
+
+    cat "${genome.baseName}_fwd.hel.fa" "${genome.baseName}_rev.hel.fa" \
+      > ${genome.baseName}_helitrons.fasta
+    """
+}
 
 /*
  * Combine and remove redundancy.
