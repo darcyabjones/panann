@@ -1,0 +1,8 @@
+*.sif
+.nextflow*
+*.log*
+
+work
+alignments
+.nextflow
+
