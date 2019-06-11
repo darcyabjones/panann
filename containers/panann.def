@@ -1,0 +1,381 @@
+Bootstrap: docker
+From: debian:stretch-20190228-slim
+Stage: init
+
+%post
+    mkdir /build
+
+    cat <<'EOF' > /build/init.sh
+        export BUILD_DIR="/build"
+        export ENV_FILE="${BUILD_DIR}/env.sh"
+
+        # Adds an environment variable to singularity env.
+        add_env () {
+          for arg in $@; do
+            eval echo "export ${arg}=\"\${${arg}}\"" >> ${SINGULARITY_ENVIRONMENT}
+            eval echo "export ${arg}=\"\${${arg}}\"" >> ${ENV_FILE}
+          done
+        }
+
+        # Adds a path to the environment, without overwriting it.
+        prepend_path () {
+          eval echo "export ${1}=\"${2}:\\\${${1}}\"" >> ${SINGULARITY_ENVIRONMENT}
+          eval echo "export ${1}=\"${2}:\\\${${1}}\"" >> ${ENV_FILE}
+          eval export ${1}="${2}:\${${1}}"
+        }
+
+        NCPU="$(grep -c ^processor /proc/cpuinfo)"
+
+        # Set these with empty defaults to avoid using unset variables in path adds
+        export PATH="${PATH-}"
+        export INCLUDE="${INCLUDE-}"
+        export CPATH="${CPATH-}"
+        export LIBRARY_PATH="${LIBRARY_PATH-}"
+        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
+        export LD_RUN_PATH="${LD_RUN_PATH-}"
+
+        # We will build everything in here
+        mkdir -p "${BUILD_DIR}"
+EOF
+
+
+
+
+Bootstrap: docker
+From: debian:stretch-20190228-slim
+Stage: spaln_builder
+
+%files from init
+    /build/init.sh
+
+%post
+    set -eux
+
+    . /build/init.sh
+
+    export SPALN_VERSION="Ver.2.3.3"
+    export SPALN_PREFIX="/opt/spaln/${SPALN_VERSION}"
+    export SPALN_REPO="https://github.com/ogotoh/spaln.git"
+    export ALN_TAB="${SPALN_PREFIX}/table"
+    export ALN_DBS="${SPALN_PREFIX}/seqdb"
+
+    add_env SPALN_VERSION SPALN_PREFIX ALN_DBS ALN_TAB
+    prepend_path PATH "${SPALN_PREFIX}/bin:${SPALN_PREFIX}/perl"
+
+    apt-get update
+    apt-get install -y \
+      build-essential \
+      git \
+      zlib1g-dev
+
+    # Runtime requires
+    #   perl
+    #   zlib1g
+
+    rm -rf /var/lib/apt/lists/*
+
+    cd /build
+    git clone "${SPALN_REPO}" spaln
+    cd spaln
+
+    git fetch --tags
+    git checkout "tags/${SPALN_VERSION}"
+    cd src
+
+    ./configure \
+      --use_zlib=1 \
+      --exec_prefix="${SPALN_PREFIX}/bin" \
+      --table_dir="${SPALN_PREFIX}/table" \
+      --alndbs_dir="${SPALN_PREFIX}/seqdb"
+
+    make
+    make install
+    mv ../perl "${SPALN_PREFIX}/perl"
+
+
+Bootstrap: docker
+From: debian:stretch-20190228-slim
+Stage: codingquarry_builder
+
+%files from init
+    /build/init.sh
+
+%post
+    set -eux
+
+    . /build/init.sh
+    export CODINGQUARRY_VERSION="v2.0"
+    export CODINGQUARRY_PREFIX="/opt/codingquarry/${CODINGQUARRY_VERSION}"
+    export CODINGQUARRY_URL="https://downloads.sourceforge.net/project/codingquarry/CodingQuarry_v2.0.tar.gz"
+    export QUARRY_PATH="${CODINGQUARRY_PREFIX}/QuarryFiles"
+
+    add_env CODINGQUARRY_PREFIX CODINGQUARRY_VERSION QUARRY_PATH
+    prepend_path PATH "${CODINGQUARRY_PREFIX}/bin"
+
+    apt-get update
+    apt-get install -y \
+      build-essential \
+      wget
+
+    # Runtime requires
+    #  libgomp1
+
+    rm -rf /var/lib/apt/lists/*
+
+    cd /build
+    wget -O codingquarry.tar.gz "${CODINGQUARRY_URL}"
+    tar -zxf codingquarry.tar.gz
+    cd CodingQuarry*
+
+    make -f makefile
+    mkdir -p "${CODINGQUARRY_PREFIX}/bin"
+    cp -r CodingQuarry "${CODINGQUARRY_PREFIX}/bin"
+    cp -r run_CQ-PM_stranded.sh "${CODINGQUARRY_PREFIX}/bin"
+    cp -r run_CQ-PM_unstranded.sh "${CODINGQUARRY_PREFIX}/bin"
+    cp -r run_CQ-PM_mine.sh "${CODINGQUARRY_PREFIX}/bin"
+    cp -r QuarryFiles "${QUARRY_PATH}"
+
+
+Bootstrap: docker
+From: debian:stretch-20190228-slim
+Stage: augustus_builder
+
+%files from init
+    /build/init.sh
+
+%post
+    set -eux
+
+    . /build/init.sh
+
+    export AUGUSTUS_VERSION="8b1b14a7489e4545e89c8725dc33268f6c2a9117"
+    export AUGUSTUS_PREFIX="/opt/augustus/${AUGUSTUS_VERSION}"
+    export AUGUSTUS_URL="https://github.com/Gaius-Augustus/Augustus.git"
+    export AUGUSTUS_CONFIG_PATH="${AUGUSTUS_PREFIX}/config"
+
+    add_env AUGUSTUS_PREFIX AUGUSTUS_VERSION AUGUSTUS_CONFIG_PATH
+    prepend_path PATH "${AUGUSTUS_PREFIX}/bin"
+
+    # Install htslib and samtools.
+    # Bam2wig in augustus depends on some intermediate samtools/htslib compilation
+    # rather than the actual headers/shared libraries, so I have to compile it
+    # separately.
+
+    export HTSLIB_VERSION="1.9"
+    export HTSLIB_REPO="https://github.com/samtools/htslib.git"
+
+    export SAMTOOLS_VERSION="1.9"
+    export SAMTOOLS_REPO="https://github.com/samtools/samtools.git"
+
+    apt-get update
+    apt-get install -y \
+      autoconf \
+      build-essential \
+      git \
+      libbz2-dev \
+      libcurl4-openssl-dev \
+      liblzma-dev \
+      libncurses5-dev \
+      libssl-dev \
+      zlib1g-dev \
+      wget
+
+    cd /build
+    git clone "${HTSLIB_REPO}" htslib
+    cd htslib
+    git fetch --tags
+    git checkout "${HTSLIB_VERSION}"
+    autoheader
+    autoconf
+    ./configure --enable-libcurl
+    make -j ${NCPU}
+
+    cd /build
+    git clone "${SAMTOOLS_REPO}" samtools
+    cd samtools
+    git fetch --tags
+    git checkout "${SAMTOOLS_VERSION}"
+    autoheader
+    autoconf
+    ./configure
+    make -j "${NCPU}"
+
+    # Now we can install augustus
+
+    apt-get update
+    apt-get install -y \
+      build-essential \
+      libbamtools-dev \
+      libboost-all-dev \
+      libboost-iostreams-dev \
+      libboost-graph-dev \
+      libcurl4-openssl-dev \
+      libgsl-dev \
+      liblpsolve55-dev \
+      libssl-dev \
+      libsuitesparse-dev \
+      libsqlite3-dev \
+      zlib1g-dev
+
+    # Runtime requires
+    #  libbamtools2.4.0
+    #  libcurl3
+    #  libgsl2
+    #  libssl1.1
+    #  libsqlite3-0
+    #  lp-solve
+    #  zlib1g
+
+    rm -rf /var/lib/apt/lists/*
+
+    # This is for bam2wig. It needs the path where samtools + htslib were build
+    export TOOLDIR="/build"
+
+    cd /build
+    git clone "${AUGUSTUS_URL}" augustus
+    cd augustus
+    git fetch --tags
+    git checkout "${AUGUSTUS_VERSION}"
+
+    mkdir bin
+    sed -i "s/# SQLITE = true/SQLITE = true/g" common.mk
+    sed -i "s/# COMPGENEPRED = true/COMPGENEPRED = true/g" common.mk
+    sed -i 's~INSTALLDIR = .*~INSTALLDIR="${AUGUSTUS_PREFIX}"~g' Makefile
+
+    cd auxprogs/bam2wig
+    make
+
+    cd /build/augustus
+
+    make
+    make install
+    make test
+
+
+Bootstrap: docker
+From: debian:stretch-20190228-slim
+Stage: busco_builder
+
+%files from init
+    /build/init.sh
+
+%post
+    set -eux
+
+    . /build/init.sh
+
+    export BUSCO_URL="https://gitlab.com/ezlab/busco.git"
+    export BUSCO_VERSION="1554283ab8ee7dd5b5290f4f748234f456c36e66"
+    export BUSCO_PREFIX="/opt/busco/${BUSCO_VERSION}"
+
+    add_env BUSCO_PREFIX BUSCO_VERSION
+    prepend_path PATH "${BUSCO_PREFIX}/scripts"
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      git \
+      python3
+
+    # Runtime requires
+    #   hmmer
+    #   ncbi-blast+
+    #   perl
+    #   r-base
+    #   wget ?
+
+    rm -rf /var/lib/apt/lists/*
+
+    git clone "${BUSCO_URL}" "${BUSCO_PREFIX}"
+    cd "${BUSCO_PREFIX}"
+
+    git fetch --tags
+    git checkout "${BUSCO_VERSION}"
+
+    export AUGUSTUS_VERSION="8b1b14a7489e4545e89c8725dc33268f6c2a9117"
+    export AUGUSTUS_PREFIX="/opt/augustus/${AUGUSTUS_VERSION}"
+
+    python3 setup.py install
+    sed -i 's~#!/usr/bin/env python~#!/usr/bin/env python3~g' scripts/run_BUSCO.py
+    sed -i 's~#!/usr/bin/env python~#!/usr/bin/env python3~g' scripts/generate_plot.py
+    cp config/config.ini.default config/config.ini
+    sed -i "s~path = /home/osboxes/BUSCOVM/augustus/augustus-3.2.2/bin/~path = ${AUGUSTUS_PREFIX}/bin/~g" config/config.ini
+    sed -i "s~path = /home/osboxes/BUSCOVM/augustus/augustus-3.2.2/scripts/~path = ${AUGUSTUS_PREFIX}/scripts/~g" config/config.ini
+    sed -i 's~path = /home/osboxes/BUSCOVM/hmmer/hmmer-3.1b2-linux-intel-ia32/binaries/~path = /usr/bin/~g' config/config.ini
+
+
+Bootstrap: docker
+From: debian:stretch-20190228-slim
+Stage: final
+
+%labels
+    Author "darcy.ab.jones@gmail.com"
+    Version "v0.0.1"
+
+%help
+    This is some help text
+
+%test
+    echo "Can add tests here"
+
+%files from spaln_builder
+    /opt/spaln
+    /build/env.sh /build/spaln_builder.sh
+
+%files from codingquarry_builder
+    /opt/codingquarry
+    /build/env.sh /build/codingquarry_builder.sh
+
+%files from augustus_builder
+    /opt/augustus
+    /build/env.sh /build/augustus_builder.sh
+
+%files from busco_builder
+    /opt/busco
+    /build/env.sh /build/busco_builder.sh
+
+%post
+    set -eu
+
+    cat /build/*.sh >> ${SINGULARITY_ENVIRONMENT}
+    export DEBIAN_FRONTEND=noninteractive
+
+    # This prevents java install from panicking
+    mkdir -p /usr/share/man/man1
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+      default-jre-headless \
+      hmmer \
+      libbamtools2.4.0 \
+      libbz2-1.0 \
+      libcurl3 \
+      libgomp1 \
+      libgsl2 \
+      liblzma5 \
+      libncurses5 \
+      libsqlite3-0 \
+      libssl1.1 \
+      libtbb2 \
+      locales \
+      lp-solve \
+      lzma \
+      ncbi-blast+ \
+      perl \
+      python \
+      python-numpy \
+      python-biopython \
+      python3 \
+      python3-numpy \
+      r-base \
+      zlib1g
+
+    rm -rf /var/lib/apt/lists/*
+
+    # Set locales for perl
+    sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+    dpkg-reconfigure --frontend=noninteractive locales
+    update-locale LANG=en_US.UTF-8
+
+    echo 'export LANG="en_US.UTF-8"' >> ${SINGULARITY_ENVIRONMENT}
+    export LANG="en_US.UTF-8"
