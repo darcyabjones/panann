@@ -2,10 +2,10 @@ ARG IMAGE
 
 FROM "${IMAGE}" as builder
 
-ARG MINIMAP_TAG
-ARG MINIMAP_REPO="https://github.com/lh3/minimap2.git"
-ARG MINIMAP_PREFIX_ARG="/opt/minimap/${MINIMAP_TAG}"
-ENV MINIMAP_PREFIX="${MINIMAP_PREFIX_ARG}"
+ARG MINIMAP2_TAG
+ARG MINIMAP2_REPO="https://github.com/lh3/minimap2.git"
+ARG MINIMAP2_PREFIX_ARG="/opt/minimap2/${MINIMAP2_TAG}"
+ENV MINIMAP2_PREFIX="${MINIMAP2_PREFIX_ARG}"
 
 ARG K8_VERSION
 ARG K8_URL="https://github.com/attractivechaos/k8/releases/download/v${K8_VERSION}/k8-${K8_VERSION}.tar.bz2"
@@ -25,13 +25,13 @@ RUN  set -eu \
        zlib1g-dev \
   && rm -rf /var/lib/apt/lists/* \
   && update-ca-certificates \
-  && git clone "${MINIMAP_REPO}" . \
+  && git clone "${MINIMAP2_REPO}" . \
   && git fetch --tags \
-  && git checkout "tags/${MINIMAP_TAG}" \
+  && git checkout "tags/${MINIMAP2_TAG}" \
   && make extra \
-  && mkdir -p "${MINIMAP_PREFIX}/bin" \
-  && cp minimap2 sdust minimap2-lite "${MINIMAP_PREFIX}/bin" \
-  && cp misc/paftools.js "${MINIMAP_PREFIX}/bin" \
+  && mkdir -p "${MINIMAP2_PREFIX}/bin" \
+  && cp minimap2 sdust minimap2-lite "${MINIMAP2_PREFIX}/bin" \
+  && cp misc/paftools.js "${MINIMAP2_PREFIX}/bin" \
   && curl -L "${K8_URL}" \
    | tar jxf - \
   && mkdir -p "${K8_PREFIX}/bin" \
@@ -43,17 +43,17 @@ RUN  set -eu \
 
 FROM "${IMAGE}"
 
-ARG MINIMAP_TAG
-ARG MINIMAP_PREFIX_ARG="/opt/minimap/${MINIMAP_TAG}"
-ENV MINIMAP_PREFIX="${MINIMAP_PREFIX_ARG}"
+ARG MINIMAP2_TAG
+ARG MINIMAP2_PREFIX_ARG="/opt/minimap2/${MINIMAP2_TAG}"
+ENV MINIMAP2_PREFIX="${MINIMAP2_PREFIX_ARG}"
 
 ARG K8_VERSION
 ARG K8_PREFIX_ARG="/opt/k8/${K8_VERSION}"
 ENV K8_PREFIX="${K8_PREFIX_ARG}"
 
-ENV PATH "${MINIMAP_PREFIX}/bin:${K8_PREFIX}/bin:${PATH}"
+ENV PATH "${MINIMAP2_PREFIX}/bin:${K8_PREFIX}/bin:${PATH}"
 
-COPY --from=builder "${MINIMAP_PREFIX}" "${MINIMAP_PREFIX}"
+COPY --from=builder "${MINIMAP2_PREFIX}" "${MINIMAP2_PREFIX}"
 COPY --from=builder "${K8_PREFIX}" "${K8_PREFIX}"
 COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/minimap2.txt
 

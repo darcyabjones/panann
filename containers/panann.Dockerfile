@@ -7,7 +7,7 @@ ARG TRINITY_IMAGE
 ARG GENOMETOOLS_IMAGE
 ARG STAR_IMAGE
 ARG STRINGTIE_IMAGE
-ARG MINIMAP_IMAGE
+ARG MINIMAP2_IMAGE
 ARG SPALN_IMAGE
 ARG GMAP_IMAGE
 ARG AUGUSTUS_IMAGE
@@ -22,7 +22,7 @@ FROM "${TRINITY_IMAGE}" as trinity_builder
 FROM "${GENOMETOOLS_IMAGE}" as genometools_builder
 FROM "${STAR_IMAGE}" as star_builder
 FROM "${STRINGTIE_IMAGE}" as stringtie_builder
-FROM "${MINIMAP_IMAGE}" as minimap2_builder
+FROM "${MINIMAP2_IMAGE}" as minimap2_builder
 FROM "${SPALN_IMAGE}" as spaln_builder
 FROM "${GMAP_IMAGE}" as gmap_builder
 FROM "${AUGUSTUS_IMAGE}" as augustus_builder
@@ -38,8 +38,8 @@ ENV TRINITY_HOME="${TRINITY_PREFIX}"
 
 ENV PATH "${TRINITY_PREFIX}:${PATH}"
 
-COPY --from=builder "${TRINITY_PREFIX}" "${TRINITY_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/trinity.txt
+COPY --from=trinity_builder "${TRINITY_PREFIX}" "${TRINITY_PREFIX}"
+COPY --from=trinity_builder "${APT_REQUIREMENTS_FILE}" /build/apt/trinity.txt
 
 
 ARG JELLYFISH_VERSION
@@ -126,17 +126,17 @@ COPY --from=stringtie_builder "${STRINGTIE_PREFIX}" "${STRINGTIE_PREFIX}"
 COPY --from=stringtie_builder "${APT_REQUIREMENTS_FILE}" /build/apt/stringtie.txt
 
 
-ARG MINIMAP_TAG
-ARG MINIMAP_PREFIX_ARG="/opt/minimap/${MINIMAP_TAG}"
-ENV MINIMAP_PREFIX="${MINIMAP_PREFIX_ARG}"
+ARG MINIMAP2_TAG
+ARG MINIMAP2_PREFIX_ARG="/opt/minimap2/${MINIMAP2_TAG}"
+ENV MINIMAP2_PREFIX="${MINIMAP2_PREFIX_ARG}"
 
 ARG K8_VERSION
 ARG K8_PREFIX_ARG="/opt/k8/${K8_VERSION}"
 ENV K8_PREFIX="${K8_PREFIX_ARG}"
 
-ENV PATH "${MINIMAP_PREFIX}/bin:${K8_PREFIX}/bin:${PATH}"
+ENV PATH "${MINIMAP2_PREFIX}/bin:${K8_PREFIX}/bin:${PATH}"
 
-COPY --from=minimap2_builder "${MINIMAP_PREFIX}" "${MINIMAP_PREFIX}"
+COPY --from=minimap2_builder "${MINIMAP2_PREFIX}" "${MINIMAP2_PREFIX}"
 COPY --from=minimap2_builder "${K8_PREFIX}" "${K8_PREFIX}"
 COPY --from=minimap2_builder "${APT_REQUIREMENTS_FILE}" /build/apt/minimap2.txt
 
@@ -178,9 +178,10 @@ ARG BUSCO_PREFIX_ARG="/opt/busco/${BUSCO_COMMIT}"
 ENV BUSCO_PREFIX="${BUSCO_PREFIX_ARG}"
 
 ENV PATH="${BUSCO_PREFIX}/scripts:${PATH}"
+ENV PYTHONPATH="${PYTHONPATH}:${BUSCO_PREFIX}/lib/python3.5/site-packages"
 
-COPY --from=builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
+COPY --from=busco_builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
+COPY --from=busco_builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
 
 
 ARG CODINGQUARRY_VERSION

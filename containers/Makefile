@@ -45,11 +45,11 @@ HTSLIB_PREFIX_ARG=$(INSTALL_BASE)/htslib/$(HTSLIB_TAG)
 BCFTOOLS_PREFIX_ARG=$(INSTALL_BASE)/bcftools/$(BCFTOOLS_TAG)
 SAMTOOLS_PREFIX_ARG=$(INSTALL_BASE)/samtools/$(SAMTOOLS_TAG)
 
-MINIMAP_TAG=v2.16
+MINIMAP2_TAG=v2.16
 K8_VERSION=0.2.4
-MINIMAP_REPO=https://github.com/lh3/minimap2.git
+MINIMAP2_REPO=https://github.com/lh3/minimap2.git
 K8_URL=https://github.com/attractivechaos/k8/releases/download/v$(K8_VERSION)/k8-$(K8_VERSION).tar.bz2
-MINIMAP_PREFIX_ARG=$(INSTALL_BASE)/minimap2/$(MINIMAP_TAG)
+MINIMAP2_PREFIX_ARG=$(INSTALL_BASE)/minimap2/$(MINIMAP_TAG)
 K8_PREFIX_ARG=$(INSTALL_BASE)/k8/$(K8_VERSION)
 
 SPALN_TAG=Ver.2.3.3
@@ -102,7 +102,7 @@ clean:
 
 tidy:
 	# Just removes untagged images to free up space
-	docker rmi $(shell docker images | grep "^<none>" | awk '{print $3}')
+	docker rmi $(shell docker images | grep "^<none>" | awk '{print $$3}') || true
 
 # Generic rules
 singularity/%.sif: docker/%
@@ -232,9 +232,9 @@ docker/genometools: genometools.Dockerfile docker/base
 docker/minimap2: minimap2.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg MINIMAP_TAG="$(MINIMAP_TAG)" \
-	  --build-arg MINIMAP_REPO="$(MINIMAP_REPO)" \
-	  --build-arg MINIMAP_PREFIX_ARG="$(MINIMAP_PREFIX_ARG)" \
+	  --build-arg MINIMAP2_TAG="$(MINIMAP2_TAG)" \
+	  --build-arg MINIMAP2_REPO="$(MINIMAP2_REPO)" \
+	  --build-arg MINIMAP2_PREFIX_ARG="$(MINIMAP2_PREFIX_ARG)" \
 	  --build-arg K8_VERSION="$(K8_VERSION)" \
 	  --build-arg K8_URL="$(K8_URL)" \
 	  --build-arg K8_PREFIX_ARG="$(K8_PREFIX_ARG)" \
@@ -297,6 +297,62 @@ docker/busco: busco.Dockerfile docker/base docker/augustus
 	  --build-arg BUSCO_PREFIX_ARG="$(BUSCO_PREFIX_ARG)" \
 	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
 	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+
+## The monolith!!!!
+docker/panann: panann.Dockerfile docker/base docker/jellyfish docker/bowtie2 docker/salmon docker/trinity docker/star docker/stringtie docker/htslib docker/genometools docker/minimap2 docker/spaln docker/gmap docker/augustus docker/codingquarry docker/busco
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg JELLYFISH_IMAGE="$(call make_image_name,jellyfish)" \
+	  --build-arg JELLYFISH_VERSION="$(JELLYFISH_VERSION)" \
+	  --build-arg JELLYFISH_PREFIX_ARG="$(JELLYFISH_PREFIX_ARG)" \
+	  --build-arg BOWTIE2_IMAGE="$(call make_image_name,bowtie2)" \
+	  --build-arg BOWTIE2_TAG="$(BOWTIE2_TAG)" \
+	  --build-arg BOWTIE2_PREFIX_ARG="$(BOWTIE2_PREFIX_ARG)" \
+	  --build-arg SALMON_IMAGE="$(call make_image_name,salmon)" \
+	  --build-arg SALMON_TAG="$(SALMON_TAG)" \
+	  --build-arg SALMON_PREFIX_ARG="$(SALMON_PREFIX_ARG)" \
+	  --build-arg TRINITY_IMAGE="$(call make_image_name,trinity)" \
+	  --build-arg TRINITY_TAG="$(TRINITY_TAG)" \
+	  --build-arg TRINITY_PREFIX_ARG="$(TRINITY_PREFIX_ARG)" \
+	  --build-arg STAR_IMAGE="$(call make_image_name,star)" \
+	  --build-arg STAR_VERSION="$(STAR_VERSION)" \
+	  --build-arg STAR_PREFIX_ARG="$(STAR_PREFIX_ARG)" \
+	  --build-arg STRINGTIE_IMAGE="$(call make_image_name,stringtie)" \
+	  --build-arg STRINGTIE_VERSION="$(STRINGTIE_VERSION)" \
+	  --build-arg STRINGTIE_PREFIX_ARG="$(STRINGTIE_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
+	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
+	  --build-arg BCFTOOLS_TAG="$(BCFTOOLS_TAG)" \
+	  --build-arg BCFTOOLS_PREFIX_ARG="$(BCFTOOLS_PREFIX_ARG)" \
+	  --build-arg GENOMETOOLS_IMAGE="$(call make_image_name,genometools)" \
+	  --build-arg GENOMETOOLS_VERSION="$(GENOMETOOLS_VERSION)" \
+	  --build-arg GENOMETOOLS_PREFIX_ARG="$(GENOMETOOLS_PREFIX_ARG)" \
+	  --build-arg MINIMAP2_IMAGE="$(call make_image_name,minimap2)" \
+	  --build-arg MINIMAP2_TAG="$(MINIMAP2_TAG)" \
+	  --build-arg MINIMAP2_PREFIX_ARG="$(MINIMAP2_PREFIX_ARG)" \
+	  --build-arg K8_VERSION="$(K8_VERSION)" \
+	  --build-arg K8_PREFIX_ARG="$(K8_PREFIX_ARG)" \
+	  --build-arg SPALN_IMAGE="$(call make_image_name,spaln)" \
+	  --build-arg SPALN_TAG="$(SPALN_TAG)" \
+	  --build-arg SPALN_PREFIX_ARG="$(SPALN_PREFIX_ARG)" \
+	  --build-arg GMAP_IMAGE="$(call make_image_name,gmap)" \
+	  --build-arg GMAP_VERSION="$(GMAP_VERSION)" \
+	  --build-arg GMAP_PREFIX_ARG="$(GMAP_PREFIX_ARG)" \
+	  --build-arg AUGUSTUS_IMAGE="$(call make_image_name,augustus)" \
+	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
+	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
+	  --build-arg CODINGQUARRY_IMAGE="$(call make_image_name,codingquarry)" \
+	  --build-arg CODINGQUARRY_VERSION="$(CODINGQUARRY_VERSION)" \
+	  --build-arg CODINGQUARRY_PREFIX_ARG="$(CODINGQUARRY_PREFIX_ARG)" \
+	  --build-arg BUSCO_IMAGE="$(call make_image_name,busco)" \
+	  --build-arg BUSCO_COMMIT="$(BUSCO_COMMIT)" \
+	  --build-arg BUSCO_PREFIX_ARG="$(BUSCO_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
