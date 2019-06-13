@@ -3,6 +3,7 @@
 *.log*
 
 work
-alignments
+aligned
+busco
+containers/singularity
 .nextflow
-

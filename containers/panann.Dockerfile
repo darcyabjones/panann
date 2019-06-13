@@ -1,0 +1,204 @@
+ARG IMAGE
+ARG JELLYFISH_IMAGE
+ARG BOWTIE2_IMAGE
+ARG SALMON_IMAGE
+ARG HTSLIB_IMAGE
+ARG TRINITY_IMAGE
+ARG GENOMETOOLS_IMAGE
+ARG STAR_IMAGE
+ARG STRINGTIE_IMAGE
+ARG MINIMAP_IMAGE
+ARG SPALN_IMAGE
+ARG GMAP_IMAGE
+ARG AUGUSTUS_IMAGE
+ARG BUSCO_IMAGE
+ARG CODINGQUARRY_IMAGE
+
+FROM "${JELLYFISH_IMAGE}" as jellyfish_builder
+FROM "${BOWTIE2_IMAGE}" as bowtie2_builder
+FROM "${SALMON_IMAGE}" as salmon_builder
+FROM "${HTSLIB_IMAGE}" as htslib_builder
+FROM "${TRINITY_IMAGE}" as trinity_builder
+FROM "${GENOMETOOLS_IMAGE}" as genometools_builder
+FROM "${STAR_IMAGE}" as star_builder
+FROM "${STRINGTIE_IMAGE}" as stringtie_builder
+FROM "${MINIMAP_IMAGE}" as minimap2_builder
+FROM "${SPALN_IMAGE}" as spaln_builder
+FROM "${GMAP_IMAGE}" as gmap_builder
+FROM "${AUGUSTUS_IMAGE}" as augustus_builder
+FROM "${BUSCO_IMAGE}" as busco_builder
+FROM "${CODINGQUARRY_IMAGE}" as codingquarry_builder
+
+FROM "${IMAGE}"
+
+ARG TRINITY_TAG
+ARG TRINITY_PREFIX_ARG="/opt/trinity/${TRINITY_TAG}"
+ENV TRINITY_PREFIX="${TRINITY_PREFIX_ARG}"
+ENV TRINITY_HOME="${TRINITY_PREFIX}"
+
+ENV PATH "${TRINITY_PREFIX}:${PATH}"
+
+COPY --from=builder "${TRINITY_PREFIX}" "${TRINITY_PREFIX}"
+COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/trinity.txt
+
+
+ARG JELLYFISH_VERSION
+ARG JELLYFISH_PREFIX_ARG="/opt/jellyfish/${JELLYFISH_VERSION}"
+ENV JELLYFISH_PREFIX="${JELLYFISH_PREFIX_ARG}"
+
+ENV PATH="${JELLYFISH_PREFIX}/bin:${PATH}"
+ENV INCLUDE="${JELLYFISH_DIR}/include:${INCLUDE}"
+ENV CPATH="${JELLYFISH_DIR}/include:${CPATH}"
+ENV LIBRARY_PATH="${JELLYFISH_DIR}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${JELLYFISH_DIR}/lib:${LD_LIBRARY_PATH}"
+ENV LD_RUN_PATH="${JELLYFISH_DIR}/lib:${LD_RUN_PATH}"
+
+# Jellyfish has no runtime deps
+COPY --from=jellyfish_builder "${JELLYFISH_PREFIX}" "${JELLYFISH_PREFIX}"
+
+
+ARG BOWTIE2_TAG
+ARG BOWTIE2_PREFIX_ARG="/opt/bowtie2/${BOWTIE2_TAG}"
+ENV BOWTIE2_PREFIX="${BOWTIE2_PREFIX_ARG}"
+ENV PATH="${PATH}:${BOWTIE2_PREFIX}/bin"
+
+COPY --from=bowtie2_builder "${BOWTIE2_PREFIX}" "${BOWTIE2_PREFIX}"
+COPY --from=bowtie2_builder "${APT_REQUIREMENTS_FILE}" /build/apt/bowtie2.txt
+
+ARG SALMON_TAG
+ARG SALMON_PREFIX_ARG="/opt/salmon/${SALMON_TAG}"
+ENV SALMON_PREFIX="${SALMON_PREFIX_ARG}"
+
+ENV PATH "${SALMON_PREFIX}/bin:${PATH}"
+ENV LD_LIBRARY_PATH "${SALMON_PREFIX}/lib:${LD_LIBRARY_PATH}"
+
+COPY --from=salmon_builder "${SALMON_PREFIX}" "${SALMON_PREFIX}"
+COPY --from=salmon_builder "/build/apt-requirements.txt" /build/apt/salmon.txt
+
+
+ARG HTSLIB_TAG
+ARG SAMTOOLS_TAG
+ARG HTSLIB_PREFIX_ARG="/opt/htslib/${HTSLIB_TAG}"
+ARG SAMTOOLS_PREFIX_ARG="/opt/samtools/${SAMTOOLS_TAG}"
+ENV HTSLIB_PREFIX="${HTSLIB_PREFIX_ARG}"
+ENV SAMTOOLS_PREFIX="${SAMTOOLS_PREFIX_ARG}"
+
+ENV PATH="${SAMTOOLS_PREFIX}/bin:${BCFTOOLS_PREFIX}/bin:${HTSLIB_PREFIX}/bin:${PATH}"
+ENV CPATH="${HTSLIB_PREFIX}/include:${CPATH}"
+ENV LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LD_LIBRARY_PATH}"
+
+COPY --from=htslib_builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
+COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
+COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
+
+
+ARG GENOMETOOLS_VERSION
+ARG GENOMETOOLS_PREFIX_ARG="/opt/genometools/${GENOMETOOLS_VERSION}"
+ENV GENOMETOOLS_PREFIX="${GENOMETOOLS_PREFIX_ARG}"
+
+ENV PATH="${GENOMETOOLS_PREFIX}/bin:${PATH}"
+ENV INCLUDE="${GENOMETOOLS_PREFIX}/include:${INCLUDE}"
+ENV CPATH="${GENOMETOOLS_PREFIX}/include:${CPATH}"
+ENV LIBRARY_PATH="${GENOMETOOLS_PREFIX}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${GENOMETOOLS_PREFIX}/lib:${LD_LIBRARY_PATH}"
+ENV LD_RUN_PATH="${GENOMETOOLS_PREFIX}/lib:${LD_RUN_PATH}"
+
+COPY --from=genometools_builder "${GENOMETOOLS_PREFIX}" "${GENOMETOOLS_PREFIX}"
+COPY --from=genometools_builder "${APT_REQUIREMENTS_FILE}" /build/apt/genometools.txt
+
+
+ARG STAR_VERSION
+ARG STAR_PREFIX_ARG="/opt/star/${STAR_VERSION}"
+ENV STAR_PREFIX="${STAR_PREFIX_ARG}"
+ENV PATH="${STAR_PREFIX}/bin:${PATH}"
+
+COPY --from=star_builder "${STAR_PREFIX}" "${STAR_PREFIX}"
+COPY --from=star_builder "${APT_REQUIREMENTS_FILE}" /build/apt/star.txt
+
+
+ARG STRINGTIE_VERSION
+ARG STRINGTIE_PREFIX_ARG="/opt/stringtie/${STRINGTIE_VERSION}"
+ENV STRINGTIE_PREFIX="${STRINGTIE_PREFIX_ARG}"
+ENV PATH "${STRINGTIE_PREFIX}/bin:${PATH}"
+
+COPY --from=stringtie_builder "${STRINGTIE_PREFIX}" "${STRINGTIE_PREFIX}"
+COPY --from=stringtie_builder "${APT_REQUIREMENTS_FILE}" /build/apt/stringtie.txt
+
+
+ARG MINIMAP_TAG
+ARG MINIMAP_PREFIX_ARG="/opt/minimap/${MINIMAP_TAG}"
+ENV MINIMAP_PREFIX="${MINIMAP_PREFIX_ARG}"
+
+ARG K8_VERSION
+ARG K8_PREFIX_ARG="/opt/k8/${K8_VERSION}"
+ENV K8_PREFIX="${K8_PREFIX_ARG}"
+
+ENV PATH "${MINIMAP_PREFIX}/bin:${K8_PREFIX}/bin:${PATH}"
+
+COPY --from=minimap2_builder "${MINIMAP_PREFIX}" "${MINIMAP_PREFIX}"
+COPY --from=minimap2_builder "${K8_PREFIX}" "${K8_PREFIX}"
+COPY --from=minimap2_builder "${APT_REQUIREMENTS_FILE}" /build/apt/minimap2.txt
+
+
+ARG SPALN_TAG
+ARG SPALN_PREFIX_ARG="/opt/spaln/${SPALN_TAG}"
+ENV SPALN_PREFIX="${SPALN_PREFIX_ARG}"
+ENV ALN_TAB="${SPALN_PREFIX}/table"
+ENV ALN_DBS="${SPALN_PREFIX}/seqdb"
+ENV PATH="${SPALN_PREFIX}/bin:${SPALN_PREFIX}/perl:${PATH}"
+
+COPY --from=spaln_builder "${SPALN_PREFIX}" "${SPALN_PREFIX}"
+COPY --from=spaln_builder "${APT_REQUIREMENTS_FILE}" /build/apt/spaln.txt
+
+
+ARG GMAP_VERSION
+ARG GMAP_PREFIX_ARG="/opt/gmap/${GMAP_VERSION}"
+ENV GMAP_PREFIX="${GMAP_PREFIX_ARG}"
+
+ENV PATH "${GMAP_PREFIX}/bin:${PATH}"
+
+COPY --from=gmap_builder "${GMAP_PREFIX}" "${GMAP_PREFIX}"
+COPY --from=gmap_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gmap.txt
+
+
+ARG AUGUSTUS_COMMIT
+ARG AUGUSTUS_PREFIX_ARG="/opt/augustus/${AUGUSTUS_COMMIT}"
+ENV AUGUSTUS_PREFIX="${AUGUSTUS_PREFIX_ARG}"
+
+ENV PATH="${AUGUSTUS_PREFIX}/bin:${AUGUSTUS_PREFIX}/scripts:${PATH}"
+ENV AUGUSTUS_CONFIG_PATH="${AUGUSTUS_PREFIX}/config"
+
+COPY --from=augustus_builder "${AUGUSTUS_PREFIX}" "${AUGUSTUS_PREFIX}"
+COPY --from=augustus_builder "${APT_REQUIREMENTS_FILE}" /build/apt/augustus.txt
+
+
+ARG BUSCO_COMMIT
+ARG BUSCO_PREFIX_ARG="/opt/busco/${BUSCO_COMMIT}"
+ENV BUSCO_PREFIX="${BUSCO_PREFIX_ARG}"
+
+ENV PATH="${BUSCO_PREFIX}/scripts:${PATH}"
+
+COPY --from=builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
+COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
+
+
+ARG CODINGQUARRY_VERSION
+ARG CODINGQUARRY_URL="https://downloads.sourceforge.net/project/codingquarry/CodingQuarry_v2.0.tar.gz"
+ARG CODINGQUARRY_PREFIX_ARG="/opt/codingquarry/${CODINGQUARRY_VERSION}"
+ENV CODINGQUARRY_PREFIX="${CODINGQUARRY_PREFIX_ARG}"
+ENV QUARRY_PATH="${CODINGQUARRY_PREFIX}/QuarryFiles"
+
+ENV PATH "${CODINGQUARRY_PREFIX}/bin:${PATH}"
+
+COPY --from=codingquarry_builder "${CODINGQUARRY_PREFIX}" "${CODINGQUARRY_PREFIX}"
+COPY --from=codingquarry_builder "${APT_REQUIREMENTS_FILE}" /build/apt/codingquarry.txt
+
+
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
+  && apt_install_from_file /build/apt/*.txt \
+  && rm -rf /var/lib/apt/lists/* \
+  && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"

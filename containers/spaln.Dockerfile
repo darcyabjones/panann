@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM ${IMAGE} as builder
+FROM "${IMAGE}" as builder
 
 ARG SPALN_TAG
 ARG SPALN_REPO="https://github.com/ogotoh/spaln.git"
@@ -8,19 +8,18 @@ ARG SPALN_PREFIX_ARG="/opt/spaln/${SPALN_TAG}"
 ENV SPALN_PREFIX="${SPALN_PREFIX_ARG}"
 
 WORKDIR /tmp
-RUN  apt-get update \
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
   && apt-get install -y \
        build-essential \
+       ca-certificates \
        git \
        zlib1g-dev \
-  && rm -rf /var/lib/apt/lists/*
-
-# Runtime requires
-#   perl
-#   zlib1g
-
-WORKDIR /tmp
-RUN  git clone "${SPALN_REPO}" . \
+  && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
+  && git clone "${SPALN_REPO}" . \
   && git fetch --tags \
   && git checkout "tags/${SPALN_TAG}" \
   && cd src \
@@ -31,21 +30,28 @@ RUN  git clone "${SPALN_REPO}" . \
        --alndbs_dir="${SPALN_PREFIX}/seqdb" \
   && make \
   && make install \
-  && mv /tmp/perl "${SPALN_PREFIX}/perl"
+  && mv /tmp/perl "${SPALN_PREFIX}/perl" \
+  && add_runtime_dep perl zlib1g
+
+# CA cert stuff required for git clone https
 
 
-FROM ${IMAGE}
+FROM "${IMAGE}"
 
 ARG SPALN_TAG
 ARG SPALN_PREFIX_ARG="/opt/spaln/${SPALN_TAG}"
 ENV SPALN_PREFIX="${SPALN_PREFIX_ARG}"
 ENV ALN_TAB="${SPALN_PREFIX}/table"
 ENV ALN_DBS="${SPALN_PREFIX}/seqdb"
+ENV PATH="${SPALN_PREFIX}/bin:${SPALN_PREFIX}/perl:${PATH}"
 
 COPY --from=builder "${SPALN_PREFIX}" "${SPALN_PREFIX}"
+COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/spaln.txt
 
-RUN  apt-get update \
-  && apt-get install -y --no-install-recommends perl zlib1g \
-  && rm -rf /var/lib/apt/lists/*
-
-ENV PATH="${SPALN_PREFIX}/bin:${SPALN_PREFIX}/perl:${PATH}"
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
+  && apt_install_from_file /build/apt/*.txt \
+  && rm -rf /var/lib/apt/lists/* \
+  && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"

@@ -8,7 +8,10 @@ ARG STAR_PREFIX_ARG="/opt/star/${STAR_VERSION}"
 ENV STAR_PREFIX="${STAR_PREFIX_ARG}"
 
 WORKDIR /tmp
-RUN  apt-get update \
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
   && apt-get install -y \
        build-essential \
        wget \
@@ -19,26 +22,28 @@ RUN  apt-get update \
   && cd STAR*/source \
   && make LDFLAGSextra=-flto CXXFLAGSextra="-flto -march=x86-64 -mtune=native" STAR STARlong \
   && mkdir -p "${STAR_PREFIX}/bin" \
-  && mv ../bin/Linux_x86_64/STAR* "${STAR_PREFIX}/bin"
+  && mv ../bin/Linux_x86_64/STAR* "${STAR_PREFIX}/bin" \
+  && add_runtime_dep libgomp1 zlib1g
 
-# See if we can provide build flags as a build time-option?
+# See if we need to provide build flags as a build time-option?
 # STAR already seems to require x86-64 instructions, so i think current settings are safe.
 # LDFLAGSextra=-flto CXXFLAGSextra="-flto -march=x86-64 -mtune=native"
 
-# Runtime requires
-#  libgomp1
-#  zlib1g-dev
 
 FROM "${IMAGE}"
 
 ARG STAR_VERSION
 ARG STAR_PREFIX_ARG="/opt/star/${STAR_VERSION}"
 ENV STAR_PREFIX="${STAR_PREFIX_ARG}"
+ENV PATH="${STAR_PREFIX}/bin:${PATH}"
 
 COPY --from=builder "${STAR_PREFIX}" "${STAR_PREFIX}"
+COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/star.txt
 
-RUN  apt-get update \
-  && apt-get install -y libgomp1 zlib1g \
-  && rm -rf /var/lib/apt/lists/*
-
-ENV PATH="${STAR_PREFIX}/bin:${PATH}"
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
+  && apt_install_from_file /build/apt/*.txt \
+  && rm -rf /var/lib/apt/lists/* \
+  && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"

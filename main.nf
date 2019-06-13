@@ -52,7 +52,7 @@ params.remote_proteins = false
 
 params.genome_alignment = false
 
-params.busco_species = false
+params.busco_lineage = false
 
 /*
  * Sanitise the input
@@ -75,6 +75,8 @@ if ( params.transcripts ) {
         .collectFile(name: "transcripts.fasta", newLine: true, sort: "deep")
         .first()
         .set { transcripts }
+} else {
+    transcripts = false
 }
 
 if ( params.proteins ) {
@@ -83,6 +85,8 @@ if ( params.proteins ) {
         .collectFile(name: "proteins.fasta", newLine: true, sort: "deep")
         .first()
         .set { proteins }
+} else {
+    proteins = false
 }
 
 if ( params.remote_proteins ) {
@@ -92,6 +96,51 @@ if ( params.remote_proteins ) {
         .first()
         .set { remoteProteins }
 }
+
+if ( params.busco_lineage ) {
+    Channel
+        .fromPath(params.busco_lineage, checkIfExists: true, type: "file")
+        .first()
+        .set { buscoLineage }
+}
+
+
+genomes.into {
+    genomes4Busco;
+    genomes4SpalnIndex;
+}
+
+
+if ( params.busco_lineage ) {
+
+    process runBusco {
+        label "busco"
+        label "medium_task"
+        tag { name }
+
+        publishDir "${params.outdir}/busco"
+
+        input:
+        set val(name), file(fasta) from genomes4Busco
+        file "lineage" from buscoLineage
+
+        output:
+        file "${name}" into buscoResults
+
+        script:
+        """
+        run_BUSCO.py \
+          --in "${fasta}" \
+          --out "${name}" \
+          --cpu ${task.cpus} \
+          --mode "genome" \
+          --lineage_path "lineage"
+
+        mv "run_${name}" "${name}"
+        """
+    }
+}
+
 
 // If genome alignment not provided, run sibelliaz
 // Should there be a step to run transcript assembly with trinity?
@@ -104,7 +153,7 @@ process getSpalnIndex {
     tag { name }
 
     input:
-    set val(name), file(genome) from genomes
+    set val(name), file(genome) from genomes4SpalnIndex
 
     output:
     set val(name),
@@ -132,6 +181,9 @@ process AlignSpalnTranscripts {
     publishDir "aligned"
 
     tag { name }
+
+    when:
+    params.transcripts
 
     input:
     file transcripts
