@@ -30,7 +30,7 @@ def helpMessage() {
 
     ## Parameters
     genomes - fasta genomes
-    known_sites - table
+    known_sites - table. name, gff3. Note gff3 must have the exons set for star to work. Use genometools to add this.
     transcripts - already assembled transcripts (skip assembly?)
     proteins - predicted proteins from closely related species/isolate
 
@@ -42,9 +42,13 @@ def helpMessage() {
     augustus_config - The augustus config directory. If not provided, assumes
       that AUGUSTUS_CONFIG_PATH is set where the tasks will be executed.
 
-    fastq - table, rnaseq fastq files to assemble. need name, r1, r2. If add fasta field, do reference guided assembly.
+    fastq - table, rnaseq fastq files to assemble. need read_group, r1, r2. If add fasta field, do reference guided assembly.
     bams - table, already aligned bam-files. Need name/fasta and bam.
     cufflinks_gtf - Cufflinks assemblies, need name/fasta and gtf.
+
+    notfungus - dont use fungal specific features
+    genemark - flag to use genemark (it's installed)
+    softmasked
 
 
     ## Exit codes
@@ -84,6 +88,8 @@ params.cufflinks_gtf = false
  * Sanitise the input
  */
 
+def is_null = { f -> (f == null || f == '') }
+
 if ( params.genomes ) {
     Channel
         .fromPath(params.genomes, checkIfExists: true, type: "file")
@@ -94,6 +100,23 @@ if ( params.genomes ) {
     exit 1
 }
 
+if ( params.known_sites ) {
+    // Todo: merge with genomes here and error if get multiple gffs per genome
+    // or names that don't match any genome
+    Channel
+        .fromPath(params.known_sites, checkIfExists: true, type: "file")
+        .splitCsv(by: 1, sep: '\t', header: true)
+        .filter { (!is_null(it.name) && !is_null(it.gff3)) }
+        .map {[
+            it.name,
+            file(it.gff3, checkIfExists: true),
+        ]}
+        .unique()
+        .set { knownSites }
+
+} else {
+    knownSites = Channel.empty()
+}
 
 if ( params.transcripts ) {
     Channel
@@ -158,7 +181,7 @@ if ( params.augustus_config ) {
         label "augustus"
         label "small_task"
 
-        output:
+       output:
         file "config" into augustusConfig
 
         """
@@ -172,14 +195,17 @@ if ( params.fastq ) {
     Channel
         .fromPath(params.fastq, checkIfExists: true)
         .splitCsv(by: 1, sep: '\t', header: true)
-        .filter { it.name != null && it.read1_file != null && it.read2_file != null }
+        .filter { !is_null(it.read_group) && !is_null(it.r1) && !is_null(it.r2) }
         .map {[
-            it.name,
-            (it.genome != null) ? file(it.genome).baseName : null,
-            file(it.read1_file, checkIfExists: true),
-            file(it.read2_file, checkIfExists: true)
+            it.read_group,
+            !is_null(it.name) ? it.name : 'WAS_NULL',
+            file(it.r1, checkIfExists: true),
+            file(it.r2, checkIfExists: true)
         ]}
+        .unique()
         .set { fastq }
+
+        // Split these into genome guided and non-genome guided.
 } else {
     fastq = Channel.empty()
 }
@@ -191,13 +217,32 @@ genomes.into {
     genomes4Busco;
     genomes4SpalnIndex;
     genomes4GmapIndex;
+    genomes4StarIndex;
 }
 
-fastq.into {
-    fastq4TrinityAssemble;
-    fastq4StarAlign;
-}
+fastq
+    .tap { fastqNoGenome; fastq4Alignment }
+    .filter { rg, n, r1, r2 -> n != 'WAS_NULL' }
+    .set { fastq4TrinityAssembleGuided }
 
+fastqNoGenome
+    .filter {rg, n, r1, r2 -> n == 'WAS_NULL' }
+    .map { rg, n, r1, r2 -> [rg, r1, r2] }
+    .unique()
+    .set { fastq4TrinityAssemble }
+
+fastq4Alignment
+    .map { rg, n, r1, r2 -> [rg, r1, r2] }
+    .unique()
+    .into {
+        fastq4StarFindNovelSpliceSites;
+        fastq4StarAlignReads;
+    }
+
+knownSites.set { knownSites4StarIndex }
+
+fastq4TrinityAssemble
+    .tap { fastq4TrinityAssembleDenovo }
 
 // Indexing and preprocessing
 
@@ -254,15 +299,133 @@ process getGmapIndex {
 }
 
 
-// RNAseq alignments and assembly
+if ( params.known_sites ) {
+    genomes4StarIndex
+        .join( knownSites4StarIndex, by: 0, remainder: true)
+        .view()
+        .filter { n, f, g -> (!is_null(f) && !is_null(n)) }
+        .map { n, f, g -> [n, f, !is_null(g) ? g : file('WAS_NULL')] }
+        .set { genomes4StarIndexWithGff }
+} else {
+    genomes4StarIndex
+        .map { n, f -> [n, f, file('WAS_NULL')] }
+        .set { genomes4StarIndexWithGff }
+}
 
+process getStarIndex {
+
+    label "star"
+    label "medium_task"
+
+    tag { name }
+
+    when:
+    params.fastq
+
+    input:
+    set val(name), file(fasta), file(gff) from genomes4StarIndexWithGff
+
+    output:
+    set val(name), file("index") into starIndices
+
+    script:
+    // If no gff was in known_sites, use it, otherwise dont
+    def sjdb = gff.name != 'WAS_NULL' ? "--sjdbGTFfile ${gff} --sjdbOverhang 149 " : ''
+
+    // --sjdbGTFfeatureExon should there be an option to make this CDS?
+    """
+    mkdir -p index
+    STAR \
+      --runThreadN ${task.cpus} \
+      --runMode genomeGenerate \
+      --genomeDir index \
+      --genomeFastaFiles ${fasta} \
+      --genomeSAindexNbases 11 \
+      --sjdbGTFtagExonParentTranscript Parent \
+      --sjdbGTFfeatureExon exon \
+      ${sjdb}
+    """
+}
+
+starIndices.into {
+    starIndices4StarFindNovelSpliceSites;
+    starIndices4StarAlignReads;
+}
+
+
+process starFindNovelSpliceSites {
+
+    label "star"
+    label "medium_task"
+
+    tag "${name}-${read_group}"
+
+    when:
+    params.fastq
+
+    input:
+    set val(name), file("index"), val(read_group),
+        file(r1s), file(r2s) from starIndices4StarFindNovelSpliceSites
+            .combine(fastq4StarFindNovelSpliceSites)
+            .groupTuple(by: [0, 1, 2])
+
+    output:
+    set val(name), val(read_group),
+        file("${name}_${read_group}.SJ.out.tab") into starSpliceSites
+
+    script:
+    def r1_joined = r1s.join(',')
+    def r2_joined = r2s.join(',')
+    """
+    STAR \
+      --runThreadN "${task.cpus}" \
+      --readFilesCommand zcat \
+      --genomeDir "index" \
+      --outSAMtype None \
+      --outSAMmode None \
+      --outSJfilterReads All \
+      --outSJfilterOverhangMin 5 1 1 1 \
+      --outSJfilterCountUniqueMin 10 5 5 5 \
+      --outSJfilterDistToOtherSJmin 5 0 0 3 \
+      --outSJfilterIntronMaxVsReadN 0 1 500 5000 10000 20000 \
+      --alignIntronMin 5 \
+      --alignIntronMax 10000 \
+      --alignSJoverhangMin 1 \
+      --alignSJDBoverhangMin 1 \
+      --alignSoftClipAtReferenceEnds No \
+      --outFileNamePrefix "${name}_${read_group}." \
+      --readFilesIn "${r1_joined}" "${r2_joined}"
+    """
+}
+
+
+// RNAseq alignments and assembly
+/*
 process trinityAssembleTranscripts {
 
+    label "trinity"
+    label "big_task"
+
+    input:
+
+    output:
+
+    script:
+    // NB genome guided uses bams to assemble the reads, needs a separate process.
+    // jaccard_clip should be useful for fungi. make it an option to disable?.
+    """
+    Trinity \
+      --seqtype fq \
+      --max_memory "${task.memory}" \
+      --CPU "${task.cpus}" \
+      --jaccard_clip \
+      --output trinity_assembly \
+    """
 }
 
-process starAlignTranscripts {
-
+process starAlignReads {
 }
+*/
 
 // 1 align transcripts to all genomes
 process alignSpalnTranscripts {
@@ -382,7 +545,6 @@ process alignSpalnProteins {
 
     input:
     file proteins
-
     set val(name),
         file(bkn),
         file(ent),
@@ -489,6 +651,82 @@ process runBusco {
 }
 
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
+
+// Combine transcript input for genemark`
+
+process runGenemark {
+
+    label "genemark"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    params.genemark
+
+    input:
+    genome
+    transcript_intron_coords (e.g. from star)
+
+    output:
+    genemark.gtf
+
+    script:
+    def use_fungus = params.notfungus ? '' : '--fungus '
+
+    """
+    gmes_petap.pl \
+      --soft_mask 100 \
+      --ET ${transcript_intron_coords} \
+      --evidence \
+      ${use_fungus}
+    """
+}
+
+process runBraker {
+
+    label "braker"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    genome
+    genemark_gtf
+    spaln_protein_alignments
+    transcripts
+    bams
+
+    output:
+    braker.gff
+    species file
+
+    script:
+    def species = "Pnodorum"
+    def use_softmasking = params.softmasked ? "--softmasking --UTR=on"
+
+    // Input GFFs have specific format requirements.
+    // NB braker uses spaln output 0
+    // Might need to separate bams into different strands? using --stranded
+    // --crf might be good to try for the "reference" isolate?.
+    // --AUGUSTUS_CONFIG_PATH can set this instead of env-var.
+    """
+    braker.pl \
+      --cores="${task.cpus}" \
+      --species="${species}" \
+      --alternatives-from-evidence=true \
+      --genome="${genome}" \
+      --bam="one.bam,two.bam" \
+      --hints="one.gff,two.gff" \
+      --prot_aln=proteins.gff \
+      --prg=spaln \
+      --geneMarkGtf=file.gtf \
+      --skipGetAnnoFromFasta \
+      --verbosity=3 \
+      --splice_sites=GTAG,ATAC \
+    """
+}
+
 
 // 6 If no genome alignment, run sibelliaz
 

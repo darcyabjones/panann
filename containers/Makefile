@@ -78,6 +78,11 @@ BUSCO_REPO=https://gitlab.com/ezlab/busco.git
 BUSCO_PREFIX_ARG=$(INSTALL_BASE)/busco/$(BUSCO_COMMIT)
 
 
+GENEMARKES_VERSION=v.4.38
+GENEMARKES_TAR=sources/gm_et_linux_64.tar.gz
+GENEMARKES_KEY=sources/gm_key_64
+GENEMARKES_PREFIX_ARG=$(INSTALL_BASE)/genemarkes/$(GENEMARKES_VERSION)
+
 all: docker
 
 docker: docker/general docker/alignment docker/rnaseq docker/annotation
@@ -90,8 +95,8 @@ docker/alignment: docker/minimap2 docker/spaln docker/gmap
 docker/rnaseq: docker/trinity docker/star docker/stringtie
 docker/annotation: docker/augustus docker/codingquarry docker/busco
 
-# Proprietary software won't be build by default.
-docker/proprietary:
+# Proprietary software won't be built by default.
+docker/proprietary: docker/genemarkes
 
 clean:
 	docker stop $(shell docker ps -aq) || true
@@ -297,6 +302,17 @@ docker/busco: busco.Dockerfile docker/base docker/augustus
 	  --build-arg BUSCO_PREFIX_ARG="$(BUSCO_PREFIX_ARG)" \
 	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
 	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+
+docker/genemarkes: genemarkes.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg GENEMARKES_VERSION="$(GENEMARKES_VERSION)" \
+	  --build-arg GENEMARKES_TAR="$(GENEMARKES_TAR)" \
+	  --build-arg GENEMARKES_KEY="$(GENEMARKES_KEY)" \
+	  --build-arg GENEMARKES_PREFIX_ARG="$(GENEMARKES_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
