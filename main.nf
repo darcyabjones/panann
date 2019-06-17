@@ -376,6 +376,7 @@ process starFindNovelSpliceSites {
     script:
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
+
     """
     STAR \
       --runThreadN "${task.cpus}" \
@@ -398,6 +399,62 @@ process starFindNovelSpliceSites {
     """
 }
 
+
+process starAlignReads {
+
+    label "star"
+    label "medium_task"
+
+    tag "${name}-${read_group}"
+
+    when:
+    params.fastq
+
+    input:
+
+    output:
+
+    script:
+    """
+    STAR \
+      --runThreadN ${task.cpus} \
+      --readFilesCommand zcat \
+      --genomeDir "index" \
+      --sjdbFileChrStartEnd *SJ.out.tab \
+      --outSAMtype BAM Unsorted \
+      --outBAMcompression 1 \
+      --outSJfilterReads All \
+      --outSJfilterCountUniqueMin 10 5 5 5 \
+      --outSJfilterIntronMaxVsReadN 0 1 500 5000 10000 20000 \
+      --alignIntronMin 5 \
+      --alignIntronMax 10000 \
+      --alignSJoverhangMin 10 \
+      --alignSJDBoverhangMin 1 \
+      --alignSoftClipAtReferenceEnds No \
+      --outFilterType BySJout \
+      --outFilterMultimapNmax 1 \
+      --outFilterMismatchNmax 10 \
+      --outFilterMismatchNoverLmax 0.2 \
+      --outMultimapperOrder Random \
+      --outSAMattributes All \
+      --outSAMstrandField intronMotif\
+      --outSAMattrIHstart 0 \
+      --outSAMmapqUnique 50 \
+      --outFileNamePrefix "${name}_${read_group}." \
+      --readFilesIn "${r1_joined}" "${r2_joined}"
+
+    samtools view \
+        -uT "${faidx}" \
+        "${name}_${read_group}.Aligned.out.bam" \
+    | samtools sort \
+        -O BAM \
+        -@ "${task.cpus}" \
+        -l 9 \
+        -o "${name}_${read_group}.bam"
+
+    rm -f "${name}_${read_group}.Aligned.out.bam"
+    """
+}
 
 // RNAseq alignments and assembly
 /*
@@ -423,8 +480,6 @@ process trinityAssembleTranscripts {
     """
 }
 
-process starAlignReads {
-}
 */
 
 // 1 align transcripts to all genomes
