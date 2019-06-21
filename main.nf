@@ -55,6 +55,10 @@ def helpMessage() {
 
     - 0: All ok.
     - 1: Incomplete parameter inputs.
+
+
+    ## Output
+    aligned_reads - Fastq reads aligned to each genome as bams.
     """.stripIndent()
 }
 
@@ -218,6 +222,7 @@ genomes.into {
     genomes4SpalnIndex;
     genomes4GmapIndex;
     genomes4StarIndex;
+    genomes4GetFaidx;
 }
 
 fastq
@@ -246,6 +251,27 @@ fastq4TrinityAssemble
 
 
 // Indexing and preprocessing
+
+process getFaidx {
+
+    label "samtools"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file(genome) from genomes4GetFaidx
+
+    output:
+    set val(name), file(genome), file("${genome}.fai") into genomesWithFaidx
+
+    """
+    samtools faidx "${genome}"
+    """
+}
+
+genomesWithFaidx.set { genomesWithFaidx4TidyBams }
+
 
 process getSpalnIndex {
 
@@ -385,6 +411,7 @@ process starFindNovelSpliceSites {
     script:
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
+
     """
     STAR \
       --runThreadN "${task.cpus}" \
@@ -416,25 +443,134 @@ process starAlignReads {
     label "star"
     label "medium_task"
 
+    tag "${name}-${read_group}"
+
+    when:
+    params.fastq
+
     input:
     set val(name), file("index"), val(read_group),
         file(r1s), file(r2s) from starIndices4StarAlignReads
             .combine(fastq4StarAlignReads)
             .groupTuple(by: [0, 1, 2])
-
-    file "*.SJ.out.tab" from starNovelSpliceSites
+    file "*SJ.out.tab" from starNovelSpliceSites
         .map { n, rg, f -> f }
         .collect()
 
     output:
+    set val(name), val(read_group), file("${name}_${read_group}.bam") into alignedReads
 
     script:
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
     """
+    STAR \
+      --runThreadN ${task.cpus} \
+      --readFilesCommand zcat \
+      --genomeDir "index" \
+      --sjdbFileChrStartEnd *SJ.out.tab \
+      --outSAMtype BAM Unsorted \
+      --outBAMcompression 1 \
+      --outSJfilterReads All \
+      --outSJfilterCountUniqueMin 10 5 5 5 \
+      --outSJfilterIntronMaxVsReadN 0 1 500 5000 10000 20000 \
+      --alignIntronMin 5 \
+      --alignIntronMax 10000 \
+      --alignSJoverhangMin 10 \
+      --alignSJDBoverhangMin 1 \
+      --alignSoftClipAtReferenceEnds No \
+      --outFilterType BySJout \
+      --outFilterMultimapNmax 1 \
+      --outFilterMismatchNmax 10 \
+      --outFilterMismatchNoverLmax 0.2 \
+      --outMultimapperOrder Random \
+      --outSAMattributes All \
+      --outSAMstrandField intronMotif\
+      --outSAMattrIHstart 0 \
+      --outSAMmapqUnique 50 \
+      --outFileNamePrefix "${name}_${read_group}." \
+      --readFilesIn "${r1_joined}" "${r2_joined}"
 
+    mv "${name}_${read_group}.Aligned.out.bam" "${name}_${read_group}.bam"
     """
 }
+
+
+process tidyBams {
+
+    label "samtools"
+    label "small_task"
+    publishDir "${params.outdir}/aligned_reads"
+
+    tag "${name}-${read_group}"
+
+    when:
+    params.fastq
+
+    input:
+    set val(name), val(read_group), file("my.bam"),
+        file(genome), file(faidx) from alignedReads
+            .combine(genomesWithFaidx4TidyBams, by: 0)
+
+    output:
+    set val(name), val(read_group), file("${name}_${read_group}.bam"),
+        file("${name}_${read_group}.bam.bai") into tidiedBams
+
+    script:
+    """
+    samtools view \
+        -uT "${faidx}" \
+        "my.bam" \
+    | samtools sort \
+        -O BAM \
+        -@ "${task.cpus}" \
+        -l 9 \
+        -o "${name}_${read_group}.bam"
+
+    samtools index "${name}_${read_group}.bam"
+    """
+}
+
+tidiedBams.set { bams4AssembleStringtie }
+
+
+/*
+ * Assembly transcripts with Stringtie
+ */
+process assembleStringtie {
+
+    label "stringtie"
+    label "medium_task"
+
+    tag "${name} - ${read_group}"
+
+    when:
+    params.fastq
+
+    input:
+    bams
+
+    known_sites
+
+    output:
+    set val(name), val(read_group), file("${name}_${read_group}.gtf") into stringtieAssembledTranscripts
+
+    script:
+    def stranded = "--rf"
+    """
+    stringtie \
+      -p "${task.cpus}" \
+      -G KNOWN_SITES \
+      ${stranded} \
+      -o "${name}_${read_group}.gtf" \
+      -m 200
+    """
+}
+
+process mergeStrintieAssemblies {
+
+}
+
 
 // RNAseq alignments and assembly
 /*
