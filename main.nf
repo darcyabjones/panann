@@ -244,6 +244,7 @@ knownSites.set { knownSites4StarIndex }
 fastq4TrinityAssemble
     .tap { fastq4TrinityAssembleDenovo }
 
+
 // Indexing and preprocessing
 
 process getSpalnIndex {
@@ -428,6 +429,7 @@ process starAlignReads {
 */
 
 // 1 align transcripts to all genomes
+/*
 process alignSpalnTranscripts {
     label "spaln"
     label "medium_task"
@@ -470,7 +472,9 @@ process alignSpalnTranscripts {
     > "${name}_transcripts.gff3"
     """
 }
+*/
 
+/*
 process alignGmapTranscripts {
 
     label "gmap"
@@ -526,12 +530,13 @@ process alignGmapTranscripts {
     > ${name}_transcripts.gff3
     """
 }
+*/
 
 // Align with minimap2
 
 
 // 2 align proteins to all genomes
-
+/*
 process alignSpalnProteins {
     label "spaln"
     label "medium_task"
@@ -571,9 +576,10 @@ process alignSpalnProteins {
     > "${name}_proteins.gff3"
     """
 }
+*/
 
 // 3 align remote proteins to all genomes
-
+/*
 process alignSpalnRemoteProteins {
     label "spaln"
     label "medium_task"
@@ -615,9 +621,10 @@ process alignSpalnRemoteProteins {
     > "${name}_proteins.gff3"
     """
 }
+*/
 
 // 4 run busco on all genomes
-
+/*
 process runBusco {
     label "busco"
     label "medium_task"
@@ -649,11 +656,12 @@ process runBusco {
     mv "run_${name}" "${name}"
     """
 }
+*/
 
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
 
 // Combine transcript input for genemark`
-
+/*
 process runGenemark {
 
     label "genemark"
@@ -682,7 +690,9 @@ process runGenemark {
       ${use_fungus}
     """
 }
+*/
 
+/*
 process runBraker {
 
     label "braker"
@@ -726,7 +736,7 @@ process runBraker {
       --splice_sites=GTAG,ATAC \
     """
 }
-
+*/
 
 // 6 If no genome alignment, run sibelliaz
 

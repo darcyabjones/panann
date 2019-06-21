@@ -1,0 +1,3 @@
+read_group	name	r1	r2
+rg1		small_task/SRR6163776_1.fastq.gz	small_task/SRR6163776_2.fastq.gz
+rg1		small_task/SRR6163911_1.fastq.gz	small_task/SRR6163911_2.fastq.gz
