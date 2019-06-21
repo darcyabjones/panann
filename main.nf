@@ -300,6 +300,9 @@ process getGmapIndex {
 }
 
 
+/*
+ * Index genome for STAR
+ */
 if ( params.known_sites ) {
     genomes4StarIndex
         .join( knownSites4StarIndex, by: 0, remainder: true)
@@ -354,6 +357,11 @@ starIndices.into {
 }
 
 
+/*
+ * Perform first pass for STAR.
+ *
+ * This helps refine intron splice sites in the alignments.
+ */
 process starFindNovelSpliceSites {
 
     label "star"
@@ -372,7 +380,7 @@ process starFindNovelSpliceSites {
 
     output:
     set val(name), val(read_group),
-        file("${name}_${read_group}.SJ.out.tab") into starSpliceSites
+        file("${name}_${read_group}.SJ.out.tab") into starNovelSpliceSites
 
     script:
     def r1_joined = r1s.join(',')
@@ -400,6 +408,34 @@ process starFindNovelSpliceSites {
 }
 
 
+/*
+ * Perform second pass STAR alignment
+ */
+process starAlignReads {
+
+    label "star"
+    label "medium_task"
+
+    input:
+    set val(name), file("index"), val(read_group),
+        file(r1s), file(r2s) from starIndices4StarAlignReads
+            .combine(fastq4StarAlignReads)
+            .groupTuple(by: [0, 1, 2])
+
+    file "*.SJ.out.tab" from starNovelSpliceSites
+        .map { n, rg, f -> f }
+        .collect()
+
+    output:
+
+    script:
+    def r1_joined = r1s.join(',')
+    def r2_joined = r2s.join(',')
+    """
+
+    """
+}
+
 // RNAseq alignments and assembly
 /*
 process trinityAssembleTranscripts {
@@ -424,8 +460,6 @@ process trinityAssembleTranscripts {
     """
 }
 
-process starAlignReads {
-}
 */
 
 // 1 align transcripts to all genomes
