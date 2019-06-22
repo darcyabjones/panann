@@ -83,6 +83,12 @@ GENEMARKES_TAR=sources/gm_et_linux_64.tar.gz
 GENEMARKES_KEY=sources/gm_key_64
 GENEMARKES_PREFIX_ARG=$(INSTALL_BASE)/genemarkes/$(GENEMARKES_VERSION)
 
+
+SIGNALP_VERSION=5.0
+SIGNALP_PREFIX_ARG=$(INSTALL_BASE)/signalp/$(SIGNALP_VERSION)
+SIGNALP_TAR=sources/signalp-5.0.Linux.tar.gz
+
+
 all: docker
 
 docker: docker/general docker/alignment docker/rnaseq docker/annotation
@@ -96,7 +102,7 @@ docker/rnaseq: docker/trinity docker/star docker/stringtie
 docker/annotation: docker/augustus docker/codingquarry docker/busco
 
 # Proprietary software won't be built by default.
-docker/proprietary: docker/genemarkes
+docker/proprietary: docker/genemarkes docker/signalp
 
 clean:
 	docker stop $(shell docker ps -aq) || true
@@ -316,6 +322,17 @@ docker/genemarkes: genemarkes.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+
+docker/signalp: signalp.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg SIGNALP_VERSION="$(SIGNALP_VERSION)" \
+	  --build-arg SIGNALP_TAR="$(SIGNALP_TAR)" \
+	  --build-arg SIGNALP_PREFIX_ARG="$(SIGNALP_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+
 
 ## The monolith!!!!
 docker/panann: panann.Dockerfile docker/base docker/jellyfish docker/bowtie2 docker/salmon docker/trinity docker/star docker/stringtie docker/htslib docker/genometools docker/minimap2 docker/spaln docker/gmap docker/augustus docker/codingquarry docker/busco

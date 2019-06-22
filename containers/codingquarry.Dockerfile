@@ -26,8 +26,9 @@ RUN  set -eu \
   && cp -r run_CQ-PM_stranded.sh "${CODINGQUARRY_PREFIX}/bin" \
   && cp -r run_CQ-PM_unstranded.sh "${CODINGQUARRY_PREFIX}/bin" \
   && cp -r run_CQ-PM_mine.sh "${CODINGQUARRY_PREFIX}/bin" \
+  && cp -r CufflinksGTF_to_CodingQuarryGFF3.py "${CODINGQUARRY_PREFIX}/bin" \
   && cp -r QuarryFiles "${QUARRY_PATH}" \
-  && add_runtime_dep libgomp1
+  && add_runtime_dep libgomp1 python python-biopython gawk
 
 
 FROM "${IMAGE}"

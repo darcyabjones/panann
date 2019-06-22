@@ -45,9 +45,11 @@ def helpMessage() {
     fastq - table, rnaseq fastq files to assemble. need read_group, r1, r2. If add fasta field, do reference guided assembly.
     bams - table, already aligned bam-files. Need name/fasta and bam.
     cufflinks_gtf - Cufflinks assemblies, need name/fasta and gtf.
+    fr -- Use if the stranded RNA seq is not RF.
 
     notfungus - dont use fungal specific features
     genemark - flag to use genemark (it's installed)
+    signalp - flag to use signalp to run CodingQuarry - Pathogen mode.
     softmasked
 
 
@@ -85,8 +87,13 @@ params.augustus_config = false
 
 // RNAseq params
 params.fastq = false
+params.fr = false
 params.bams = false
 params.cufflinks_gtf = false
+
+params.notfungus = false
+params.genemark = false
+params.signalp = false
 
 /*
  * Sanitise the input
@@ -223,6 +230,29 @@ genomes.into {
     genomes4GmapIndex;
     genomes4StarIndex;
     genomes4GetFaidx;
+    genomes4RunCodingQuarry;
+    genomes4RunCodingQuarryPM;
+}
+
+if ( params.known_sites ) {
+    genomes4StarIndex
+        .join( knownSites4StarIndex, by: 0, remainder: true)
+        .view()
+        .filter { n, f, g -> (!is_null(f) && !is_null(n)) }
+        .map { n, f, g -> [n, f, !is_null(g) ? g : file('WAS_NULL')] }
+        .into {
+            genomes4StarIndexWithGff;
+            genomes4AssembleStringtie;
+            genomes4MergeStringtie;
+        }
+} else {
+    genomes4StarIndex
+        .map { n, f -> [n, f, file('WAS_NULL')] }
+        .into {
+            genomes4StarIndexWithGff;
+            genomes4AssembleStringtie;
+            genomes4MergeStringtie;
+        }
 }
 
 fastq
@@ -329,18 +359,6 @@ process getGmapIndex {
 /*
  * Index genome for STAR
  */
-if ( params.known_sites ) {
-    genomes4StarIndex
-        .join( knownSites4StarIndex, by: 0, remainder: true)
-        .view()
-        .filter { n, f, g -> (!is_null(f) && !is_null(n)) }
-        .map { n, f, g -> [n, f, !is_null(g) ? g : file('WAS_NULL')] }
-        .set { genomes4StarIndexWithGff }
-} else {
-    genomes4StarIndex
-        .map { n, f -> [n, f, file('WAS_NULL')] }
-        .set { genomes4StarIndexWithGff }
-}
 
 process getStarIndex {
 
@@ -393,7 +411,7 @@ process starFindNovelSpliceSites {
     label "star"
     label "medium_task"
 
-    tag "${name}-${read_group}"
+    tag "${name} - ${read_group}"
 
     when:
     params.fastq
@@ -443,7 +461,7 @@ process starAlignReads {
     label "star"
     label "medium_task"
 
-    tag "${name}-${read_group}"
+    tag "${name} - ${read_group}"
 
     when:
     params.fastq
@@ -502,7 +520,7 @@ process tidyBams {
     label "small_task"
     publishDir "${params.outdir}/aligned_reads"
 
-    tag "${name}-${read_group}"
+    tag "${name} - ${read_group}"
 
     when:
     params.fastq
@@ -548,29 +566,194 @@ process assembleStringtie {
     params.fastq
 
     input:
-    bams
-
-    known_sites
+    set val(name), val(read_group), file(bam), file(bai),
+        file(fasta), file(gff) from bams4AssembleStringtie
+            .combine(genomes4AssembleStringtie, by: 0)
 
     output:
-    set val(name), val(read_group), file("${name}_${read_group}.gtf") into stringtieAssembledTranscripts
+    set val(name), val(read_group),
+        file("${name}_${read_group}.gtf") into stringtieAssembledTranscripts
 
     script:
-    def stranded = "--rf"
+    def stranded = params.fr ? '' : "--rf"
+    def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
     """
     stringtie \
       -p "${task.cpus}" \
-      -G KNOWN_SITES \
       ${stranded} \
+      ${known} \
       -o "${name}_${read_group}.gtf" \
-      -m 200
+      -m 200 \
+      "${bam}"
     """
 }
 
-process mergeStrintieAssemblies {
 
+/*
+ * Combine stringtie annotations from multiple bams.
+ */
+process mergeStrintie {
+
+    label "stringtie"
+    label "medium_task"
+    publishDir "${params.outdir}/stringtie"
+
+    tag "${name}"
+
+    when:
+    params.fastq
+
+    input:
+    set val(name), file("*gtf"), file(gff) from stringtieAssembledTranscripts
+        .map { n, rg, f -> [n, f] }
+        .groupTuple(by: 0)
+        .combine( genomes4MergeStringtie.map {n, f, g -> [n, g]}, by: 0 )
+
+    output:
+    set val(name), file("${name}.gtf") into stringtieMergedTranscripts
+
+    script:
+    def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
+    """
+    stringtie \
+      -p "${task.cpus}" \
+      ${known} \
+      --merge \
+      -o "${name}.gtf" \
+      *gtf
+    """
 }
 
+
+stringtieMergedTranscripts.into {
+    stringtieMergedTranscripts4CodingQuarry;
+    stringtieMergedTranscripts4CodingQuarryPM;
+}
+
+
+process runCodingQuarry {
+
+    label "codingquarry"
+    label "medium_task"
+    publishDir "${params.outdir}/codingquarry"
+
+    tag "${name}"
+
+    when:
+    params.fastq && !params.notfungus
+
+    input:
+    set val(name), file("transcripts.gtf"),
+        file("genome.fasta") from stringtieMergedTranscripts4CodingQuarry
+            .combine(genomes4RunCodingQuarry, by: 0)
+
+    output:
+    set val(name), file("${name}") into codingQuarryPredictions
+
+    script:
+    """
+    grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
+    CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
+
+    CodingQuarry -f genome.fasta -t transcripts.gff3 -p "${task.cpus}"
+
+      \${QUARRY_PATH}/scripts/fastaTranslate.py out/Predicted_CDS.fa \
+    | sed 's/*\$//g' > Predicted_Proteins.faa
+
+      \${QUARRY_PATH}/scripts/gene_errors_Xs.py Predicted_Proteins.faa out/Predicted_Proteins.faa
+
+    mv out "${name}"
+    """
+}
+
+codingQuarryPredictions.into {
+    codingQuarryPredictions4SignalP;
+    codingQuarryPredictions4PM;
+}
+
+
+process getCodingQuarrySignalP {
+
+    label "signalp"
+    label "medium_task"
+    publishDir "${params.outdir}/codingquarry"
+
+    tag "${name}"
+
+    when:
+    params.fastq && !params.notfungus && params.signalp
+
+    input:
+    set val(name), file("cq") from codingQuarryPredictions4SignalP
+
+    output:
+    set val(name), file("${name}.signalp5") into codingQuarryPredictionsSecreted
+
+    script:
+    """
+    mkdir tmp
+    signalp \
+      -fasta "cq/Predicted_Proteins.faa" \
+      -prefix "${name}" \
+      -org euk \
+      -tmp tmp
+
+    mv "${name}_summary.signalp5" "${name}.signalp5"
+
+    rm -rf -- tmp
+    """
+}
+
+
+/*
+*/
+process runCodingQuarryPM {
+
+    label "codingquarry"
+    label "medium_task"
+    publishDir "${params.outdir}/codingquarry"
+
+    tag "${name}"
+
+    when:
+    params.fastq && !params.notfungus && params.signalp
+
+    input:
+    set val(name), file("transcripts.gtf"), file("genome.fasta"),
+        file("first"), file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
+            .combine(genomes4RunCodingQuarryPM, by: 0)
+            .combine(codingQuarryPredictions4PM, by: 0)
+            .combine(codingQuarryPredictionsSecreted, by: 0)
+
+    output:
+    set val(name), file("${name}") into codingQuarryPMPredictions
+
+    script:
+    """
+    grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
+    CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
+
+    gawk '
+      BEGIN {
+        OFS=" "
+      }
+      \$2 ~ /^SP/ {
+        match(\$0, /CS pos: ([0-9]*)-/, x)
+        print \$1, x[1]
+      }
+    ' < "secretome.signalp5" > secretome.txt
+
+    CodingQuarry \
+      -f genome.fasta \
+      -t transcripts.gff3 \
+      -2 "first/PredictedPass.gff3" \
+      -p "${task.cpus}" \
+      -g secretome.txt \
+      -h
+
+    mv out "${name}"
+    """
+}
 
 // RNAseq alignments and assembly
 /*
