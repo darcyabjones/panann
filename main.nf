@@ -34,7 +34,6 @@ def helpMessage() {
     transcripts - already assembled transcripts (skip assembly?)
     proteins - predicted proteins from closely related species/isolate
 
-    remote_proteins - protein sequences from remotely related isolates, to be weighted differently.
     genome_alignment - A multiple genome alignment in MAF format, e.g. from cactus or sibelliaz.
       if not provided, align the genomes with sibelliaz
 
@@ -71,18 +70,13 @@ if (params.help) {
 
 
 params.genomes = false
-
 params.known_sites = false
-
 params.transcripts = false
-
 params.proteins = false
-params.remote_proteins = false
 
 params.genome_alignment = false
 
 params.busco_lineage = false
-
 params.augustus_config = false
 
 // RNAseq params
@@ -94,10 +88,15 @@ params.cufflinks_gtf = false
 params.notfungus = false
 params.genemark = false
 params.signalp = false
+params.notrinity = false
+params.nostar = false
+
 
 /*
  * Sanitise the input
  */
+
+def stranded = params.fr ? "fr" : "rf"
 
 def is_null = { f -> (f == null || f == '') }
 
@@ -129,15 +128,18 @@ if ( params.known_sites ) {
     knownSites = Channel.empty()
 }
 
+
 if ( params.transcripts ) {
     Channel
         .fromPath(params.transcripts, checkIfExists: true, type: "file")
         .collectFile(name: "transcripts.fasta", newLine: true, sort: "deep")
         .first()
         .set { transcripts }
+
 } else {
     transcripts = false
 }
+
 
 if ( params.proteins ) {
     Channel
@@ -145,28 +147,22 @@ if ( params.proteins ) {
         .collectFile(name: "proteins.fasta", newLine: true, sort: "deep")
         .first()
         .set { proteins }
+
 } else {
     proteins = false
 }
 
-if ( params.remote_proteins ) {
-    Channel
-        .fromPath(params.remote_proteins, checkIfExists: true, type: "file")
-        .collectFile(name: "remote_proteins.fasta", newLine: true, sort: "deep")
-        .first()
-        .set { remoteProteins }
-} else {
-    remoteProteins = false
-}
 
 if ( params.busco_lineage ) {
     Channel
         .fromPath(params.busco_lineage, checkIfExists: true, type: "file")
         .first()
         .set { buscoLineage }
+
 } else {
     buscoLineage = false
 }
+
 
 if ( params.genome_alignment ) {
     Channel
@@ -178,6 +174,7 @@ if ( params.genome_alignment ) {
     genomeAlignment = false
 }
 
+
 // Because augustus requires the config folder to be editable, it's easier
 // to keep track of it in the pipeline.
 // Assumes the correct environment variable is set.
@@ -186,15 +183,17 @@ if ( params.augustus_config ) {
         .fromPath(params.augustus_config, checkIfExists: true, type: "dir")
         .first()
         .set { augustusConfig }
+
 } else {
     process getAugustusConfig {
 
         label "augustus"
         label "small_task"
 
-       output:
+        output:
         file "config" into augustusConfig
 
+        script:
         """
         cp -r \${AUGUSTUS_CONFIG_PATH} ./config
         """
@@ -211,18 +210,20 @@ if ( params.fastq ) {
             it.read_group,
             !is_null(it.name) ? it.name : 'WAS_NULL',
             file(it.r1, checkIfExists: true),
-            file(it.r2, checkIfExists: true)
+            file(it.r2, checkIfExists: true),
+            !is_null(it.stranded) ? it.stranded : stranded
         ]}
         .unique()
         .set { fastq }
 
-        // Split these into genome guided and non-genome guided.
 } else {
     fastq = Channel.empty()
 }
 
 
 // Split up the inputs.
+
+knownSites.set { knownSites4StarIndex }
 
 genomes.into {
     genomes4Busco;
@@ -245,6 +246,7 @@ if ( params.known_sites ) {
             genomes4AssembleStringtie;
             genomes4MergeStringtie;
         }
+
 } else {
     genomes4StarIndex
         .map { n, f -> [n, f, file('WAS_NULL')] }
@@ -255,32 +257,47 @@ if ( params.known_sites ) {
         }
 }
 
+
 fastq
     .tap { fastqNoGenome; fastq4Alignment }
-    .filter { rg, n, r1, r2 -> n != 'WAS_NULL' }
+    .filter { rg, n, r1, r2, st -> n != 'WAS_NULL' }
+    .map { rg, n, r1, r2, st -> [n, rg] }
     .set { fastq4TrinityAssembleGuided }
 
 fastqNoGenome
-    .filter {rg, n, r1, r2 -> n == 'WAS_NULL' }
-    .map { rg, n, r1, r2 -> [rg, r1, r2] }
+    .filter {rg, n, r1, r2, st -> n == 'WAS_NULL' }
+    .map { rg, n, r1, r2, st -> [rg, r1, r2, st] }
     .unique()
     .set { fastq4TrinityAssemble }
 
 fastq4Alignment
-    .map { rg, n, r1, r2 -> [rg, r1, r2] }
+    .map { rg, n, r1, r2, st -> [rg, r1, r2, st] }
     .unique()
     .into {
         fastq4StarFindNovelSpliceSites;
         fastq4StarAlignReads;
     }
 
-knownSites.set { knownSites4StarIndex }
 
-fastq4TrinityAssemble
-    .tap { fastq4TrinityAssembleDenovo }
-
-
+//
 // Indexing and preprocessing
+//
+
+
+process getUnivec {
+
+    label "download"
+    label "small_task"
+
+    output:
+    file "univec.fasta" into univec
+
+    script:
+    """
+    wget -O univec.fasta ftp://ftp.ncbi.nlm.nih.gov/pub/UniVec/UniVec_Core
+    """
+}
+
 
 process getFaidx {
 
@@ -295,6 +312,7 @@ process getFaidx {
     output:
     set val(name), file(genome), file("${genome}.fai") into genomesWithFaidx
 
+    script:
     """
     samtools faidx "${genome}"
     """
@@ -322,6 +340,7 @@ process getSpalnIndex {
         file("${genome.baseName}.grp"),
         file("${genome.baseName}.seq") into spalnIndices
 
+    script:
     """
     makeidx.pl -inp ${genome}
     """
@@ -332,6 +351,7 @@ spalnIndices.into {
     spalnIndices4AlignSpalnProteins;
     spalnIndices4AlignSpalnRemoteProteins;
 }
+
 
 process getGmapIndex {
 
@@ -346,6 +366,7 @@ process getGmapIndex {
     output:
     set val(name), file("db") into gmapIndices
 
+    script:
     """
     gmap_build \
       -k 13 \
@@ -359,7 +380,6 @@ process getGmapIndex {
 /*
  * Index genome for STAR
  */
-
 process getStarIndex {
 
     label "star"
@@ -368,7 +388,7 @@ process getStarIndex {
     tag { name }
 
     when:
-    params.fastq
+    params.fastq && !params.nostar
 
     input:
     set val(name), file(fasta), file(gff) from genomes4StarIndexWithGff
@@ -379,18 +399,19 @@ process getStarIndex {
     script:
     // If no gff was in known_sites, use it, otherwise dont
     def sjdb = gff.name != 'WAS_NULL' ? "--sjdbGTFfile ${gff} --sjdbOverhang 149 " : ''
+    // Possibly need option to set this to CDS, incase user input doesn't have exons?
+    def exon_feature = "exon"
 
-    // --sjdbGTFfeatureExon should there be an option to make this CDS?
     """
     mkdir -p index
     STAR \
       --runThreadN ${task.cpus} \
       --runMode genomeGenerate \
       --genomeDir index \
-      --genomeFastaFiles ${fasta} \
+      --genomeFastaFiles "${fasta}" \
       --genomeSAindexNbases 11 \
       --sjdbGTFtagExonParentTranscript Parent \
-      --sjdbGTFfeatureExon exon \
+      --sjdbGTFfeatureExon "${exon_feature}" \
       ${sjdb}
     """
 }
@@ -400,6 +421,10 @@ starIndices.into {
     starIndices4StarAlignReads;
 }
 
+
+//
+// RNAseq alignments and assembly
+//
 
 /*
  * Perform first pass for STAR.
@@ -414,16 +439,21 @@ process starFindNovelSpliceSites {
     tag "${name} - ${read_group}"
 
     when:
-    params.fastq
+    !params.nostar
 
     input:
-    set val(name), file("index"), val(read_group),
-        file(r1s), file(r2s) from starIndices4StarFindNovelSpliceSites
+    set val(name),
+        file("index"),
+        val(read_group),
+        file(r1s),
+        file(r2s),
+        val(strand) from starIndices4StarFindNovelSpliceSites
             .combine(fastq4StarFindNovelSpliceSites)
             .groupTuple(by: [0, 1, 2])
 
     output:
-    set val(name), val(read_group),
+    set val(name),
+        val(read_group),
         file("${name}_${read_group}.SJ.out.tab") into starNovelSpliceSites
 
     script:
@@ -464,23 +494,32 @@ process starAlignReads {
     tag "${name} - ${read_group}"
 
     when:
-    params.fastq
+    !params.nostar
 
     input:
-    set val(name), file("index"), val(read_group),
-        file(r1s), file(r2s) from starIndices4StarAlignReads
+    set val(name),
+        file("index"),
+        val(read_group),
+        file(r1s),
+        file(r2s),
+        val(strand) from starIndices4StarAlignReads
             .combine(fastq4StarAlignReads)
             .groupTuple(by: [0, 1, 2])
+
     file "*SJ.out.tab" from starNovelSpliceSites
         .map { n, rg, f -> f }
         .collect()
 
     output:
-    set val(name), val(read_group), file("${name}_${read_group}.bam") into alignedReads
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}.bam"),
+        val(strand) into alignedReads
 
     script:
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
+
     """
     STAR \
       --runThreadN ${task.cpus} \
@@ -514,6 +553,10 @@ process starAlignReads {
 }
 
 
+/*
+ * Sort bams and add bam index.
+ * NOTE: merge user provided bams before this!
+ */
 process tidyBams {
 
     label "samtools"
@@ -522,17 +565,21 @@ process tidyBams {
 
     tag "${name} - ${read_group}"
 
-    when:
-    params.fastq
-
     input:
-    set val(name), val(read_group), file("my.bam"),
-        file(genome), file(faidx) from alignedReads
+    set val(name),
+        val(read_group),
+        file("my.bam"),
+        val(strand),
+        file(genome),
+        file(faidx) from alignedReads
             .combine(genomesWithFaidx4TidyBams, by: 0)
 
     output:
-    set val(name), val(read_group), file("${name}_${read_group}.bam"),
-        file("${name}_${read_group}.bam.bai") into tidiedBams
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}.bam"),
+        file("${name}_${read_group}.bam.bai"),
+        val(strand) into tidiedBams
 
     script:
     """
@@ -549,11 +596,11 @@ process tidyBams {
     """
 }
 
-tidiedBams.set { bams4AssembleStringtie }
+tidiedBams.into { bams4AssembleStringtie; bams4TrinityAssembleGuided }
 
 
 /*
- * Assembly transcripts with Stringtie
+ * Assemble transcripts with Stringtie
  */
 process assembleStringtie {
 
@@ -562,25 +609,29 @@ process assembleStringtie {
 
     tag "${name} - ${read_group}"
 
-    when:
-    params.fastq
-
     input:
-    set val(name), val(read_group), file(bam), file(bai),
-        file(fasta), file(gff) from bams4AssembleStringtie
+    set val(name),
+        val(read_group),
+        file(bam),
+        file(bai),
+        val(strand),
+        file(fasta),
+        file(gff) from bams4AssembleStringtie
             .combine(genomes4AssembleStringtie, by: 0)
 
     output:
-    set val(name), val(read_group),
+    set val(name),
+        val(read_group),
         file("${name}_${read_group}.gtf") into stringtieAssembledTranscripts
 
     script:
-    def stranded = params.fr ? '' : "--rf"
+    def strand_flag = strand == "fr" ? "--fr" : "--rf"
     def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
+
     """
     stringtie \
       -p "${task.cpus}" \
-      ${stranded} \
+      ${strand_flag} \
       ${known} \
       -o "${name}_${read_group}.gtf" \
       -m 200 \
@@ -592,16 +643,13 @@ process assembleStringtie {
 /*
  * Combine stringtie annotations from multiple bams.
  */
-process mergeStrintie {
+process mergeStringtie {
 
     label "stringtie"
     label "medium_task"
     publishDir "${params.outdir}/stringtie"
 
     tag "${name}"
-
-    when:
-    params.fastq
 
     input:
     set val(name), file("*gtf"), file(gff) from stringtieAssembledTranscripts
@@ -614,6 +662,7 @@ process mergeStrintie {
 
     script:
     def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
+
     """
     stringtie \
       -p "${task.cpus}" \
@@ -624,165 +673,146 @@ process mergeStrintie {
     """
 }
 
-
 stringtieMergedTranscripts.into {
     stringtieMergedTranscripts4CodingQuarry;
     stringtieMergedTranscripts4CodingQuarryPM;
 }
 
 
-process runCodingQuarry {
-
-    label "codingquarry"
-    label "medium_task"
-    publishDir "${params.outdir}/codingquarry"
-
-    tag "${name}"
-
-    when:
-    params.fastq && !params.notfungus
-
-    input:
-    set val(name), file("transcripts.gtf"),
-        file("genome.fasta") from stringtieMergedTranscripts4CodingQuarry
-            .combine(genomes4RunCodingQuarry, by: 0)
-
-    output:
-    set val(name), file("${name}") into codingQuarryPredictions
-
-    script:
-    """
-    grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
-    CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
-
-    CodingQuarry -f genome.fasta -t transcripts.gff3 -p "${task.cpus}"
-
-      \${QUARRY_PATH}/scripts/fastaTranslate.py out/Predicted_CDS.fa \
-    | sed 's/*\$//g' > Predicted_Proteins.faa
-
-      \${QUARRY_PATH}/scripts/gene_errors_Xs.py Predicted_Proteins.faa out/Predicted_Proteins.faa
-
-    mv out "${name}"
-    """
-}
-
-codingQuarryPredictions.into {
-    codingQuarryPredictions4SignalP;
-    codingQuarryPredictions4PM;
-}
-
-
-process getCodingQuarrySignalP {
-
-    label "signalp"
-    label "medium_task"
-    publishDir "${params.outdir}/codingquarry"
-
-    tag "${name}"
-
-    when:
-    params.fastq && !params.notfungus && params.signalp
-
-    input:
-    set val(name), file("cq") from codingQuarryPredictions4SignalP
-
-    output:
-    set val(name), file("${name}.signalp5") into codingQuarryPredictionsSecreted
-
-    script:
-    """
-    mkdir tmp
-    signalp \
-      -fasta "cq/Predicted_Proteins.faa" \
-      -prefix "${name}" \
-      -org euk \
-      -tmp tmp
-
-    mv "${name}_summary.signalp5" "${name}.signalp5"
-
-    rm -rf -- tmp
-    """
-}
-
-
 /*
-*/
-process runCodingQuarryPM {
-
-    label "codingquarry"
-    label "medium_task"
-    publishDir "${params.outdir}/codingquarry"
-
-    tag "${name}"
-
-    when:
-    params.fastq && !params.notfungus && params.signalp
-
-    input:
-    set val(name), file("transcripts.gtf"), file("genome.fasta"),
-        file("first"), file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
-            .combine(genomes4RunCodingQuarryPM, by: 0)
-            .combine(codingQuarryPredictions4PM, by: 0)
-            .combine(codingQuarryPredictionsSecreted, by: 0)
-
-    output:
-    set val(name), file("${name}") into codingQuarryPMPredictions
-
-    script:
-    """
-    grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
-    CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
-
-    gawk '
-      BEGIN {
-        OFS=" "
-      }
-      \$2 ~ /^SP/ {
-        match(\$0, /CS pos: ([0-9]*)-/, x)
-        print \$1, x[1]
-      }
-    ' < "secretome.signalp5" > secretome.txt
-
-    CodingQuarry \
-      -f genome.fasta \
-      -t transcripts.gff3 \
-      -2 "first/PredictedPass.gff3" \
-      -p "${task.cpus}" \
-      -g secretome.txt \
-      -h
-
-    mv out "${name}"
-    """
-}
-
-// RNAseq alignments and assembly
-/*
-process trinityAssembleTranscripts {
+ * Assemble reads into transcripts with trinity.
+ */
+process trinityAssemble {
 
     label "trinity"
     label "big_task"
+    publishDir "${params.outdir}/trinity"
+
+    tag "${read_group}"
+
+    when:
+    !params.notrinity
 
     input:
+    set val(read_group),
+        file(r1s),
+        file(r2s),
+        val(strand) from fastq4TrinityAssemble
+            .groupTuple(by: 0)
 
     output:
+    set val(read_group), file("${read_group}.fasta") into assembledTranscripts
 
     script:
-    // NB genome guided uses bams to assemble the reads, needs a separate process.
-    // jaccard_clip should be useful for fungi. make it an option to disable?.
+    def r1_joined = r1s.join(',')
+    def r2_joined = r2s.join(',')
+    def use_jaccard = params.notfungus ? '' : "--jaccard_clip "
+    def strand_flag = strand == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
+
     """
     Trinity \
-      --seqtype fq \
-      --max_memory "${task.memory}" \
+      --seqType fq \
+      --max_memory "${task.memory.toGiga()}G" \
       --CPU "${task.cpus}" \
-      --jaccard_clip \
+      ${use_jaccard} \
+      ${strand_flag} \
       --output trinity_assembly \
+      --left "${r1_joined}" \
+      --right "${r2_joined}"
+
+    mv trinity_assembly/Trinity.fasta "${read_group}.fasta"
+    rm -rf -- trinity_assembly
     """
 }
 
-*/
 
-// 1 align transcripts to all genomes
 /*
+ * Perform genome guided assembly with Trinity.
+ */
+process trinityAssembleGuided {
+
+    label "trinity"
+    label "big_task"
+    publishDir "${params.outdir}/trinity"
+
+    tag "${name}"
+
+    when:
+    !params.notrinity
+
+    input:
+    set val(name),
+        file("*bam"),
+        val(strand) from fastq4TrinityAssembleGuided
+            .join(bams4TrinityAssembleGuided, by: [0, 1])
+            .map { n, rg, b, i, st -> [n, b, st] }
+            .groupTuple(by: 0)
+
+    output:
+    set val(name), file("${name}.fasta") into guidedAssembledTranscripts
+
+    script:
+    def use_jaccard = params.notfungus ? '' : "--jaccard_clip "
+    def strand_flag = strand.get(0) == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
+
+    """
+    samtools merge -r "merged.bam" *bam
+    samtools index "merged.bam"
+
+    Trinity \
+      --max_memory "${task.memory.toGiga()}G" \
+      --CPU "${task.cpus}" \
+      ${use_jaccard} \
+      ${strand_flag} \
+      --output trinity_assembly \
+      --genome_guided_max_intron 15000 \
+      --genome_guided_bam "merged.bam"
+
+    mv trinity_assembly/Trinity-GG.fasta "${name}.fasta"
+    rm -rf -- merged.bam merged.bam.bai trinity_assembly
+    """
+}
+
+
+//
+// 1 align transcripts to all genomes
+//
+
+/*
+ */
+process cleanTranscripts {
+    label "pasa"
+    label "small_task"
+
+    tag "${read_group}"
+
+    input:
+    set val(read_group), file("transcripts.fasta") from transcripts
+        .mix(assembledTranscripts.map { rg, f -> f })
+        .mix(guidedAssembledTranscripts.map { rg, f -> f } )
+
+    file "univec.fasta" from  univec
+
+    output:
+    set val(read_group),
+        file("transcripts.fasta"),
+        file("transcripts.fasta.cln"),
+        file("transcripts.fasta.clean") into cleanedTranscripts
+
+    script:
+    """
+    seqclean "transcripts.fasta" -v "univec.fasta"
+    """
+}
+
+cleanedTranscripts.into {
+    transcripts4AlignSpalnTranscripts;
+    transcripts4AlignGmapTranscripts;
+}
+
+
+/*
+ */
 process alignSpalnTranscripts {
     label "spaln"
     label "medium_task"
@@ -791,11 +821,8 @@ process alignSpalnTranscripts {
 
     tag { name }
 
-    when:
-    params.transcripts
-
     input:
-    file transcripts
+    set val(read_group), file(fasta) from transcripts4AlignSpalnTranscripts
 
     set val(name),
         file(bkn),
@@ -808,6 +835,9 @@ process alignSpalnTranscripts {
     output:
     set val(name), file("${name}_transcripts.gff3") into spalnAlignedTranscripts
 
+    script:
+    def species = "Dothideo"
+
     """
     spaln \
       -L \
@@ -815,19 +845,20 @@ process alignSpalnTranscripts {
       -O3 \
       -Q7 \
       -S3 \
-      -TDothideo \
+      -T${species} \
       -yX \
       -yS \
       -ya2 \
       -t ${task.cpus} \
       -d "${name}" \
-      "${transcripts}" \
+      "${fasta}" \
     > "${name}_transcripts.gff3"
     """
 }
-*/
+
 
 /*
+ */
 process alignGmapTranscripts {
 
     label "gmap"
@@ -837,44 +868,33 @@ process alignGmapTranscripts {
 
     tag { name }
 
-    when:
-    params.transcripts
-
     input:
-    file transcripts
+    set val(read_group), file(fasta) from transcripts4AlignGmapTranscripts
     set val(name), file("db") from gmapIndices
 
     output:
     set val(name), file("${name}_transcripts.gff3") into gmapAlignedTranscripts
 
     script:
-    // Options to parametrise
-    //-n, --npaths=INT               Maximum number of paths to show (default 5).  If set to 1, GMAP
-    //                                 will not report chimeric alignments, since those imply
-    //                                 two paths.  If you want a single alignment plus chimeric
-    //                                 alignments, then set this to be 0.
-    //--min-intronlength=INT         Min length for one internal intron (default 9).  Below this size,
-    //                                 a genomic gap will be considered a deletion rather than an intron.
-    //--max-intronlength-middle=INT  Max length for one internal intron (default 500000).  Note: for backward
-    //                                 compatibility, the -K or --intronlength flag will set both
-    //                                 --max-intronlength-middle and --max-intronlength-ends.
-    //                                 Also see --split-large-introns below.
-    //--max-intronlength-ends=INT    Max length for first or last intron (default 10000).  Note: for backward
-    //                                 compatibility, the -K or --intronlength flag will set both
-    //                                 --max-intronlength-middle and --max-intronlength-ends.
-    //--trim-end-exons=INT           Trim end exons with fewer than given number of matches
-    //                                 (in nt, default 12)
-    //--microexon-spliceprob=FLOAT   Allow microexons only if one of the splice site probabilities is
-    //                                 greater than this value (default 0.95)
-    //--canonical-mode=INT           Reward for canonical and semi-canonical introns
-    //                                 0=low reward, 1=high reward (default), 2=low reward for
-    //                                 high-identity sequences and high reward otherwise
-    //--cross-species                Use a more sensitive search for canonical splicing, which helps especially
-    //                                 for cross-species alignments and other difficult cases
+    def min_intronlength = 6
+    def max_intronlength_middle = 20000
+    def max_intronlength_ends = 10000
+    def trim_end_exons = 12
+    def microexon_spliceprob = 0.95
+    def canonical_mode = 1
+    def cross_species = "" // "--cross-species "
+
     """
     gmap \
-      --chimera-margin=50 \
       --npaths=1 \
+      --chimera-margin=50 \
+      --min-intronlength="${min_intronlength}" \
+      --max-intronlength-middle="${max_intronlength_middle}" \
+      --max-intronlength-ends="${max_intronlength_ends}" \
+      --trim-end-exons="${trim_end_exons}" \
+      --microexon-spliceprob="${microexon_spliceprob}" \
+      --canonical-mode="${canonical_mode}" \
+      ${cross_species} \
       --format=gff3_match_cdna \
       --nthreads "${task.cpus}" \
       -D db \
@@ -883,13 +903,14 @@ process alignGmapTranscripts {
     > ${name}_transcripts.gff3
     """
 }
-*/
-
-// Align with minimap2
 
 
+//
 // 2 align proteins to all genomes
+//
+
 /*
+ */
 process alignSpalnProteins {
     label "spaln"
     label "medium_task"
@@ -897,9 +918,6 @@ process alignSpalnProteins {
     publishDir "${params.outdir}/aligned/spaln"
 
     tag { name }
-
-    when:
-    params.proteins
 
     input:
     file proteins
@@ -929,55 +947,14 @@ process alignSpalnProteins {
     > "${name}_proteins.gff3"
     """
 }
-*/
 
-// 3 align remote proteins to all genomes
+
+//
+// 3 run busco on all genomes
+//
+
 /*
-process alignSpalnRemoteProteins {
-    label "spaln"
-    label "medium_task"
-
-    publishDir "${params.outdir}/aligned/spaln"
-
-    tag { name }
-
-    when:
-    params.remote_proteins
-
-    input:
-    file remoteProteins
-
-    set val(name),
-        file(bkn),
-        file(ent),
-        file(idx),
-        file(bkp),
-        file(grp),
-        file(seq) from spalnIndices4AlignSpalnRemoteProteins
-
-    output:
-    set val(name), file("${name}_remote_proteins.gff3")
-
-    script:
-    """
-    spaln \
-      -L \
-      -M3 \
-      -O3 \
-      -Q7 \
-      -TDothideo \
-      -ya1 \
-      -t ${task.cpus} \
-      -a \
-      -d "${name}" \
-      "${proteins}" \
-    > "${name}_proteins.gff3"
-    """
-}
-*/
-
-// 4 run busco on all genomes
-/*
+ */
 process runBusco {
     label "busco"
     label "medium_task"
@@ -996,6 +973,7 @@ process runBusco {
     output:
     file "${name}" into buscoResults
 
+    script:
     """
     export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
 
@@ -1009,7 +987,7 @@ process runBusco {
     mv "run_${name}" "${name}"
     """
 }
-*/
+
 
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
 
@@ -1090,6 +1068,136 @@ process runBraker {
     """
 }
 */
+
+
+process runCodingQuarry {
+
+    label "codingquarry"
+    label "medium_task"
+    publishDir "${params.outdir}/codingquarry"
+
+    tag "${name}"
+
+    when:
+    params.fastq && !params.notfungus
+
+    input:
+    set val(name), file("transcripts.gtf"),
+        file("genome.fasta") from stringtieMergedTranscripts4CodingQuarry
+            .combine(genomes4RunCodingQuarry, by: 0)
+
+    output:
+    set val(name), file("${name}") into codingQuarryPredictions
+
+    script:
+    """
+    grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
+    CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
+
+    CodingQuarry -f genome.fasta -t transcripts.gff3 -p "${task.cpus}"
+
+    \${QUARRY_PATH}/scripts/fastaTranslate.py out/Predicted_CDS.fa \
+    | sed 's/*\$//g' > Predicted_Proteins.faa
+
+    \${QUARRY_PATH}/scripts/gene_errors_Xs.py Predicted_Proteins.faa out/Predicted_Proteins.faa
+
+    mv out "${name}"
+    """
+}
+
+codingQuarryPredictions.into {
+    codingQuarryPredictions4SignalP;
+    codingQuarryPredictions4PM;
+}
+
+
+/*
+ * CQPM looks for genes that might not be predicted main set because of
+ * genome compartmentalisation.
+ * NOTE: This fails if there are fewer than 500 secreted genes to train from.
+ */
+process getCodingQuarrySignalP {
+
+    label "signalp"
+    label "medium_task"
+    publishDir "${params.outdir}/codingquarry"
+
+    tag "${name}"
+
+    when:
+    params.fastq && !params.notfungus && params.signalp
+
+    input:
+    set val(name), file("cq") from codingQuarryPredictions4SignalP
+
+    output:
+    set val(name), file("${name}.signalp5") into codingQuarryPredictionsSecreted
+
+    script:
+    """
+    mkdir tmp
+    signalp \
+      -fasta "cq/Predicted_Proteins.faa" \
+      -prefix "${name}" \
+      -org euk \
+      -tmp tmp
+
+    mv "${name}_summary.signalp5" "${name}.signalp5"
+
+    rm -rf -- tmp
+    """
+}
+
+
+/*
+ */
+process runCodingQuarryPM {
+
+    label "codingquarry"
+    label "medium_task"
+    publishDir "${params.outdir}/codingquarry"
+
+    tag "${name}"
+
+    when:
+    params.fastq && !params.notfungus && params.signalp
+
+    input:
+    set val(name), file("transcripts.gtf"), file("genome.fasta"),
+        file("first"), file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
+            .combine(genomes4RunCodingQuarryPM, by: 0)
+            .combine(codingQuarryPredictions4PM, by: 0)
+            .combine(codingQuarryPredictionsSecreted, by: 0)
+
+    output:
+    set val(name), file("${name}") into codingQuarryPMPredictions
+
+    script:
+    """
+    grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
+    CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
+
+    gawk '
+      BEGIN {
+        OFS=" "
+      }
+      \$2 ~ /^SP/ {
+        match(\$0, /CS pos: ([0-9]*)-/, x)
+        print \$1, x[1]
+      }
+    ' < "secretome.signalp5" > secretome.txt
+
+    CodingQuarry \
+      -f genome.fasta \
+      -t transcripts.gff3 \
+      -2 "first/PredictedPass.gff3" \
+      -p "${task.cpus}" \
+      -g secretome.txt \
+      -h
+
+    mv out "${name}"
+    """
+}
 
 // 6 If no genome alignment, run sibelliaz
 

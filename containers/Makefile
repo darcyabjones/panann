@@ -60,6 +60,11 @@ GMAP_VERSION=2019-05-12
 GMAP_URL=http://research-pub.gene.com/gmap/src/gmap-gsnap-$(GMAP_VERSION).tar.gz
 GMAP_PREFIX_ARG=$(INSTALL_BASE)/gmap/$(GMAP_VERSION)
 
+FASTA_VERSION=36.3.8g
+FASTA_URL=http://faculty.virginia.edu/wrpearson/fasta/fasta36/fasta-36.3.8g.tar.gz
+FASTA_PREFIX_ARG=$(INSTALL_BASE)/fasta/$(FASTA_VERSION)
+
+
 GENOMETOOLS_VERSION=1.5.10
 GENOMETOOLS_URL=http://genometools.org/pub/genometools-$(GENOMETOOLS_VERSION).tar.gz
 GENOMETOOLS_PREFIX_ARG=$(INSTALL_BASE)/genometools/$(GENOMETOOLS_VERSION)
@@ -76,6 +81,10 @@ CODINGQUARRY_PREFIX_ARG=$(INSTALL_BASE)/codingquarry/$(CODINGQUARRY_VERSION)
 BUSCO_COMMIT=1554283ab8ee7dd5b5290f4f748234f456c36e66
 BUSCO_REPO=https://gitlab.com/ezlab/busco.git
 BUSCO_PREFIX_ARG=$(INSTALL_BASE)/busco/$(BUSCO_COMMIT)
+
+PASA_TAG=pasa-v2.3.3
+PASA_REPO=https://github.com/PASApipeline/PASApipeline.git
+PASA_PREFIX_ARG=$(INSTALL_BASE)/pasa/$(PASA_TAG)
 
 
 GENEMARKES_VERSION=v.4.38
@@ -273,6 +282,17 @@ docker/gmap: gmap.Dockerfile docker/base
 	  -t "$(call make_image_name,$@)" \
 	  .
 
+docker/fasta: fasta.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg FASTA_VERSION="$(FASTA_VERSION)" \
+	  --build-arg FASTA_URL="$(FASTA_URL)" \
+	  --build-arg FASTA_PREFIX_ARG="$(FASTA_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+
+
 # Annotation tools
 
 docker/augustus: augustus.Dockerfile docker/base
@@ -288,6 +308,28 @@ docker/augustus: augustus.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+
+docker/pasa: pasa.Dockerfile docker/base docker/gmap docker/fasta docker/htslib
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg GMAP_IMAGE="$(call make_image_name,gmap)" \
+	  --build-arg FASTA_IMAGE="$(call make_image_name,fasta)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
+	  --build-arg PASA_TAG="$(PASA_TAG)" \
+	  --build-arg PASA_REPO="$(PASA_REPO)" \
+	  --build-arg PASA_PREFIX_ARG="$(PASA_PREFIX_ARG)" \
+	  --build-arg GMAP_VERSION="$(GMAP_VERSION)" \
+	  --build-arg GMAP_PREFIX_ARG="$(GMAP_PREFIX_ARG)" \
+	  --build-arg FASTA_VERSION="$(FASTA_VERSION)" \
+	  --build-arg FASTA_PREFIX_ARG="$(FASTA_PREFIX_ARG)" \
+	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+
 
 docker/codingquarry: codingquarry.Dockerfile docker/base
 	docker build \
