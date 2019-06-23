@@ -108,7 +108,7 @@ singularity: singularity/panann.sif
 docker/general: docker/htslib docker/genometools
 docker/alignment: docker/minimap2 docker/spaln docker/gmap
 docker/rnaseq: docker/trinity docker/star docker/stringtie
-docker/annotation: docker/augustus docker/codingquarry docker/busco
+docker/annotation: docker/augustus docker/codingquarry docker/busco docker/pasa
 
 # Proprietary software won't be built by default.
 docker/proprietary: docker/genemarkes docker/signalp
@@ -122,7 +122,8 @@ clean:
 
 tidy:
 	# Just removes untagged images to free up space
-	docker rmi $(shell docker images | grep "^<none>" | awk '{print $$3}') || true
+	#docker rmi -f $(shell docker images -f "dangling=true" -q) || true
+	docker image print -f
 
 # Generic rules
 singularity/%.sif: docker/%
@@ -134,13 +135,14 @@ docker/%.tar.gz: docker/%
 	docker save "$(call make_image_name,$(basename $(basename $@)))" | gzip > $@
 
 
-
 docker/base: base.Dockerfile
 	docker build \
 	  --build-arg DEBIAN_VERSION=$(DEBIAN_VERSION) \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 # RNAseq stuff
 
@@ -153,6 +155,8 @@ docker/jellyfish: jellyfish.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/bowtie2: bowtie2.Dockerfile docker/base
 	docker build \
@@ -163,6 +167,8 @@ docker/bowtie2: bowtie2.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/salmon: salmon.Dockerfile docker/base
 	docker build \
@@ -173,6 +179,8 @@ docker/salmon: salmon.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/trinity: docker/jellyfish docker/bowtie2 docker/htslib docker/salmon
 docker/trinity: trinity.Dockerfile docker/base
@@ -198,6 +206,8 @@ docker/trinity: trinity.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/star: star.Dockerfile docker/base
 	docker build \
@@ -208,6 +218,8 @@ docker/star: star.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/stringtie: stringtie.Dockerfile docker/base
 	docker build \
@@ -218,6 +230,8 @@ docker/stringtie: stringtie.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 # General tools
 
@@ -236,6 +250,8 @@ docker/htslib: htslib.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/genometools: genometools.Dockerfile docker/base
 	docker build \
@@ -246,6 +262,8 @@ docker/genometools: genometools.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 # Aligners
 
@@ -261,6 +279,8 @@ docker/minimap2: minimap2.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/spaln: spaln.Dockerfile docker/base
 	docker build \
@@ -271,6 +291,8 @@ docker/spaln: spaln.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/gmap: gmap.Dockerfile docker/base
 	docker build \
@@ -281,6 +303,8 @@ docker/gmap: gmap.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/fasta: fasta.Dockerfile docker/base
 	docker build \
@@ -291,6 +315,8 @@ docker/fasta: fasta.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 
 # Annotation tools
@@ -308,6 +334,8 @@ docker/augustus: augustus.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/pasa: pasa.Dockerfile docker/base docker/gmap docker/fasta docker/htslib
 	docker build \
@@ -329,6 +357,8 @@ docker/pasa: pasa.Dockerfile docker/base docker/gmap docker/fasta docker/htslib
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 
 docker/codingquarry: codingquarry.Dockerfile docker/base
@@ -340,6 +370,8 @@ docker/codingquarry: codingquarry.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/busco: busco.Dockerfile docker/base docker/augustus
 	docker build \
@@ -353,6 +385,8 @@ docker/busco: busco.Dockerfile docker/base docker/augustus
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/genemarkes: genemarkes.Dockerfile docker/base
 	docker build \
@@ -364,6 +398,8 @@ docker/genemarkes: genemarkes.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 docker/signalp: signalp.Dockerfile docker/base
 	docker build \
@@ -374,6 +410,8 @@ docker/signalp: signalp.Dockerfile docker/base
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
 
 ## The monolith!!!!
@@ -431,3 +469,5 @@ docker/panann: panann.Dockerfile docker/base docker/jellyfish docker/bowtie2 doc
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@

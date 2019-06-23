@@ -6,5 +6,7 @@ work
 aligned
 busco
 containers/singularity
+containers/docker
+containers/sources
 .nextflow
 run

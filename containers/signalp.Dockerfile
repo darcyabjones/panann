@@ -25,7 +25,7 @@ RUN  set -eu \
   && chmod a+x "${SIGNALP_PREFIX}/bin/signalp" \
   && rm -rf -- "${SIGNALP_PREFIX}/signalp.1" "${SIGNALP_PREFIX}/test" \
   && apt-get update \
-  && apt-get install -y gawk \
+  && apt-get install -y gawk
 
 WORKDIR /
 ENV PATH="${PATH}:${SIGNALP_PREFIX}/bin"
