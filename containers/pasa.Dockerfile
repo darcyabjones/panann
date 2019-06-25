@@ -47,7 +47,6 @@ RUN  set -eu \
   && cp -r pasa-plugins/transdecoder "${PASA_PREFIX}/pasa-plugins/transdecoder" \
   && rm -r "${PASA_PREFIX}/pasa-plugins/transdecoder/sample_data" \
   && cp -r SAMPLE_HOOKS "${PASA_PREFIX}/SAMPLE_HOOKS" \
-  && cp Launch_PASA_pipeline.pl "${PASA_PREFIX}/bin" \
   && cp Launch_PASA_pipeline.pl "${PASA_PREFIX}" \
   && wget -O "${PASA_PREFIX}/bin/blat" http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/blat/blat \
   && chmod 755 "${PASA_PREFIX}/bin/blat" \
@@ -63,7 +62,7 @@ ARG PASA_PREFIX_ARG="/opt/pasa/${PASA_TAG}"
 ENV PASA_PREFIX="${PASA_PREFIX_ARG}"
 ENV PASA_HOME="${PASA_PREFIX}"
 
-ENV PATH "${PASA_PREFIX}/bin:${PASA_PREFIX}/misc_utilities:${PASA_PREFIX}/scripts:${PATH}"
+ENV PATH "${PASA_PREFIX}:${PASA_PREFIX}/bin:${PASA_PREFIX}/misc_utilities:${PASA_PREFIX}/scripts:${PATH}"
 
 COPY --from=builder "${PASA_PREFIX}" "${PASA_PREFIX}"
 COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/pasa.txt

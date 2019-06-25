@@ -23,6 +23,10 @@ COPY base.sh /build/base.sh
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
   && mkdir -p /usr/share/man/man1 \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+       procps \
+  && rm -rf /var/lib/apt/lists/* \
   && touch "${APT_REQUIREMENTS_FILE}"
 
 # Adding man folder prevents java install from panicking

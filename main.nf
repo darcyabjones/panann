@@ -71,6 +71,7 @@ if (params.help) {
 
 params.genomes = false
 params.known_sites = false
+
 params.transcripts = false
 params.proteins = false
 
@@ -81,8 +82,8 @@ params.augustus_config = false
 
 // RNAseq params
 params.fastq = false
-params.fr = false
 params.bams = false
+params.fr = false
 params.cufflinks_gtf = false
 
 params.notfungus = false
@@ -100,19 +101,18 @@ def stranded = params.fr ? "fr" : "rf"
 
 def is_null = { f -> (f == null || f == '') }
 
+
 if ( params.genomes ) {
     Channel
         .fromPath(params.genomes, checkIfExists: true, type: "file")
         .map { g -> [g.baseName, g] }
-        .set { genomes }
+        .into { genomes; genomes4CheckBams }
 } else {
     log.error "Please provide some genomes to predict genes for with `--genomes`."
     exit 1
 }
 
 if ( params.known_sites ) {
-    // Todo: merge with genomes here and error if get multiple gffs per genome
-    // or names that don't match any genome
     Channel
         .fromPath(params.known_sites, checkIfExists: true, type: "file")
         .splitCsv(by: 1, sep: '\t', header: true)
@@ -122,7 +122,21 @@ if ( params.known_sites ) {
             file(it.gff3, checkIfExists: true),
         ]}
         .unique()
-        .set { knownSites }
+        .into { knownSites; knownSites4CheckNoDups }
+
+    knownSites4CheckNoDups
+        .groupTuple(by: 0)
+        .filter { name, gffs -> gffs.length > 1 }
+        .map { n, g -> n }
+        .collect()
+        .set { ks_duplicates }
+
+    if ( ks_duplicates.length != 0 ) {
+        log.error "There is more than one "known" GFF annotation " +
+            "provided for name ${name}. Please merge them into one " +
+            " file. E.G. using `genometools gff3`"
+        exit 1
+    }
 
 } else {
     knownSites = Channel.empty()
@@ -132,8 +146,6 @@ if ( params.known_sites ) {
 if ( params.transcripts ) {
     Channel
         .fromPath(params.transcripts, checkIfExists: true, type: "file")
-        .collectFile(name: "transcripts.fasta", newLine: true, sort: "deep")
-        .first()
         .set { transcripts }
 
 } else {
@@ -144,8 +156,6 @@ if ( params.transcripts ) {
 if ( params.proteins ) {
     Channel
         .fromPath(params.proteins, checkIfExists: true, type: "file")
-        .collectFile(name: "proteins.fasta", newLine: true, sort: "deep")
-        .first()
         .set { proteins }
 
 } else {
@@ -205,14 +215,27 @@ if ( params.fastq ) {
     Channel
         .fromPath(params.fastq, checkIfExists: true)
         .splitCsv(by: 1, sep: '\t', header: true)
-        .filter { !is_null(it.read_group) && !is_null(it.r1) && !is_null(it.r2) }
-        .map {[
-            it.read_group,
-            !is_null(it.name) ? it.name : 'WAS_NULL',
-            file(it.r1, checkIfExists: true),
-            file(it.r2, checkIfExists: true),
-            !is_null(it.stranded) ? it.stranded : stranded
-        ]}
+        .filter { !is_null(it.r1) || !is_null(it.r2) }
+        .map { it ->
+            if ( is_null(it.read_group) ) {
+                log.error "A fastq pair has no read_group set."
+                log.error "The offending line is ${it}"
+                exit 1
+            };
+            if ( is_null(it.r1) || is_null(it.r2) ) {
+                log.error "A fastq pair has one member of the pair unset."
+                log.error "The pipeline only currently supports stranded " +
+                    "paired-RNAseq."
+                exit 1
+            };
+            [
+                it.read_group,
+                !is_null(it.name) ? it.name : 'WAS_NULL',
+                file(it.r1, checkIfExists: true),
+                file(it.r2, checkIfExists: true),
+                !is_null(it.stranded) ? it.stranded : stranded
+            ]
+        }
         .unique()
         .set { fastq }
 
@@ -221,40 +244,111 @@ if ( params.fastq ) {
 }
 
 
+if ( params.bams ) {
+    Channel
+        .fromPath(params.bams, checkIfExists: true)
+        .splitCsv(by: 1, sep: '\t', header: true)
+        .filter { !is_null(it.bam) }
+        .map { it ->
+            if ( is_null(it.read_group) ) {
+                log.error "The bam file ${it.bam.name} doesn't have a " \
+                    "read_group set."
+                exit 1
+            };
+            if ( is_null(is.name) ) {
+                log.error "The bam file ${is.bam.name} with read_group " \
+                    "${it.read_group}, doesn't have a genome name set."
+                exit 1
+            };
+            [
+                it.name,
+                it.read_group,
+                file(it.bam, checkIfExists: true),
+                !is_null(it.stranded) ? it.stranded : stranded
+            ]
+        }
+        .unique()
+        .into { bams; bams4Check }
+
+    bams4Check
+        .combine(genomes4CheckBams, by: 1, remainder: true)
+        .filter { n, r, b, s, g -> is_null(g) }
+        .map { n, r, b, s, g -> b }
+        .collect()
+        .set { bams_no_genome }
+
+    if ( bams_no_genome.length > 0 ) {
+        log.error "The provided bams ${bams_no_genome} could not be mapped " +
+            "assigned to a genome based on the name column."
+        log.error "Please check that the name in the table matches "+
+            "the basename of one of the genomes."
+        exit 1
+    }
+} else {
+    bams = Channel.empty()
+}
+
 // Split up the inputs.
+process getFaidx {
 
-knownSites.set { knownSites4StarIndex }
+    label "samtools"
+    label "small_task"
 
-genomes.into {
-    genomes4Busco;
+    tag { name }
+
+    input:
+    set val(name), file(genome) from genomes
+
+    output:
+    set val(name), file(genome), file("${genome}.fai") into genomesWithFaidx
+
+    script:
+    """
+    samtools faidx "${genome}"
+    """
+}
+
+
+genomesWithFaidx.into {
+    genomes4KnownSites;
     genomes4SpalnIndex;
     genomes4GmapIndex;
-    genomes4StarIndex;
-    genomes4GetFaidx;
+    genomes4TidyBams;
+    genomes4TidyFilteredBams;
+    genomes4ExtractSpliceSites;
+    genomes4Busco;
+    genomes4RunGenemark;
     genomes4RunCodingQuarry;
     genomes4RunCodingQuarryPM;
 }
 
+
 if ( params.known_sites ) {
-    genomes4StarIndex
-        .join( knownSites4StarIndex, by: 0, remainder: true)
-        .view()
-        .filter { n, f, g -> (!is_null(f) && !is_null(n)) }
-        .map { n, f, g -> [n, f, !is_null(g) ? g : file('WAS_NULL')] }
-        .into {
-            genomes4StarIndexWithGff;
-            genomes4AssembleStringtie;
-            genomes4MergeStringtie;
+    genomes4KnownSites
+        .join( knownSites, by: 0, remainder: true)
+        .map { n, f, i, g ->
+            if ( is_null(f) ) {
+                log.error "The known site file ${g.name} with name ${n} " +
+                    "doesn't match any of the provided genomes."
+                log.error "Please check that the name in the table matches " +
+                    "the basename of one of the genomes."
+                exit 1
+            };
+            [n, f, i, !is_null(g) ? g : file('was_null')]
         }
+        .set { genomesWithKnownSites }
 
 } else {
-    genomes4StarIndex
-        .map { n, f -> [n, f, file('WAS_NULL')] }
-        .into {
-            genomes4StarIndexWithGff;
-            genomes4AssembleStringtie;
-            genomes4MergeStringtie;
-        }
+    genomes4KnownSites
+        .map { n, f, i -> [n, f, i, file('WAS_NULL')] }
+        .set { genomesWithKnownSites }
+}
+
+genomesWithKnownSites.into {
+    genomes4StarIndex;
+    genomes4AssembleStringtie;
+    genomes4MergeStringtie;
+    genomes4RunPASA;
 }
 
 
@@ -265,7 +359,6 @@ fastq
     .set { fastq4TrinityAssembleGuided }
 
 fastqNoGenome
-    .filter {rg, n, r1, r2, st -> n == 'WAS_NULL' }
     .map { rg, n, r1, r2, st -> [rg, r1, r2, st] }
     .unique()
     .set { fastq4TrinityAssemble }
@@ -299,28 +392,6 @@ process getUnivec {
 }
 
 
-process getFaidx {
-
-    label "samtools"
-    label "small_task"
-
-    tag { name }
-
-    input:
-    set val(name), file(genome) from genomes4GetFaidx
-
-    output:
-    set val(name), file(genome), file("${genome}.fai") into genomesWithFaidx
-
-    script:
-    """
-    samtools faidx "${genome}"
-    """
-}
-
-genomesWithFaidx.set { genomesWithFaidx4TidyBams }
-
-
 process getSpalnIndex {
 
     label "spaln"
@@ -329,7 +400,7 @@ process getSpalnIndex {
     tag { name }
 
     input:
-    set val(name), file(genome) from genomes4SpalnIndex
+    set val(name), file(genome), file(faidx) from genomes4SpalnIndex
 
     output:
     set val(name),
@@ -361,7 +432,7 @@ process getGmapIndex {
     tag { name }
 
     input:
-    set val(name), file(genome) from genomes4GmapIndex
+    set val(name), file(genome), file(faidx) from genomes4GmapIndex
 
     output:
     set val(name), file("db") into gmapIndices
@@ -391,7 +462,10 @@ process getStarIndex {
     params.fastq && !params.nostar
 
     input:
-    set val(name), file(fasta), file(gff) from genomes4StarIndexWithGff
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file(gff) from genomes4StarIndex
 
     output:
     set val(name), file("index") into starIndices
@@ -555,7 +629,7 @@ process starAlignReads {
 
 /*
  * Sort bams and add bam index.
- * NOTE: merge user provided bams before this!
+ * NOTE: merging in user provided bams here!
  */
 process tidyBams {
 
@@ -572,7 +646,8 @@ process tidyBams {
         val(strand),
         file(genome),
         file(faidx) from alignedReads
-            .combine(genomesWithFaidx4TidyBams, by: 0)
+            .mix(bams)
+            .combine(genomes4TidyBams, by: 0)
 
     output:
     set val(name),
@@ -596,7 +671,176 @@ process tidyBams {
     """
 }
 
-tidiedBams.into { bams4AssembleStringtie; bams4TrinityAssembleGuided }
+tidiedBams.into {
+    bams4AssembleStringtie;
+    bams4TrinityAssembleGuided;
+    bams4SortBamsByQuery;
+}
+
+
+process sortBamsByQuery {
+
+    label "samtools"
+    label "small_task"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file("my.bam"),
+        file("my.bam.bai"),
+        val(strand) from bams4SortBamsByQuery
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}.bam"),
+        file("${name}_${read_group}.bam.bai"),
+        val(strand) into bamsSortedByQuery
+
+    script:
+    """
+    # The -n is the important bit here
+    samtools sort \
+        -O BAM \
+        -@ "${task.cpus}" \
+        -n \
+        -l 9 \
+        -o "${name}_${read_group}.bam"
+        "my.bam"
+
+    samtools index "${name}_${read_group}.bam"
+    """
+}
+
+process filterBam {
+
+    label "augustus"
+    label "medium_task"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file(bam),
+        file(bai),
+        val(strand) from bamsSortedByQuery
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${bam.baseName}_filtered.bam"),
+        val(strand) into filteredBams
+
+    script:
+    """
+    filterBam \
+      --uniq \
+      --paired \
+      --pairwiseAlignment \
+      --in "${bam}" \
+      --out "${bam.baseName}_filtered.bam"
+    """
+}
+
+
+process tidyFilteredBams {
+
+    label "htslib"
+    label "small_task"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file("my.bam"),
+        val(strand),
+        file(genome),
+        file(faidx) from filteredBams
+            .combine(genomes4TidyFilteredBams, by: 0)
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}_filtered.bam"),
+        file("${name}_${read_group}_filtered.bam.bai"),
+        val(strand) into tidiedFilteredBams
+
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}_forward.bam"),
+        file("${name}_${read_group}_reverse.bam"),
+        file("${name}_${read_group}_unpaired.bam") into splitReadBams
+
+    script:
+    if (strand == "fr") {
+        fst = "forward"
+        snd = "reverse"
+    } else {
+        fst = "reverse"
+        snd = "forward"
+    }
+
+    """
+    samtools view \
+        -uT "${faidx}" \
+        "my.bam" \
+    | samtools sort \
+        -O BAM \
+        -@ "${task.cpus}" \
+        -l 9 \
+        -o "${name}_${read_group}_filtered.bam"
+
+    samtools index "${name}_${read_group}_filtered.bam"
+
+    samtools -f 65 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${fst}.bam"
+    samtools -f 128 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${snd}.bam"
+    samtools -F 193 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_unpaired.bam"
+    """
+}
+
+tidiedFilteredBams.set { tidiedFilteredBams4ExtractSpliceSites }
+
+
+process extractSpliceSites {
+
+    label "augustus"
+    label "small_task"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file(bam),
+        file(bai),
+        val(strand),
+        file(genome),
+        file(faidx) from tidiedFilteredBams4ExtractSpliceSites
+            .combine(genomes4ExtractSpliceSites, by: 0)
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}_introns.gff3") into spliceSites
+
+    script:
+    """
+    bam2hints --intronsonly --in="${bam}" --out="tmp.gff"
+    filterIntronsFindStrand.pl \
+      "${genome}" \
+      tmp.gff \
+      --score \
+      > "${name}_${read_group}_introns.gff3"
+
+    rm -f tmp.gff
+    """
+}
+
+spliceSites.set { spliceSites4RunGenemark }
 
 
 /*
@@ -616,6 +860,7 @@ process assembleStringtie {
         file(bai),
         val(strand),
         file(fasta),
+        file(fai),
         file(gff) from bams4AssembleStringtie
             .combine(genomes4AssembleStringtie, by: 0)
 
@@ -655,7 +900,7 @@ process mergeStringtie {
     set val(name), file("*gtf"), file(gff) from stringtieAssembledTranscripts
         .map { n, rg, f -> [n, f] }
         .groupTuple(by: 0)
-        .combine( genomes4MergeStringtie.map {n, f, g -> [n, g]}, by: 0 )
+        .join( genomes4MergeStringtie.map {n, f, i, g -> [n, g]}, by: 0 )
 
     output:
     set val(name), file("${name}.gtf") into stringtieMergedTranscripts
@@ -676,6 +921,7 @@ process mergeStringtie {
 stringtieMergedTranscripts.into {
     stringtieMergedTranscripts4CodingQuarry;
     stringtieMergedTranscripts4CodingQuarryPM;
+    stringtieMergedTranscripts4PASA;
 }
 
 
@@ -778,29 +1024,53 @@ process trinityAssembleGuided {
 // 1 align transcripts to all genomes
 //
 
+
+// Might be good to keep track of which assemblies come from trinity denovo?
+// Pasa can use this somehow.
+process combineTranscripts {
+
+    label "python3"
+    label "small_task"
+
+    input:
+    file "*fasta" from transcripts
+        .mix(assembledTranscripts.map { rg, f -> f } )
+        .mix(guidedAssembledTranscripts.map { rg, f -> f })
+        .collect()
+
+    output:
+    file "transcripts.fasta" into combinedTranscripts
+    file "transcripts.tsv" into combinedTranscriptsMap
+
+    script:
+    """
+    unique_rename_fasta.py \
+      --infiles *fasta \
+      --outfile "transcripts.fasta" \
+      --map "transcripts.tsv"
+    """
+}
+
+
 /*
  */
 process cleanTranscripts {
     label "pasa"
     label "small_task"
 
-    tag "${read_group}"
-
     input:
-    set val(read_group), file("transcripts.fasta") from transcripts
-        .mix(assembledTranscripts.map { rg, f -> f })
-        .mix(guidedAssembledTranscripts.map { rg, f -> f } )
-
-    file "univec.fasta" from  univec
+    file "transcripts.fasta" from combinedTranscripts
+    file "univec.fasta" from univec
 
     output:
-    set val(read_group),
-        file("transcripts.fasta"),
+    set file("transcripts.fasta"),
         file("transcripts.fasta.cln"),
         file("transcripts.fasta.clean") into cleanedTranscripts
 
     script:
     """
+    # this user thing is needed for seqclean. Unknown reasons
+    export USER="root"
     seqclean "transcripts.fasta" -v "univec.fasta"
     """
 }
@@ -808,6 +1078,7 @@ process cleanTranscripts {
 cleanedTranscripts.into {
     transcripts4AlignSpalnTranscripts;
     transcripts4AlignGmapTranscripts;
+    transcripts4RunPasa;
 }
 
 
@@ -822,7 +1093,9 @@ process alignSpalnTranscripts {
     tag { name }
 
     input:
-    set val(read_group), file(fasta) from transcripts4AlignSpalnTranscripts
+    set file(fasta),
+        file(fasta_cln),
+        file(fasta_clean) from transcripts4AlignSpalnTranscripts
 
     set val(name),
         file(bkn),
@@ -842,7 +1115,7 @@ process alignSpalnTranscripts {
     spaln \
       -L \
       -M3 \
-      -O3 \
+      -O2 \
       -Q7 \
       -S3 \
       -T${species} \
@@ -851,7 +1124,7 @@ process alignSpalnTranscripts {
       -ya2 \
       -t ${task.cpus} \
       -d "${name}" \
-      "${fasta}" \
+      "${fasta_clean}" \
     > "${name}_transcripts.gff3"
     """
 }
@@ -869,7 +1142,10 @@ process alignGmapTranscripts {
     tag { name }
 
     input:
-    set val(read_group), file(fasta) from transcripts4AlignGmapTranscripts
+    set file(fasta),
+        file(fasta_cln),
+        file(fasta_clean) from transcripts4AlignGmapTranscripts
+
     set val(name), file("db") from gmapIndices
 
     output:
@@ -899,15 +1175,39 @@ process alignGmapTranscripts {
       --nthreads "${task.cpus}" \
       -D db \
       -d "${name}" \
-      ${transcripts} \
+      ${fasta_clean} \
     > ${name}_transcripts.gff3
     """
 }
+
+gmapAlignedTranscripts.set { gmapAlignedTranscripts4RunPASA }
 
 
 //
 // 2 align proteins to all genomes
 //
+
+
+process combineProteins {
+
+    label "python3"
+    label "small_task"
+
+    input:
+    file "*fasta" from proteins.collect()
+
+    output:
+    file "proteins.fasta" into combinedProteins
+    file "proteins.tsv" into combinedProteinsMap
+
+    script:
+    """
+    unique_rename_fasta.py \
+      --infiles *fasta \
+      --outfile "proteins.fasta" \
+      --map "proteins.tsv"
+    """
+}
 
 /*
  */
@@ -920,7 +1220,7 @@ process alignSpalnProteins {
     tag { name }
 
     input:
-    file proteins
+    file "proteins.fasta" from combinedProteins
     set val(name),
         file(bkn),
         file(ent),
@@ -932,18 +1232,19 @@ process alignSpalnProteins {
     output:
     set val(name), file("${name}_proteins.gff3")
 
+    script:
     """
     spaln \
       -L \
       -M3 \
-      -O3 \
+      -O2 \
       -Q7 \
       -TDothideo \
       -ya2 \
       -t ${task.cpus} \
       -a \
       -d "${name}" \
-      "${proteins}" \
+      "proteins.fasta" \
     > "${name}_proteins.gff3"
     """
 }
@@ -966,7 +1267,7 @@ process runBusco {
     params.busco_lineage
 
     input:
-    set val(name), file(fasta) from genomes4Busco
+    set val(name), file(fasta), file(faidx) from genomes4Busco
     file "lineage" from buscoLineage
     file "augustus_config" from augustusConfig
 
@@ -988,11 +1289,112 @@ process runBusco {
     """
 }
 
-
+//
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
+//
 
-// Combine transcript input for genemark`
 /*
+ * Add the stringtie assembled and gmap aligned transcripts to the input channel.
+ */
+if ( params.fastq || params.bams ) {
+    genomes4RunPASA
+        .join(stringtieMergedTranscripts4PASA, by: 0, remainder: true)
+        .map { n, f, i, ks, sg ->
+            [ n, f, i, ks, !is_null(sg) ? sg : file("WAS_NULL") ]
+        }
+        .join(gmapAlignedTranscripts4RunPASA, by: 0, remainder: true)
+        .set { processed4RunPASA }
+
+} else {
+    genomes4RunPASA
+        .map { n, f, i, ks -> [ n, gf, gi, ks, file("WAS_NULL") ]}
+        .join(gmapAlignedTranscripts4RunPASA, by: 0, remainder: true)
+        .set { processed4RunPASA }
+}
+
+
+/*
+ * Run pasa
+ */
+process runPASA {
+
+    label "pasa"
+    label "medium_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file(genome_fasta),
+        file(genome_faidx),
+        file(known_sites),
+        file(stringtie_gtf),
+        file(gmap_aligned) from processed4RunPASA
+
+    set file(transcripts_fasta),
+        file(transcripts_fasta_cln),
+        file(transcripts_fasta_clean) from transcripts4RunPasa
+
+    output:
+    set val(name),
+        file("${name}.gff3"),
+        file("${name}_cds.fna"),
+        file("${name}_protein.faa") into pasaPredictions
+
+    script:
+    def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
+    def use_stringtie = stringtie_gtf.name == "WAS_NULL" ? '' : "--trans_gtf ${stringtie_gtf} "
+    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L -annots ${known_sites} "
+
+    """
+    echo "DATABASE=\${PWD}/pasa.sqlite" > align_assembly.config
+    echo "validate_alignments_in_db.dbi:--MIN_PERCENT_ALIGNED=80" >> align_assembly.config
+    echo "validate_alignments_in_db.dbi:--MIN_AVG_PER_ID=90" >> align_assembly.config
+    echo "subcluster_builder.dbi:-m=50" >> align_assembly.config
+
+    Launch_PASA_pipeline.pl \
+      --config align_assembly.config \
+      --create \
+      --run \
+      --genome "${genome_fasta}" \
+      --transcripts "${transcripts_fasta_clean}" \
+      --IMPORT_CUSTOM_ALIGNMENTS_GFF3 "${gmap_aligned}" \
+      -T -u "${transcripts_fasta}" \
+      --MAX_INTRON_LENGTH 50000 \
+      --ALIGNERS blat \
+      --CPU "${task.cpus}" \
+      --transcribed_is_aligned_orient \
+      --TRANSDECODER \
+      ${use_stringent} \
+      ${use_stringtie} \
+      ${use_known}
+
+    pasa_asmbls_to_training_set.dbi \
+      --pasa_transcripts_fasta pasa.sqlite.assemblies.fasta \
+      --pasa_transcripts_gff3 pasa.sqlite.pasa_assemblies.gff3
+
+    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.genome.gff3 \${PWD}/${name}.gff3
+    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.cds \${PWD}/${name}_cds.fna
+    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.pep \${PWD}/${name}_protein.faa
+    """
+}
+
+
+// To find "complete" cdss for training augustus...
+// awk '\$0 ~ /^>.*type:complete/ {
+//   r = gensub(/^>[[:space:]]?([^[:space:]]+).*/, "\\1", "g", $0);
+//   print r;
+// }' ${name}_cds.fna > complete.orfs
+//
+// grep -F -f complete.orfs "${name}.gff3" \
+// | awk '$3 == "exon" || $3 == "CDS"' \
+// | 's/cds\.//; s/\.exon[[:digit:]]*//' \
+// | sort -s -n -k 1,1 -k 4 -k 9 \
+// > training_set_complete.gff3
+
+
+/*
+ */
 process runGenemark {
 
     label "genemark"
@@ -1004,24 +1406,33 @@ process runGenemark {
     params.genemark
 
     input:
-    genome
-    transcript_intron_coords (e.g. from star)
+    set val(name),
+        file(genome),
+        file(faidx),
+        file("*introns.gff3") from genomes4RunGenemark
+            .join(
+                spliceSites4RunGenemark
+                    .map {n, rg, introns -> [n, introns]}
+                    .groupTuple(by: 0),
+                by: 0
+            )
 
     output:
-    genemark.gtf
+    file "genemark.gtf"
 
     script:
     def use_fungus = params.notfungus ? '' : '--fungus '
 
     """
+    sort -k1,1V -k4,4n -k5,5rn -k3,3r *introns.gff3 > hints.gff3
+
     gmes_petap.pl \
+      --cores "${task.cpus}" \
       --soft_mask 100 \
-      --ET ${transcript_intron_coords} \
-      --evidence \
+      --ET "hints.gff3" \
       ${use_fungus}
     """
 }
-*/
 
 /*
 process runBraker {
@@ -1079,11 +1490,13 @@ process runCodingQuarry {
     tag "${name}"
 
     when:
-    params.fastq && !params.notfungus
+    !params.notfungus
 
     input:
-    set val(name), file("transcripts.gtf"),
-        file("genome.fasta") from stringtieMergedTranscripts4CodingQuarry
+    set val(name),
+        file("transcripts.gtf"),
+        file("genome.fasta"),
+        file("genomes.fasta.fai") from stringtieMergedTranscripts4CodingQuarry
             .combine(genomes4RunCodingQuarry, by: 0)
 
     output:
@@ -1125,7 +1538,7 @@ process getCodingQuarrySignalP {
     tag "${name}"
 
     when:
-    params.fastq && !params.notfungus && params.signalp
+    !params.notfungus && params.signalp
 
     input:
     set val(name), file("cq") from codingQuarryPredictions4SignalP
@@ -1160,11 +1573,15 @@ process runCodingQuarryPM {
     tag "${name}"
 
     when:
-    params.fastq && !params.notfungus && params.signalp
+    !params.notfungus && params.signalp
 
     input:
-    set val(name), file("transcripts.gtf"), file("genome.fasta"),
-        file("first"), file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
+    set val(name),
+        file("transcripts.gtf"),
+        file("genome.fasta"),
+        file("genome.fasta.fai"),
+        file("first"),
+        file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
             .combine(codingQuarryPredictionsSecreted, by: 0)

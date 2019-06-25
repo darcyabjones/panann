@@ -105,7 +105,7 @@ docker: docker/general docker/alignment docker/rnaseq docker/annotation
 # Singularity is distributed as a monolith
 singularity: singularity/panann.sif
 
-docker/general: docker/htslib docker/genometools
+docker/general: docker/htslib docker/genometools docker/python3 docker/posix
 docker/alignment: docker/minimap2 docker/spaln docker/gmap
 docker/rnaseq: docker/trinity docker/star docker/stringtie
 docker/annotation: docker/augustus docker/codingquarry docker/busco docker/pasa
@@ -123,7 +123,7 @@ clean:
 tidy:
 	# Just removes untagged images to free up space
 	#docker rmi -f $(shell docker images -f "dangling=true" -q) || true
-	docker image print -f
+	docker image prune -f
 
 # Generic rules
 singularity/%.sif: docker/%
@@ -143,6 +143,27 @@ docker/base: base.Dockerfile
 	  .
 	@mkdir -p "$(dir $@)"
 	@touch $@
+
+
+docker/python3: python3.Dockerfile
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/posix: posix.Dockerfile
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
 
 # RNAseq stuff
 
