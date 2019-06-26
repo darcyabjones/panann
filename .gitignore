@@ -8,5 +8,6 @@ busco
 containers/singularity
 containers/docker
 containers/sources
+containers/downloads
 .nextflow
 run

@@ -288,7 +288,7 @@ if ( params.bams ) {
     bams = Channel.empty()
 }
 
-// Split up the inputs.
+
 process getFaidx {
 
     label "samtools"
@@ -696,7 +696,6 @@ process sortBamsByQuery {
     set val(name),
         val(read_group),
         file("${name}_${read_group}.bam"),
-        file("${name}_${read_group}.bam.bai"),
         val(strand) into bamsSortedByQuery
 
     script:
@@ -707,10 +706,8 @@ process sortBamsByQuery {
         -@ "${task.cpus}" \
         -n \
         -l 9 \
-        -o "${name}_${read_group}.bam"
+        -o "${name}_${read_group}.bam" \
         "my.bam"
-
-    samtools index "${name}_${read_group}.bam"
     """
 }
 
@@ -725,7 +722,6 @@ process filterBam {
     set val(name),
         val(read_group),
         file(bam),
-        file(bai),
         val(strand) from bamsSortedByQuery
 
     output:
@@ -748,7 +744,7 @@ process filterBam {
 
 process tidyFilteredBams {
 
-    label "htslib"
+    label "samtools"
     label "small_task"
 
     tag "${name} - ${read_group}"
@@ -796,9 +792,9 @@ process tidyFilteredBams {
 
     samtools index "${name}_${read_group}_filtered.bam"
 
-    samtools -f 65 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${fst}.bam"
-    samtools -f 128 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${snd}.bam"
-    samtools -F 193 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_unpaired.bam"
+    samtools view -f 65 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${fst}.bam"
+    samtools view -f 128 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${snd}.bam"
+    samtools view -F 193 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_unpaired.bam"
     """
 }
 
@@ -807,7 +803,7 @@ tidiedFilteredBams.set { tidiedFilteredBams4ExtractSpliceSites }
 
 process extractSpliceSites {
 
-    label "augustus"
+    label "braker"
     label "small_task"
 
     tag "${name} - ${read_group}"
@@ -829,14 +825,21 @@ process extractSpliceSites {
 
     script:
     """
-    bam2hints --intronsonly --in="${bam}" --out="tmp.gff"
+    bam2hints \
+      --intronsonly \
+      --in="${bam}" \
+      --out="tmp.gff3"
+
+    # braker panics if the genome has descriptions
+    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' "${genome}" > tmp.fasta 
+
     filterIntronsFindStrand.pl \
-      "${genome}" \
-      tmp.gff \
+      tmp.fasta \
+      tmp.gff3 \
       --score \
       > "${name}_${read_group}_introns.gff3"
 
-    rm -f tmp.gff
+    rm -f tmp.fasta tmp.gff3
     """
 }
 
@@ -1397,7 +1400,7 @@ process runPASA {
  */
 process runGenemark {
 
-    label "genemark"
+    label "genemarkes"
     label "small_task"
 
     tag { name }
@@ -1430,7 +1433,8 @@ process runGenemark {
       --cores "${task.cpus}" \
       --soft_mask 100 \
       --ET "hints.gff3" \
-      ${use_fungus}
+      ${use_fungus} \
+      --sequence "${genome}"
     """
 }
 
