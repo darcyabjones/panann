@@ -1,3 +1,4 @@
 docker/*
 singularity/*
+rmlib/*
 Makefile

@@ -56,6 +56,12 @@ RUN  set -eu \
        --prefix="${RMBLAST_PREFIX}" \
   && make -j $(grep -c ^processor /proc/cpuinfo) \
   && make install \
+  && cd .. \
+  && rm -rf -- "c++" \
+  && rm ${RMBLAST_PREFIX}/bin/*_unit_test \
+  && rm ${RMBLAST_PREFIX}/bin/test_* \
+  && rm ${RMBLAST_PREFIX}/bin/lmdb* \
+  && rm ${RMBLAST_PREFIX}/bin/seqdb* \
   && add_runtime_dep \
        libblas3 \
        libbz2-1.0 \
@@ -78,13 +84,13 @@ ARG RMBLAST_VERSION="2.9.0+"
 ARG RMBLAST_PREFIX_ARG="/opt/rmblast/${RMBLAST_VERSION}"
 ENV RMBLAST_PREFIX="${RMBLAST_PREFIX_ARG}"
 
-COPY --from=builder "${RMBLAST_PREFIX}" "${RMBLAST_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/rmblast.txt
-
 ENV PATH="${RMBLAST_PREFIX}/bin:${PATH}"
 ENV CPATH="${RMBLAST_PREFIX}/include"
 ENV LIBRARY_PATH="${RMBLAST_PREFIX}/lib:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${RMBLAST_PREFIX}/lib:${LD_LIBRARY_PATH}"
+
+COPY --from=builder "${RMBLAST_PREFIX}" "${RMBLAST_PREFIX}"
+COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/rmblast.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \

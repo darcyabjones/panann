@@ -714,6 +714,7 @@ downloads/$(REPBASE_TAR):
 
 rmlib: downloads/Dfam.hmm.gz downloads/Dfam.embl.gz
 rmlib: downloads/$(RMASK_META_TAR) downloads/$(REPBASE_TAR)
+rmlib: docker/repeatmasker
 	docker run \
 	  --rm \
 	  -v "$(PWD)/downloads:/downloads:rw" \

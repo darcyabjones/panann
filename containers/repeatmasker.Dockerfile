@@ -53,7 +53,7 @@ RUN  set -eu \
   && rm *.c *.h *.o *.fa *.freq Makefile notebook README
 
 
-FROM debian:${DEBIAN_VERSION} as recon_builder
+FROM "${IMAGE}" as recon_builder
 
 ARG RECON_VERSION="1.08"
 ARG RECON_URL="http://www.repeatmasker.org/RepeatModeler/RECON-1.08.tar.gz"
@@ -92,18 +92,24 @@ ARG TRF_VERSION="409"
 ARG TRF_URL="http://tandem.bu.edu/trf/downloads/trf409.linux64"
 ARG TRF_PREFIX_ARG="/opt/trf/${TRF_VERSION}"
 ENV TRF_PREFIX="${TRF_PREFIX_ARG}"
+ENV PATH="${TRF_PREFIX}/bin:${PATH}"
 
 # Install blast and repeat modeller deps from other images.
 ARG RMBLAST_VERSION
 ARG RMBLAST_PREFIX_ARG="/opt/rmblast/${RMBLAST_VERSION}"
 ENV RMBLAST_PREFIX="${RMBLAST_PREFIX_ARG}"
 
+ENV PATH="${RMBLAST_PREFIX}/bin:${PATH}"
+ENV CPATH="${RMBLAST_PREFIX}/include"
+ENV LIBRARY_PATH="${RMBLAST_PREFIX}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${RMBLAST_PREFIX}/lib:${LD_LIBRARY_PATH}"
+
 COPY --from=rmblast_builder "${RMBLAST_PREFIX}" "${RMBLAST_PREFIX}"
 COPY --from=rmblast_builder "${APT_REQUIREMENTS_FILE}" /build/apt/rmblast.txt
 
 ARG NSEG_PREFIX_ARG="/opt/nseg"
 ENV NSEG_PREFIX="${NSEG_PREFIX_ARG}"
-ENV PATH="${PATH}:${NSEG_PREFIX}/bin"
+ENV PATH="${NSEG_PREFIX}/bin:${PATH}"
 
 COPY --from=nseg_builder "${NSEG_PREFIX}" "${NSEG_PREFIX}"
 COPY --from=nseg_builder "${APT_REQUIREMENTS_FILE}" /build/apt/nseg.txt
@@ -113,7 +119,7 @@ ARG REPEATSCOUT_VERSION="1.0.5"
 ARG REPEATSCOUT_PREFIX_ARG="/opt/repeatscout/${REPEATSCOUT_VERSION}"
 ENV REPEATSCOUT_PREFIX="${REPEATSCOUT_PREFIX_ARG}"
 
-ENV PATH="${PATH}:${REPEATSCOUT_PREFIX}/bin"
+ENV PATH="${REPEATSCOUT_PREFIX}/bin:${PATH}"
 
 COPY --from=repscout_builder "${REPEATSCOUT_PREFIX}" "${REPEATSCOUT_PREFIX}"
 COPY --from=repscout_builder "${APT_REQUIREMENTS_FILE}" /build/apt/repeatscout.txt
@@ -123,7 +129,7 @@ ARG RECON_VERSION="1.08"
 ARG RECON_PREFIX_ARG="/opt/recon/${RECON_VERSION}"
 ENV RECON_PREFIX="${RECON_PREFIX_ARG}"
 
-ENV PATH="${PATH}:${RECON_PREFIX}/bin:${RECON_PREFIX}/scripts"
+ENV PATH="${RECON_PREFIX}/bin:${RECON_PREFIX}/scripts:${PATH}"
 
 COPY --from=recon_builder "${RECON_PREFIX}" "${RECON_PREFIX}"
 COPY --from=recon_builder "${APT_REQUIREMENTS_FILE}" /build/apt/recon.txt
@@ -136,7 +142,7 @@ ARG RMASK_PREFIX_ARG="/opt/repeatmasker/${RMASK_VERSION}"
 ENV RMASK_PREFIX="${RMASK_PREFIX_ARG}"
 
 ARG RM_LIB_ARG="/data/rmlib"
-ENV RM_LIB="$(RM_LIB_ARG)"
+ENV RM_LIB="${RM_LIB_ARG}"
 
 
 ARG RMOD_VERSION="1.0.11"
@@ -173,19 +179,22 @@ RUN  set -eu \
   && wget "${RMASK_URL}" \
   && tar -zxf RepeatMasker*.tar.gz \
   && rm RepeatMasker*.tar.gz \
-  && mv RepeatMasker*/ "${RMASK_PREFIX}" \
+  && mkdir -p "${RMASK_PREFIX}" \
+  && mv RepeatMasker*/* "${RMASK_PREFIX}" \
+  && rm -rf -- RepeatMasker* \
   && wget "${RMOD_URL}" \
-  && tar zxf RepeatModeler-*.tar.gz \
+  && tar -zxf RepeatModeler-*.tar.gz \
   && rm RepeatModeler*.tar.gz \
-  && mv RepeatModeler*/ "${RMOD_PREFIX}"
-
+  && mkdir -p "${RMOD_PREFIX}" \
+  && mv RepeatModeler*/* "${RMOD_PREFIX}" \
+  && rm -rf -- RepeatModeler*
 
 # Configure repeatmasker scripts
-COPY prep_repeatmasker_lib.sh "${RMASK_PREFIX}"
+COPY scripts/prep_repeatmasker_lib.sh "${RMASK_PREFIX}"
 WORKDIR "${RMASK_PREFIX}"
 RUN  chmod a+x "${RMASK_PREFIX}/prep_repeatmasker_lib.sh" \
   && cp RepeatMaskerConfig.tmpl RepeatMaskerConfig.pm \
-  && sed -i "s~TRF_PRGM\s*=\s*\"\"~TRF_PRGM = \"${TRF_PREFIX}/trf\"~" RepeatMaskerConfig.pm \
+  && sed -i "s~TRF_PRGM\s*=\s*\"\"~TRF_PRGM = \"${TRF_PREFIX}/bin/trf\"~" RepeatMaskerConfig.pm \
   && sed -i 's/DEFAULT_SEARCH_ENGINE\s*=\s*"crossmatch"/DEFAULT_SEARCH_ENGINE = "ncbi"/' RepeatMaskerConfig.pm \
   && sed -i 's~HMMER_DIR\s*=\s*"/usr/local/hmmer"~HMMER_DIR = "/usr/bin"~' RepeatMaskerConfig.pm \
   && sed -i "s~RMBLAST_DIR\s*=\s*\"/usr/local/rmblast\"~RMBLAST_DIR = \"${RMBLAST_PREFIX}/bin\"~" RepeatMaskerConfig.pm \

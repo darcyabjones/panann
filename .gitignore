@@ -2,6 +2,9 @@
 .nextflow*
 *.log*
 
+# Created during pipeline
+test/*.fai
+
 work
 aligned
 busco
@@ -9,5 +12,6 @@ containers/singularity
 containers/docker
 containers/sources
 containers/downloads
+containers/rmlib
 .nextflow
 run
