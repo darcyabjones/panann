@@ -124,6 +124,7 @@ if ( params.known_sites ) {
         .unique()
         .into { knownSites; knownSites4CheckNoDups }
 
+    /*
     knownSites4CheckNoDups
         .groupTuple(by: 0)
         .filter { name, gffs -> gffs.length > 1 }
@@ -137,6 +138,7 @@ if ( params.known_sites ) {
             " file. E.G. using `genometools gff3`"
         exit 1
     }
+    */
 
 } else {
     knownSites = Channel.empty()
@@ -149,7 +151,7 @@ if ( params.transcripts ) {
         .set { transcripts }
 
 } else {
-    transcripts = false
+    transcripts = Channel.empty()
 }
 
 
@@ -159,7 +161,7 @@ if ( params.proteins ) {
         .set { proteins }
 
 } else {
-    proteins = false
+    proteins = Channel.empty()
 }
 
 
@@ -321,7 +323,7 @@ if ( params.known_sites ) {
                     "the basename of one of the genomes."
                 exit 1
             };
-            [n, f, i, !is_null(g) ? g : file('was_null')]
+            [n, f, i, !is_null(g) ? g : file('WAS_NULL')]
         }
         .set { genomesWithKnownSites }
 
@@ -600,6 +602,7 @@ process starAlignReads {
         val(strand) into alignedReads
 
     script:
+    // todo assert all strand is same?
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
@@ -625,7 +628,7 @@ process starAlignReads {
       --outFilterMismatchNoverLmax 0.2 \
       --outMultimapperOrder Random \
       --outSAMattributes All \
-      --outSAMstrandField intronMotif\
+      --outSAMstrandField intronMotif \
       --outSAMattrIHstart 0 \
       --outSAMmapqUnique 50 \
       --outFileNamePrefix "${name}_${read_group}." \
@@ -966,11 +969,11 @@ process trinityAssembleGuided {
             .groupTuple(by: [0, 1, 2])
 
     output:
-    set val(name), file("${name}.fasta") into guidedAssembledTranscripts
+    set val(name), val(read_group), file("${name}_${read_group}.fasta") into guidedAssembledTranscripts
 
     script:
     def use_jaccard = params.notfungus ? '' : "--jaccard_clip "
-    def strand_flag = strand.get(0) == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
+    def strand_flag = strand == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
 
     """
     # Convert each cram to a bam
@@ -1016,7 +1019,7 @@ process combineTranscripts {
     input:
     file "*fasta" from transcripts
         .mix(assembledTranscripts.map { rg, f -> f } )
-        .mix(guidedAssembledTranscripts.map { rg, f -> f })
+        .mix(guidedAssembledTranscripts.map { n, rg, f -> f } )
         .collect()
 
     output:
