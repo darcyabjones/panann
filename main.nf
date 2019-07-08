@@ -787,7 +787,7 @@ process extractSpliceSites {
       --out="tmp.gff3"
 
     # braker panics if the genome has descriptions
-    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' "${genome}" > tmp.fasta 
+    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' "${fasta}" > tmp.fasta 
 
     filterIntronsFindStrand.pl \
       tmp.fasta \
