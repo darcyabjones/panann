@@ -685,9 +685,9 @@ process filterCrams {
         val(read_group),
         file(fasta),
         file(faidx),
-        file("${name}_${read_group}_forward.bam"),
-        file("${name}_${read_group}_reverse.bam"),
-        file("${name}_${read_group}_unpaired.bam") into splitReadCrams
+        file("${name}_${read_group}_forward.cram"),
+        file("${name}_${read_group}_reverse.cram"),
+        file("${name}_${read_group}_unpaired.cram") into splitReadCrams
 
     script:
     if (strand == "fr") {
