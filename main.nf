@@ -778,7 +778,7 @@ process extractSpliceSites {
         -b \
         -T "${fasta}" \
         -@ "${task.cpus}" \
-        -o "tmp.bam"
+        -o "tmp.bam" \
         "${cram}"
 
     bam2hints \
