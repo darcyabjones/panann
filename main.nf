@@ -124,6 +124,7 @@ if ( params.known_sites ) {
         .unique()
         .into { knownSites; knownSites4CheckNoDups }
 
+    /*
     knownSites4CheckNoDups
         .groupTuple(by: 0)
         .filter { name, gffs -> gffs.length > 1 }
@@ -137,6 +138,7 @@ if ( params.known_sites ) {
             " file. E.G. using `genometools gff3`"
         exit 1
     }
+    */
 
 } else {
     knownSites = Channel.empty()
@@ -149,7 +151,7 @@ if ( params.transcripts ) {
         .set { transcripts }
 
 } else {
-    transcripts = false
+    transcripts = Channel.empty()
 }
 
 
@@ -159,7 +161,7 @@ if ( params.proteins ) {
         .set { proteins }
 
 } else {
-    proteins = false
+    proteins = Channel.empty()
 }
 
 
@@ -334,7 +336,7 @@ if ( params.known_sites ) {
                     "the basename of one of the genomes."
                 exit 1
             };
-            [n, f, i, !is_null(g) ? g : file('was_null')]
+            [n, f, i, !is_null(g) ? g : file('WAS_NULL')]
         }
         .set { genomesWithKnownSites }
 
@@ -572,17 +574,16 @@ process starAlignReads {
 
     input:
     set val(name),
-        file("index"),
         val(read_group),
+        file("index"),
         file(r1s),
         file(r2s),
-        val(strand) from starIndices4StarAlignReads
+        val(strand),
+        file("*SJ.out.tab") from starIndices4StarAlignReads
             .combine(fastq4StarAlignReads)
+            .map { n, index, rg, r1, r2, st -> [n, rg, index, r1, r2, st] }
+            .combine(starNovelSpliceSites, by: [0, 1])
             .groupTuple(by: [0, 1, 2])
-
-    file "*SJ.out.tab" from starNovelSpliceSites
-        .map { n, rg, f -> f }
-        .collect()
 
     output:
     set val(name),
@@ -591,6 +592,7 @@ process starAlignReads {
         val(strand) into alignedReads
 
     script:
+    // todo assert all strand is same?
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
@@ -616,7 +618,7 @@ process starAlignReads {
       --outFilterMismatchNoverLmax 0.2 \
       --outMultimapperOrder Random \
       --outSAMattributes All \
-      --outSAMstrandField intronMotif\
+      --outSAMstrandField intronMotif \
       --outSAMattrIHstart 0 \
       --outSAMmapqUnique 50 \
       --outFileNamePrefix "${name}_${read_group}." \
@@ -634,7 +636,7 @@ process starAlignReads {
 process tidyBams {
 
     label "samtools"
-    label "small_task"
+    label "medium_task"
     publishDir "${params.outdir}/aligned_reads"
 
     tag "${name} - ${read_group}"
@@ -659,7 +661,7 @@ process tidyBams {
     script:
     """
     samtools view \
-        -uT "${faidx}" \
+        -ut "${faidx}" \
         "my.bam" \
     | samtools sort \
         -O BAM \
@@ -681,7 +683,7 @@ tidiedBams.into {
 process sortBamsByQuery {
 
     label "samtools"
-    label "small_task"
+    label "medium_task"
 
     tag "${name} - ${read_group}"
 
@@ -745,7 +747,7 @@ process filterBam {
 process tidyFilteredBams {
 
     label "samtools"
-    label "small_task"
+    label "medium_task"
 
     tag "${name} - ${read_group}"
 
@@ -782,7 +784,7 @@ process tidyFilteredBams {
 
     """
     samtools view \
-        -uT "${faidx}" \
+        -ut "${faidx}" \
         "my.bam" \
     | samtools sort \
         -O BAM \
@@ -991,18 +993,19 @@ process trinityAssembleGuided {
 
     input:
     set val(name),
+        val(read_group),
         file("*bam"),
         val(strand) from fastq4TrinityAssembleGuided
             .join(bams4TrinityAssembleGuided, by: [0, 1])
-            .map { n, rg, b, i, st -> [n, b, st] }
-            .groupTuple(by: 0)
+            .map { n, rg, b, i, st -> [n, rg, b, st] }
+            .groupTuple(by: [0, 1])
 
     output:
-    set val(name), file("${name}.fasta") into guidedAssembledTranscripts
+    set val(name), val(read_group), file("${name}_${read_group}.fasta") into guidedAssembledTranscripts
 
     script:
     def use_jaccard = params.notfungus ? '' : "--jaccard_clip "
-    def strand_flag = strand.get(0) == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
+    def strand_flag = strand == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
 
     """
     samtools merge -r "merged.bam" *bam
@@ -1017,7 +1020,7 @@ process trinityAssembleGuided {
       --genome_guided_max_intron 15000 \
       --genome_guided_bam "merged.bam"
 
-    mv trinity_assembly/Trinity-GG.fasta "${name}.fasta"
+    mv trinity_assembly/Trinity-GG.fasta "${name}_${read_group}.fasta"
     rm -rf -- merged.bam merged.bam.bai trinity_assembly
     """
 }
@@ -1038,7 +1041,7 @@ process combineTranscripts {
     input:
     file "*fasta" from transcripts
         .mix(assembledTranscripts.map { rg, f -> f } )
-        .mix(guidedAssembledTranscripts.map { rg, f -> f })
+        .mix(guidedAssembledTranscripts.map { n, rg, f -> f } )
         .collect()
 
     output:
