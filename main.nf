@@ -82,7 +82,7 @@ params.augustus_config = false
 
 // RNAseq params
 params.fastq = false
-params.bams = false
+params.crams = false
 params.fr = false
 params.cufflinks_gtf = false
 
@@ -106,7 +106,7 @@ if ( params.genomes ) {
     Channel
         .fromPath(params.genomes, checkIfExists: true, type: "file")
         .map { g -> [g.baseName, g] }
-        .into { genomes; genomes4CheckBams }
+        .set { genomes }
 } else {
     log.error "Please provide some genomes to predict genes for with `--genomes`."
     exit 1
@@ -244,48 +244,34 @@ if ( params.fastq ) {
 }
 
 
-if ( params.bams ) {
+if ( params.crams ) {
     Channel
-        .fromPath(params.bams, checkIfExists: true)
+        .fromPath(params.cram, checkIfExists: true)
         .splitCsv(by: 1, sep: '\t', header: true)
-        .filter { !is_null(it.bam) }
+        .filter { !is_null(it.cram) }
         .map { it ->
             if ( is_null(it.read_group) ) {
-                log.error "The bam file ${it.bam.name} doesn't have a " \
+                log.error "The cram file ${it.cram.name} doesn't have a " \
                     "read_group set."
                 exit 1
             };
             if ( is_null(is.name) ) {
-                log.error "The bam file ${is.bam.name} with read_group " \
+                log.error "The cram file ${is.cram.name} with read_group " \
                     "${it.read_group}, doesn't have a genome name set."
                 exit 1
             };
             [
                 it.name,
                 it.read_group,
-                file(it.bam, checkIfExists: true),
+                file(it.cram, checkIfExists: true),
                 !is_null(it.stranded) ? it.stranded : stranded
             ]
         }
         .unique()
-        .into { bams; bams4Check }
+        .set { crams }
 
-    bams4Check
-        .combine(genomes4CheckBams, by: 1, remainder: true)
-        .filter { n, r, b, s, g -> is_null(g) }
-        .map { n, r, b, s, g -> b }
-        .collect()
-        .set { bams_no_genome }
-
-    if ( bams_no_genome.length > 0 ) {
-        log.error "The provided bams ${bams_no_genome} could not be mapped " +
-            "assigned to a genome based on the name column."
-        log.error "Please check that the name in the table matches "+
-            "the basename of one of the genomes."
-        exit 1
-    }
 } else {
-    bams = Channel.empty()
+    crams = Channel.empty()
 }
 
 
@@ -313,6 +299,7 @@ genomesWithFaidx.into {
     genomes4KnownSites;
     genomes4SpalnIndex;
     genomes4GmapIndex;
+    genomes4UserCrams;
     genomes4TidyBams;
     genomes4TidyFilteredBams;
     genomes4ExtractSpliceSites;
@@ -350,6 +337,22 @@ genomesWithKnownSites.into {
     genomes4MergeStringtie;
     genomes4RunPASA;
 }
+
+
+
+crams
+    .combine(genomes4UserCrams, by: 0)
+    .map { n, rg, c, st, fa, fi ->
+        if (is_null(fa)) {
+            log.error "The provided cram ${c.name} could not be assigned to a" +
+                " genome based on the name column."
+            log.error "Please check that the name in the table matches "+
+                "the basename of one of the genomes."
+            exit 1
+        };
+        [n, rg, fa, fi, c, st]
+    }
+    .set { userCrams }
 
 
 fastq
@@ -468,7 +471,7 @@ process getStarIndex {
         file(gff) from genomes4StarIndex
 
     output:
-    set val(name), file("index") into starIndices
+    set val(name), file("index"), file(fasta), file(faidx) into starIndices
 
     script:
     // If no gff was in known_sites, use it, otherwise dont
@@ -518,12 +521,14 @@ process starFindNovelSpliceSites {
     input:
     set val(name),
         file("index"),
+        file(fasta),
+        file(faidx),
         val(read_group),
         file(r1s),
         file(r2s),
         val(strand) from starIndices4StarFindNovelSpliceSites
             .combine(fastq4StarFindNovelSpliceSites)
-            .groupTuple(by: [0, 1, 2])
+            .groupTuple(by: [0, 1, 2, 3, 4])
 
     output:
     set val(name),
@@ -564,6 +569,7 @@ process starAlignReads {
 
     label "star"
     label "medium_task"
+    publishDir "${params.outdir}/aligned_reads"
 
     tag "${name} - ${read_group}"
 
@@ -572,22 +578,25 @@ process starAlignReads {
 
     input:
     set val(name),
-        file("index"),
         val(read_group),
+        file("index"),
+        file(fasta),
+        file(faidx),
         file(r1s),
         file(r2s),
-        val(strand) from starIndices4StarAlignReads
+        val(strand),
+        file("*SJ.out.tab") from starIndices4StarAlignReads
             .combine(fastq4StarAlignReads)
-            .groupTuple(by: [0, 1, 2])
-
-    file "*SJ.out.tab" from starNovelSpliceSites
-        .map { n, rg, f -> f }
-        .collect()
+            .map { n, i, fa, fi, rg, r1, r2, st -> [n, rg, i, fa, fi, r1, r2, st]}
+            .combine(starNovelSpliceSites, by: [0, 1])
+            .groupTuple(by: [0, 1, 2, 3, 4])
 
     output:
     set val(name),
         val(read_group),
-        file("${name}_${read_group}.bam"),
+        file(fasta),
+        file(faidx),
+        file("${name}_${read_group}.cram"),
         val(strand) into alignedReads
 
     script:
@@ -622,96 +631,34 @@ process starAlignReads {
       --outFileNamePrefix "${name}_${read_group}." \
       --readFilesIn "${r1_joined}" "${r2_joined}"
 
-    mv "${name}_${read_group}.Aligned.out.bam" "${name}_${read_group}.bam"
-    """
-}
-
-
-/*
- * Sort bams and add bam index.
- * NOTE: merging in user provided bams here!
- */
-process tidyBams {
-
-    label "samtools"
-    label "small_task"
-    publishDir "${params.outdir}/aligned_reads"
-
-    tag "${name} - ${read_group}"
-
-    input:
-    set val(name),
-        val(read_group),
-        file("my.bam"),
-        val(strand),
-        file(genome),
-        file(faidx) from alignedReads
-            .mix(bams)
-            .combine(genomes4TidyBams, by: 0)
-
-    output:
-    set val(name),
-        val(read_group),
-        file("${name}_${read_group}.bam"),
-        file("${name}_${read_group}.bam.bai"),
-        val(strand) into tidiedBams
-
-    script:
-    """
+    mkdir tmp
     samtools view \
-        -uT "${faidx}" \
-        "my.bam" \
+        -u \
+        -C \
+        -T "${fasta}" \
+        "${name}_${read_group}.Aligned.out.bam" \
     | samtools sort \
-        -O BAM \
+        -O cram \
         -@ "${task.cpus}" \
+        -T tmp \
         -l 9 \
-        -o "${name}_${read_group}.bam"
+        -o "${name}_${read_group}.cram"
 
-    samtools index "${name}_${read_group}.bam"
+    rm -rf -- tmp
+    rm -f *.bam
     """
 }
 
-tidiedBams.into {
-    bams4AssembleStringtie;
-    bams4TrinityAssembleGuided;
-    bams4SortBamsByQuery;
-}
+alignedReads
+    .mix(userCrams)
+    .into {
+        crams4AssembleStringtie;
+        crams4TrinityAssembleGuided;
+        crams4FilterCrams;
+    }
 
 
-process sortBamsByQuery {
-
-    label "samtools"
-    label "small_task"
-
-    tag "${name} - ${read_group}"
-
-    input:
-    set val(name),
-        val(read_group),
-        file("my.bam"),
-        file("my.bam.bai"),
-        val(strand) from bams4SortBamsByQuery
-
-    output:
-    set val(name),
-        val(read_group),
-        file("${name}_${read_group}.bam"),
-        val(strand) into bamsSortedByQuery
-
-    script:
-    """
-    # The -n is the important bit here
-    samtools sort \
-        -O BAM \
-        -@ "${task.cpus}" \
-        -n \
-        -l 9 \
-        -o "${name}_${read_group}.bam" \
-        "my.bam"
-    """
-}
-
-process filterBam {
+process filterCrams {
 
     label "augustus"
     label "medium_task"
@@ -721,55 +668,26 @@ process filterBam {
     input:
     set val(name),
         val(read_group),
-        file(bam),
-        val(strand) from bamsSortedByQuery
+        file(fasta),
+        file(faidx),
+        file(cram),
+        val(strand) from crams4FilterCrams
 
     output:
     set val(name),
         val(read_group),
-        file("${bam.baseName}_filtered.bam"),
-        val(strand) into filteredBams
-
-    script:
-    """
-    filterBam \
-      --uniq \
-      --paired \
-      --pairwiseAlignment \
-      --in "${bam}" \
-      --out "${bam.baseName}_filtered.bam"
-    """
-}
-
-
-process tidyFilteredBams {
-
-    label "samtools"
-    label "small_task"
-
-    tag "${name} - ${read_group}"
-
-    input:
-    set val(name),
-        val(read_group),
-        file("my.bam"),
-        val(strand),
-        file(genome),
-        file(faidx) from filteredBams
-            .combine(genomes4TidyFilteredBams, by: 0)
-
-    output:
-    set val(name),
-        val(read_group),
-        file("${name}_${read_group}_filtered.bam"),
-        file("${name}_${read_group}_filtered.bam.bai"),
-        val(strand) into tidiedFilteredBams
+        file(fasta),
+        file(faidx),
+        file("${cram.baseName}_filtered.cram"),
+        val(strand) into filteredCrams
 
     set val(name),
         val(read_group),
+        file(fasta),
+        file(faidx),
         file("${name}_${read_group}_forward.bam"),
         file("${name}_${read_group}_reverse.bam"),
-        file("${name}_${read_group}_unpaired.bam") into splitReadBams
+        file("${name}_${read_group}_unpaired.bam") into splitReadCrams
 
     script:
     if (strand == "fr") {
@@ -781,24 +699,53 @@ process tidyFilteredBams {
     }
 
     """
+    mkdir tmp
+
+    # Convert cram to bam and sort by read name.
+    # The -n is the important bit here
     samtools view \
-        -uT "${faidx}" \
-        "my.bam" \
+        -u \
+        -b \
+        -T "${fasta}" \
+        "${cram}" \
     | samtools sort \
         -O BAM \
         -@ "${task.cpus}" \
+        -T tmp \
+        -n \
         -l 9 \
-        -o "${name}_${read_group}_filtered.bam"
+        -o "my.bam"
 
-    samtools index "${name}_${read_group}_filtered.bam"
+    filterBam \
+      --uniq \
+      --paired \
+      --pairwiseAlignment \
+      --in "my.bam" \
+      --out "my_filtered.bam"
 
-    samtools view -f 65 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${fst}.bam"
-    samtools view -f 128 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_${snd}.bam"
-    samtools view -F 193 "${name}_${read_group}_filtered.bam" > "${name}_${read_group}_unpaired.bam"
+    # Convert bam to cram and sort by position.
+    samtools view \
+        -u \
+        -C \
+        -T "${fasta}" \
+        "my_filtered.bam" \
+    | samtools sort \
+        -O cram \
+        -@ "${task.cpus}" \
+        -T tmp \
+        -l 9 \
+        -o "${name}_${read_group}_filtered.cram"
+
+    samtools view -f 65 "${name}_${read_group}_filtered.cram" > "${name}_${read_group}_${fst}.cram"
+    samtools view -f 128 "${name}_${read_group}_filtered.cram" > "${name}_${read_group}_${snd}.cram"
+    samtools view -F 193 "${name}_${read_group}_filtered.cram" > "${name}_${read_group}_unpaired.cram"
+
+    rm -rf -- tmp
+    rm -f my.bam my_filtered.bam
     """
 }
 
-tidiedFilteredBams.set { tidiedFilteredBams4ExtractSpliceSites }
+filteredCrams.set { filteredCrams4ExtractSpliceSites }
 
 
 process extractSpliceSites {
@@ -811,12 +758,10 @@ process extractSpliceSites {
     input:
     set val(name),
         val(read_group),
-        file(bam),
-        file(bai),
-        val(strand),
-        file(genome),
-        file(faidx) from tidiedFilteredBams4ExtractSpliceSites
-            .combine(genomes4ExtractSpliceSites, by: 0)
+        file(fasta),
+        file(faidx),
+        file(cram),
+        val(strand) from filteredCrams4ExtractSpliceSites
 
     output:
     set val(name),
@@ -825,9 +770,17 @@ process extractSpliceSites {
 
     script:
     """
+    # Convert cram to bam.
+    samtools view \
+        -b \
+        -T "${fasta}" \
+        -@ "${task.cpus}" \
+        -o "tmp.bam"
+        "${cram}"
+
     bam2hints \
       --intronsonly \
-      --in="${bam}" \
+      --in="tmp.bam" \
       --out="tmp.gff3"
 
     # braker panics if the genome has descriptions
@@ -839,7 +792,7 @@ process extractSpliceSites {
       --score \
       > "${name}_${read_group}_introns.gff3"
 
-    rm -f tmp.fasta tmp.gff3
+    rm -f tmp.fasta tmp.gff3 tmp.bam
     """
 }
 
@@ -859,13 +812,16 @@ process assembleStringtie {
     input:
     set val(name),
         val(read_group),
-        file(bam),
-        file(bai),
-        val(strand),
         file(fasta),
-        file(fai),
-        file(gff) from bams4AssembleStringtie
-            .combine(genomes4AssembleStringtie, by: 0)
+        file(faidx),
+        file(cram),
+        val(strand),
+        file(gff) from crams4AssembleStringtie
+            .join(
+                genomes4AssembleStringtie.map { n, f, i, g -> [n, g] },
+                by: 0,
+                remainder: false
+            )
 
     output:
     set val(name),
@@ -877,13 +833,23 @@ process assembleStringtie {
     def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
 
     """
+    # Convert cram to bam.
+    samtools view \
+        -b \
+        -T "${fasta}" \
+        -@ "${task.cpus}" \
+        -o "tmp.bam" \
+        "${cram}"
+
     stringtie \
       -p "${task.cpus}" \
       ${strand_flag} \
       ${known} \
       -o "${name}_${read_group}.gtf" \
       -m 200 \
-      "${bam}"
+      "tmp.bam"
+
+    rm -f tmp.bam
     """
 }
 
@@ -991,11 +957,13 @@ process trinityAssembleGuided {
 
     input:
     set val(name),
-        file("*bam"),
+        file(fasta),
+        file(faidx),
+        file("*cram"),
         val(strand) from fastq4TrinityAssembleGuided
-            .join(bams4TrinityAssembleGuided, by: [0, 1])
-            .map { n, rg, b, i, st -> [n, b, st] }
-            .groupTuple(by: 0)
+            .join(crams4TrinityAssembleGuided, by: [0, 1])
+            .map { n, rg, fa, fi, c, st -> [n, fa, fi, c, st] }
+            .groupTuple(by: [0, 1, 2])
 
     output:
     set val(name), file("${name}.fasta") into guidedAssembledTranscripts
@@ -1005,6 +973,16 @@ process trinityAssembleGuided {
     def strand_flag = strand.get(0) == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
 
     """
+    # Convert each cram to a bam
+    for c in *cram; do
+        samtools view \
+            -b \
+            -T "${fasta}" \
+            -@ "${task.cpus}" \
+            -o "\${c%cram}bam"
+            "\${c}"
+    done
+
     samtools merge -r "merged.bam" *bam
     samtools index "merged.bam"
 
@@ -1018,7 +996,7 @@ process trinityAssembleGuided {
       --genome_guided_bam "merged.bam"
 
     mv trinity_assembly/Trinity-GG.fasta "${name}.fasta"
-    rm -rf -- merged.bam merged.bam.bai trinity_assembly
+    rm -rf -- *bam merged.bam.bai trinity_assembly
     """
 }
 
@@ -1299,7 +1277,7 @@ process runBusco {
 /*
  * Add the stringtie assembled and gmap aligned transcripts to the input channel.
  */
-if ( params.fastq || params.bams ) {
+if ( params.fastq || params.crams ) {
     genomes4RunPASA
         .join(stringtieMergedTranscripts4PASA, by: 0, remainder: true)
         .map { n, f, i, ks, sg ->

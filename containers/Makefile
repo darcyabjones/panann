@@ -281,24 +281,34 @@ docker/trinity: trinity.Dockerfile docker/base
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-docker/star: star.Dockerfile docker/base
+docker/star: star.Dockerfile docker/base docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg STAR_VERSION="$(STAR_VERSION)" \
 	  --build-arg STAR_URL="$(STAR_URL)" \
 	  --build-arg STAR_PREFIX_ARG="$(STAR_PREFIX_ARG)" \
+	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-docker/stringtie: stringtie.Dockerfile docker/base
+docker/stringtie: stringtie.Dockerfile docker/base docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg STRINGTIE_VERSION="$(STRINGTIE_VERSION)" \
 	  --build-arg STRINGTIE_URL="$(STRINGTIE_URL)" \
 	  --build-arg STRINGTIE_PREFIX_ARG="$(STRINGTIE_PREFIX_ARG)" \
+	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
+	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
@@ -408,9 +418,10 @@ docker/fasta: fasta.Dockerfile docker/base
 
 # Annotation tools
 
-docker/augustus: augustus.Dockerfile docker/base
+docker/augustus: augustus.Dockerfile docker/base docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
 	  --build-arg AUGUSTUS_REPO="$(AUGUSTUS_REPO)" \
 	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
@@ -418,6 +429,8 @@ docker/augustus: augustus.Dockerfile docker/base
 	  --build-arg HTSLIB_REPO="$(HTSLIB_REPO)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
 	  --build-arg SAMTOOLS_REPO="$(SAMTOOLS_REPO)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
