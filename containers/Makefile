@@ -69,6 +69,10 @@ FASTA_VERSION=36.3.8g
 FASTA_URL=http://faculty.virginia.edu/wrpearson/fasta/fasta36/fasta-36.3.8g.tar.gz
 FASTA_PREFIX_ARG=$(INSTALL_BASE)/fasta/$(FASTA_VERSION)
 
+MMSEQS_TAG=7-4e23d
+MMSEQS_REPO=https://github.com/soedinglab/MMseqs2.git
+MMSEQS_PREFIX_ARG=$(INSTALL_BASE)/mmseqs/$(MMSEQS_TAG)
+
 
 GENOMETOOLS_VERSION=1.5.10
 GENOMETOOLS_URL=http://genometools.org/pub/genometools-$(GENOMETOOLS_VERSION).tar.gz
@@ -94,6 +98,10 @@ PASA_PREFIX_ARG=$(INSTALL_BASE)/pasa/$(PASA_TAG)
 BRAKER_COMMIT=e117150b8ad66ecf7cd5828c7f7fe476a4a8c191
 BRAKER_REPO=https://github.com/Gaius-Augustus/BRAKER.git
 BRAKER_PREFIX_ARG=$(INSTALL_BASE)/braker/$(BRAKER_COMMIT)
+
+GEMOMA_VERSION=1.6.1
+GEMOMA_URL=http://www.jstacs.de/downloads/GeMoMa-1.6.1.zip
+GEMOMA_PREFIX_ARG=$(INSTALL_BASE)/gemoma/$(GEMOMA_VERSION)
 
 
 GENEMARKES_VERSION=v.4.38
@@ -415,6 +423,18 @@ docker/fasta: fasta.Dockerfile docker/base
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
+docker/mmseqs: mmseqs.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg MMSEQS_TAG="$(MMSEQS_TAG)" \
+	  --build-arg MMSEQS_REPO="$(MMSEQS_REPO)" \
+	  --build-arg MMSEQS_PREFIX_ARG="$(MMSEQS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
 
 # Annotation tools
 
@@ -497,6 +517,27 @@ docker/braker: braker.Dockerfile docker/base docker/augustus docker/htslib docke
 	  .
 	@mkdir -p "$(dir $@)"
 	@touch $@
+
+docker/gemoma: gemoma.Dockerfile docker/base docker/mmseqs docker/htslib
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg MMSEQS_IMAGE="$(call make_image_name,mmseqs)" \
+	  --build-arg MMSEQS_TAG="$(MMSEQS_TAG)" \
+	  --build-arg MMSEQS_PREFIX_ARG="$(MMSEQS_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
+	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
+	  --build-arg GEMOMA_VERSION="$(GEMOMA_VERSION)" \
+	  --build-arg GEMOMA_URL="$(GEMOMA_URL)" \
+	  --build-arg GEMOMA_PREFIX_ARG="$(GEMOMA_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
 
 docker/busco: busco.Dockerfile docker/base docker/augustus
 	docker build \
