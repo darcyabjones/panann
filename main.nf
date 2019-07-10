@@ -248,16 +248,17 @@ if ( params.fastq ) {
 
 if ( params.crams ) {
     Channel
-        .fromPath(params.cram, checkIfExists: true)
+        .fromPath(params.crams, checkIfExists: true)
         .splitCsv(by: 1, sep: '\t', header: true)
         .filter { !is_null(it.cram) }
+	.view()
         .map { it ->
             if ( is_null(it.read_group) ) {
                 log.error "The cram file ${it.cram.name} doesn't have a " \
                     "read_group set."
                 exit 1
             };
-            if ( is_null(is.name) ) {
+            if ( is_null(it.name) ) {
                 log.error "The cram file ${is.cram.name} with read_group " \
                     "${it.read_group}, doesn't have a genome name set."
                 exit 1
@@ -270,6 +271,7 @@ if ( params.crams ) {
             ]
         }
         .unique()
+        .view()
         .set { crams }
 
 } else {
@@ -354,6 +356,7 @@ crams
         };
         [n, rg, fa, fi, c, st]
     }
+    .view()
     .set { userCrams }
 
 
@@ -395,7 +398,6 @@ process getUnivec {
     wget -O univec.fasta ftp://ftp.ncbi.nlm.nih.gov/pub/UniVec/UniVec_Core
     """
 }
-
 
 process getSpalnIndex {
 
@@ -657,13 +659,13 @@ alignedReads
     .into {
         crams4AssembleStringtie;
         crams4TrinityAssembleGuided;
-        crams4FilterCrams;
+        crams4ExtractAugustusSpliceSites;
     }
 
 
-process filterCrams {
+process extractAugustusRnaseqHints {
 
-    label "augustus"
+    label "braker"
     label "medium_task"
 
     tag "${name} - ${read_group}"
@@ -674,23 +676,13 @@ process filterCrams {
         file(fasta),
         file(faidx),
         file(cram),
-        val(strand) from crams4FilterCrams
+        val(strand) from crams4ExtractAugustusSpliceSites
 
     output:
     set val(name),
         val(read_group),
-        file(fasta),
-        file(faidx),
-        file("${cram.baseName}_filtered.cram"),
-        val(strand) into filteredCrams
-
-    set val(name),
-        val(read_group),
-        file(fasta),
-        file(faidx),
-        file("${name}_${read_group}_forward.cram"),
-        file("${name}_${read_group}_reverse.cram"),
-        file("${name}_${read_group}_unpaired.cram") into splitReadCrams
+        file("${name}_${read_group}_intron_hints.gff3"),
+        file("${name}_${read_group}_exon_hints.gff3") into augustusRnaseqHints
 
     script:
     if (strand == "fr") {
@@ -718,6 +710,7 @@ process filterCrams {
         -n \
         -l 9 \
         -o "my.bam"
+    rm -rf -- tmp
 
     filterBam \
       --uniq \
@@ -726,64 +719,28 @@ process filterCrams {
       --in "my.bam" \
       --out "my_filtered.bam"
 
-    # Convert bam to cram and sort by position.
+    # Sort by position.
+    mkdir -p tmp
     samtools view \
         -u \
-        -C \
+        -b \
         -T "${fasta}" \
         "my_filtered.bam" \
     | samtools sort \
-        -O cram \
+        -O bam \
         -@ "${task.cpus}" \
         -T tmp \
         -l 9 \
-        -o "${name}_${read_group}_filtered.cram"
-
-    samtools view -f 65 "${name}_${read_group}_filtered.cram" > "${name}_${read_group}_${fst}.cram"
-    samtools view -f 128 "${name}_${read_group}_filtered.cram" > "${name}_${read_group}_${snd}.cram"
-    samtools view -F 193 "${name}_${read_group}_filtered.cram" > "${name}_${read_group}_unpaired.cram"
+        -o "sorted_filtered.bam"
 
     rm -rf -- tmp
     rm -f my.bam my_filtered.bam
-    """
-}
-
-filteredCrams.set { filteredCrams4ExtractSpliceSites }
-
-
-process extractSpliceSites {
-
-    label "braker"
-    label "small_task"
-
-    tag "${name} - ${read_group}"
-
-    input:
-    set val(name),
-        val(read_group),
-        file(fasta),
-        file(faidx),
-        file(cram),
-        val(strand) from filteredCrams4ExtractSpliceSites
-
-    output:
-    set val(name),
-        val(read_group),
-        file("${name}_${read_group}_introns.gff3") into spliceSites
-
-    script:
-    """
-    # Convert cram to bam.
-    samtools view \
-        -b \
-        -T "${fasta}" \
-        -@ "${task.cpus}" \
-        -o "tmp.bam" \
-        "${cram}"
-
+    
+    
+    # Extract introns
     bam2hints \
       --intronsonly \
-      --in="tmp.bam" \
+      --in="sorted_filtered.bam" \
       --out="tmp.gff3"
 
     # braker panics if the genome has descriptions
@@ -793,13 +750,59 @@ process extractSpliceSites {
       tmp.fasta \
       tmp.gff3 \
       --score \
-      > "${name}_${read_group}_introns.gff3"
+      > "${name}_${read_group}_intron_hints.gff3"
 
-    rm -f tmp.fasta tmp.gff3 tmp.bam
+    rm -f tmp.fasta tmp.gff3
+
+    # Extract exons
+    bam2hints () {
+          bam2wig "\${1}.bam" \
+        | wig2hints.pl \
+            --width=10 \
+            --margin=10 \
+            --minthresh=2 \
+            --minscore=4 \
+            --prune=0.1 \
+            --src=W \
+            --type=ep \
+            --UCSC="\${1}.track" \
+            --radius=4.5 \
+            --pri=4 \
+            --strand="\${2}" \
+        > "\${1}_hints.gff3"
+    }
+
+    if [ ${fst} == forward ]
+    then
+        samtools view -b -f 65 "sorted_filtered.bam" > "forward.bam"
+        bam2hints "forward" "+"
+        rm -f "forward.bam"
+
+        samtools view -b -f 128 "sorted_filtered.bam" > "reverse.bam"
+        bam2hints "reverse" "-"
+        rm -f "reverse.bam"
+    else
+        samtools view -b -f 128 "sorted_filtered.bam" > "forward.bam"
+        bam2hints "forward" "+"
+        rm -f "forward.bam"
+
+        samtools view -b -f 65 "sorted_filtered.bam" > "reverse.bam"
+        bam2hints "reverse" "-"
+        rm -f "reverse.bam"
+    fi
+
+    samtools view -b -F 193 "sorted_filtered.bam" > "unstranded.bam"
+    bam2hints "unstranded" "." 
+    rm -f "unstranded.bam"
+
+    cat forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3 \
+      > "${name}_${read_group}_exon_hints.gff3"
+
+    rm -f sorted_filtered.bam forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3
     """
 }
 
-spliceSites.set { spliceSites4RunGenemark }
+augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
 
 
 /*
@@ -1395,8 +1398,8 @@ process runGenemark {
         file(faidx),
         file("*introns.gff3") from genomes4RunGenemark
             .join(
-                spliceSites4RunGenemark
-                    .map {n, rg, introns -> [n, introns]}
+                augustusRnaseqHints4RunGenemark
+                    .map {n, rg, introns, exons -> [n, introns]}
                     .groupTuple(by: 0),
                 by: 0
             )
