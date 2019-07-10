@@ -722,6 +722,8 @@ process extractAugustusRnaseqHints {
       --in "my.bam" \
       --out "my_filtered.bam"
 
+    rm -f my.bam
+
     # Sort by position.
     mkdir -p tmp
     samtools view \
@@ -737,8 +739,7 @@ process extractAugustusRnaseqHints {
         -o "sorted_filtered.bam"
 
     rm -rf -- tmp
-    rm -f my.bam my_filtered.bam
-
+    rm -f my_filtered.bam
 
     # Extract introns
     bam2hints \
