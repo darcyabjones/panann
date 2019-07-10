@@ -11,7 +11,7 @@ ARG GEMOMA_VERSION
 ARG GEMOMA_URL="http://www.jstacs.de/downloads/GeMoMa-1.6.1.zip"
 ARG GEMOMA_PREFIX_ARG="/opt/gemoma/${GEMOMA_VERSION}"
 ENV GEMOMA_PREFIX="${GEMOMA_PREFIX_ARG}"
-ENV GEMOMA_JAR="${GEMOMA_PREFIX}/bin/GeMoMa.jar"
+ENV GEMOMA_JAR="${GEMOMA_PREFIX}/bin/GeMoMa-${GEMOMA_VERSION}.jar"
 
 WORKDIR /tmp
 RUN  set -eu \
@@ -28,7 +28,7 @@ RUN  set -eu \
   && rm *.zip \
   && mkdir -p "${GEMOMA_PREFIX}/bin" \
   && cp "GeMoMa-${GEMOMA_VERSION}.jar" "${GEMOMA_PREFIX}/bin" \
-  && ln -sf "${GEMOMA_PREFIX}/bin/GeMoMa-${GEMOMA_VERSION}.jar" "${GEMOMA_JAR}" \
+  && ln -sf "${GEMOMA_PREFIX}/bin/GeMoMa-${GEMOMA_VERSION}.jar" "${GEMOMA_PREFIX}/bin/GeMoMa.jar" \
   && add_runtime_dep default-jre-headless
 
 
@@ -37,7 +37,7 @@ FROM "${IMAGE}"
 ARG GEMOMA_VERSION
 ARG GEMOMA_PREFIX_ARG="/opt/gemoma/${GEMOMA_VERSION}"
 ENV GEMOMA_PREFIX="${GEMOMA_PREFIX_ARG}"
-ENV GEMOMA_JAR="${GEMOMA_PREFIX}/bin/GeMoMa.jar"
+ENV GEMOMA_JAR="${GEMOMA_PREFIX}/bin/GeMoMa-${GEMOMA_VERSION}.jar"
 
 ENV PATH="${GEMOMA_PREFIX}/bin:${PATH}"
 
@@ -71,11 +71,13 @@ COPY --from=htslib_builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
 COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
 COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
 
-
+# Calling the jar file is necessary to create the config xml file.
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
   && . /build/base.sh \
   && apt-get update \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
+  && java -jar "${GEMOMA_JAR}" CLI \
+  && rm -rf -- GeMoMa_temp \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"

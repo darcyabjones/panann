@@ -311,6 +311,7 @@ genomesWithFaidx.into {
     genomes4RunGenemark;
     genomes4RunCodingQuarry;
     genomes4RunCodingQuarryPM;
+    genomes4AlignGemomaCDSParts;
 }
 
 
@@ -340,6 +341,7 @@ genomesWithKnownSites.into {
     genomes4AssembleStringtie;
     genomes4MergeStringtie;
     genomes4RunPASA;
+    genomes4ExtractGemomaCDSParts;
 }
 
 
@@ -659,7 +661,8 @@ alignedReads
     .into {
         crams4AssembleStringtie;
         crams4TrinityAssembleGuided;
-        crams4ExtractAugustusSpliceSites;
+        crams4ExtractAugustusRnaseqHints;
+        crams4ExtractGemomaRnaseqHints;
     }
 
 
@@ -676,7 +679,7 @@ process extractAugustusRnaseqHints {
         file(fasta),
         file(faidx),
         file(cram),
-        val(strand) from crams4ExtractAugustusSpliceSites
+        val(strand) from crams4ExtractAugustusRnaseqHints
 
     output:
     set val(name),
@@ -735,8 +738,8 @@ process extractAugustusRnaseqHints {
 
     rm -rf -- tmp
     rm -f my.bam my_filtered.bam
-    
-    
+
+
     # Extract introns
     bam2hints \
       --intronsonly \
@@ -803,6 +806,97 @@ process extractAugustusRnaseqHints {
 }
 
 augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
+
+
+process extractGemomaRnaseqHints {
+
+    label "gemoma"
+    label "medium_task"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file(fasta),
+        file(faidx),
+        file(cram),
+        val(strand) from crams4ExtractGemomaRnaseqHints
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}_introns.gff"),
+        file("${name}_${read_group}_forward.bedgraph"),
+        file("${name}_${read_group}_reverse.bedgraph") into gemomaRnaseqHints
+
+    script:
+    // FR_UNSTRANDED also valid option
+    def strand_flag = strand == "fr" ? "s=FR_SECOND_STRAND " : "s=FR_FIRST_STRAND "
+
+    """
+    # Convert cram to bam.
+    samtools view \
+        -b \
+        -T "${fasta}" \
+        -@ "${task.cpus}" \
+        -o "tmp.bam" \
+        "${cram}"
+
+    java -jar \${GEMOMA_JAR} CLI ERE ${strand_flag} m=tmp.bam c=true
+
+    # m - mapped reads file (BAM/SAM files containing the mapped reads)	= null
+    # u - use secondary alignments (allows to filter flags in the SAM or BAM, default = true)	= true
+
+    mv introns.gff "${name}_${read_group}_introns.gff"
+    mv coverage_forward.bedgraph "${name}_${read_group}_forward.bedgraph"
+    mv coverage_reverse.bedgraph "${name}_${read_group}_reverse.bedgraph"
+
+    rm -f *.bam protocol_ERE.txt
+    rm -rf -- GeMoMa_temp
+    """
+}
+
+
+process combineGemomaRnaseqHints {
+
+    label "gemoma"
+    label "medium_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file("*i.gff"),
+        file("*f.bedgraph"),
+        file("*r.bedgraph") from gemomaRnaseqHints
+            .map { n, rg, i, f, r -> [n, i, f, r] }
+            .groupTuple(by: 0)
+
+    output:
+    set val(name),
+        file("introns.gff"),
+        file("forward_coverage.bedgraph"),
+        file("reverse_coverage.bedgraph") into combinedGemomaRnaseqHints
+
+    script:
+    """
+    java -cp \${GEMOMA_JAR} \
+      projects.gemoma.CombineIntronFiles \
+      introns.gff \
+      *i.gff
+
+    java -cp \${GEMOMA_JAR} \
+      projects.gemoma.CombineCoverageFiles \
+      forward_coverage.bedgraph \
+      *f.bedgraph
+
+    java -cp \${GEMOMA_JAR} \
+      projects.gemoma.CombineCoverageFiles \
+      reverse_coverage.bedgraph \
+      *r.bedgraph
+    """
+}
 
 
 /*
@@ -1603,6 +1697,97 @@ process runCodingQuarryPM {
     mv out "${name}"
     """
 }
+
+
+
+process extractGemomaCDSParts {
+
+    label "gemoma"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file(gff) from genomes4ExtractGemomaCDSParts
+            .filter { n, fa, fi, g -> g.name != 'WAS_NULL' }
+
+    output:
+    set val(name),
+        file("cds-parts.fasta"),
+        file("assignment.tabular"),
+        file("proteins.fasta") into gemomaCDSParts
+
+    script:
+    """
+    java -jar \${GEMOMA_JAR} CLI Extractor \
+      a=${gff} \
+      g=${fasta} \
+      p=true \
+      outdir=.
+
+    rm -rf -- GeMoMa_temp
+    rm protocol_Extractor.txt
+    """
+}
+
+gemomaCDSParts.set { gemomaCDSParts4AlignGemomaCDSParts }
+
+
+process runGemoma {
+
+    label "gemoma"
+    label "medium_task"
+
+    tag "${ref_name} - ${target_name}"
+
+    input:
+    set val(ref_name),
+        file("cds-parts.fasta"),
+        file("assignment.tabular"),
+        file("proteins.fasta"),
+        val(target_name),
+        file(fasta),
+        file(faidx),
+        file("introns.gff"),
+        file("forward.bedgraph"),
+        file("reverse.bedgraph") from gemomaCDSParts4AlignGemomaCDSParts
+            .combine(
+                genomes4AlignGemomaCDSParts
+                    .join(combinedGemomaRnaseqHints, by: 0)
+            )
+            .filter { rn, c, a, p, tn, fa, fi, i, fc, rc -> rn != tn }
+
+    output:
+
+    script:
+    // Todo add translation table option using gc option
+    def max_intron = 20000
+    """
+    java -jar \${GEMOMA_JAR} CLI GeMoMaPipeline \
+      t=${fasta} \
+      s=pre-extracted \
+      i=${ref_name} \
+      c=cds-parts.fasta \
+      a=assignment.tabular \
+      r=EXTRACTED \
+      introns=introns.gff \
+      coverage=STRANDED \
+      coverage_forward=forward.bedgraph \
+      coverage_reverse=reverse.bedgraph \
+      tblastn=false \
+      GeMoMa.r=3 \
+      GeMoMa.m=${max_intron} \
+      AnnotationFinalizer.u=YES \
+      AnnotationFinalizer.p=g \
+      p=false \
+      pc=false \
+      threads=${task.cpus}
+    """
+}
+
 
 // 6 If no genome alignment, run sibelliaz
 
