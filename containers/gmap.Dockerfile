@@ -23,10 +23,13 @@ RUN  set -eu \
   && tar -zxf gmap.tar.gz \
   && rm gmap.tar.gz \
   && cd gmap* \
-  && ./configure --prefix="${GMAP_PREFIX}" \
-  && make \
-  && make check \
-  && make install \
+  && for level in none sse2 ssse3 avx2 sse4.1 sse4.2; \
+     do \
+       ./configure --prefix="${GMAP_PREFIX}" --with-simd-level="${level}"; \
+       make; \
+       make check; \
+       make install; \
+     done \
   && add_runtime_dep libbz2-1.0 perl zlib1g
 
 

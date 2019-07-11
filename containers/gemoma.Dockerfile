@@ -1,9 +1,9 @@
 ARG IMAGE
-ARG MMSEQS_IMAGE
 ARG HTSLIB_IMAGE
+ARG MMSEQS_IMAGE
 
-FROM "${MMSEQS_IMAGE}" as mmseqs_builder
 FROM "${HTSLIB_IMAGE}" as htslib_builder
+FROM "${MMSEQS_IMAGE}" as mmseqs_builder
 
 FROM "${IMAGE}" as builder
 
@@ -45,16 +45,6 @@ COPY --from=builder "${GEMOMA_PREFIX}" "${GEMOMA_PREFIX}"
 COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/gemoma.txt
 
 
-ARG MMSEQS_TAG="7-4e23d"
-ARG MMSEQS_PREFIX_ARG="/opt/mmseqs/${MMSEQS_TAG}"
-ENV MMSEQS_PREFIX="${MMSEQS_PREFIX_ARG}"
-
-ENV PATH="${MMSEQS_PREFIX}/bin:${PATH}"
-
-COPY --from=mmseqs_builder "${MMSEQS_PREFIX}" "${MMSEQS_PREFIX}"
-COPY --from=mmseqs_builder "${APT_REQUIREMENTS_FILE}" /build/apt/mmseqs.txt
-
-
 ARG HTSLIB_TAG
 ARG SAMTOOLS_TAG
 ARG HTSLIB_PREFIX_ARG="/opt/htslib/${HTSLIB_TAG}"
@@ -70,6 +60,15 @@ ENV LD_LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LD_LIBRARY_PATH}"
 COPY --from=htslib_builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
 COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
 COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
+
+ARG MMSEQS_TAG="7-4e23d"
+ARG MMSEQS_PREFIX_ARG="/opt/mmseqs/${MMSEQS_TAG}"
+ENV MMSEQS_PREFIX="${MMSEQS_PREFIX_ARG}"
+
+ENV PATH="${MMSEQS_PREFIX}/bin:${PATH}"
+
+COPY --from=mmseqs_builder "${MMSEQS_PREFIX}" "${MMSEQS_PREFIX}"
+COPY --from=mmseqs_builder "${APT_REQUIREMENTS_FILE}" /build/apt/mmseqs.txt
 
 # Calling the jar file is necessary to create the config xml file.
 RUN  set -eu \

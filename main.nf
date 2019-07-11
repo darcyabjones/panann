@@ -251,7 +251,6 @@ if ( params.crams ) {
         .fromPath(params.crams, checkIfExists: true)
         .splitCsv(by: 1, sep: '\t', header: true)
         .filter { !is_null(it.cram) }
-	.view()
         .map { it ->
             if ( is_null(it.read_group) ) {
                 log.error "The cram file ${it.cram.name} doesn't have a " \
@@ -312,6 +311,7 @@ genomesWithFaidx.into {
     genomes4RunCodingQuarry;
     genomes4RunCodingQuarryPM;
     genomes4AlignGemomaCDSParts;
+    genomes4RunGemoma;
 }
 
 
@@ -748,7 +748,7 @@ process extractAugustusRnaseqHints {
       --out="tmp.gff3"
 
     # braker panics if the genome has descriptions
-    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' "${fasta}" > tmp.fasta 
+    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' "${fasta}" > tmp.fasta
 
     filterIntronsFindStrand.pl \
       tmp.fasta \
@@ -796,7 +796,7 @@ process extractAugustusRnaseqHints {
     fi
 
     samtools view -b -F 193 "sorted_filtered.bam" > "unstranded.bam"
-    bam2hints "unstranded" "." 
+    bam2hints "unstranded" "."
     rm -f "unstranded.bam"
 
     cat forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3 \
@@ -1737,12 +1737,12 @@ process extractGemomaCDSParts {
 gemomaCDSParts.set { gemomaCDSParts4AlignGemomaCDSParts }
 
 
-process runGemoma {
+process alignGemomaCDSParts {
 
-    label "gemoma"
+    label "mmseqs"
     label "medium_task"
 
-    tag "${ref_name} - ${target_name}"
+    tag "${target_name} - ${ref_name}"
 
     input:
     set val(ref_name),
@@ -1751,41 +1751,153 @@ process runGemoma {
         file("proteins.fasta"),
         val(target_name),
         file(fasta),
-        file(faidx),
-        file("introns.gff"),
-        file("forward.bedgraph"),
-        file("reverse.bedgraph") from gemomaCDSParts4AlignGemomaCDSParts
-            .combine(
-                genomes4AlignGemomaCDSParts
-                    .join(combinedGemomaRnaseqHints, by: 0)
-            )
-            .filter { rn, c, a, p, tn, fa, fi, i, fc, rc -> rn != tn }
+        file(faidx) from gemomaCDSParts4AlignGemomaCDSParts
+            .combine( genomes4AlignGemomaCDSParts )
+            .filter { rn, c, a, p, tn, fa, fi -> rn != tn }
 
     output:
+    set val(target_name),
+        val(ref_name),
+        file("matches.tsv"),
+        file("assignment.tabular"),
+        file("proteins.fasta") into alignedGemomaCDSParts
 
     script:
     // Todo add translation table option using gc option
-    def max_intron = 20000
     """
-    java -jar \${GEMOMA_JAR} CLI GeMoMaPipeline \
+    mkdir -p genome
+    # Stopping splitting by len is important. Otherwise scaffold names don't match.
+    mmseqs createdb "${fasta}" genome/db --dont-split-seq-by-len
+
+    mkdir -p proteins
+    mmseqs createdb cds-parts.fasta proteins/db
+
+    mkdir -p alignment tmp
+    mmseqs search \
+      proteins/db \
+      genome/db \
+      alignment/db \
+      tmp \
+      --threads ${task.cpus} \
+      -e 100 \
+      --min-length 10 \
+      --comp-bias-corr 1 \
+      --split-mode 1 \
+      --realign \
+      --max-seqs 100 \
+      --mask 0 \
+      --orf-start-mode 1 \
+      --translation-table 1 \
+      --use-all-table-starts
+
+    mmseqs convertalis \
+      proteins/db \
+      genome/db \
+      alignment/db \
+      matches.tsv \
+      --threads ${task.cpus} \
+      --format-mode 0 \
+      --format-output 'query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,empty,raw,nident,empty,empty,empty,qframe,tframe,qaln,taln,qlen,tlen'
+
+    rm -rf -- genome proteins alignment tmp
+    """
+}
+
+/*
+*/
+
+process runGemoma {
+
+    label "gemoma"
+    label "small_task"
+
+    tag "${target_name} - ${ref_name}"
+
+    input:
+    set val(target_name),
+        file(fasta),
+        file(faidx),
+        val(ref_name),
+        file("matches.tsv"),
+        file("assignment.tabular"),
+        file("proteins.fasta"),
+        file("introns.gff"),
+        file("forward_coverage.bedgraph"),
+        file("reverse_coverage.bedgraph") from genomes4RunGemoma
+            .join(alignedGemomaCDSParts, by: 0)
+            .combine(combinedGemomaRnaseqHints, by: 0)
+            .filter { tn, fa, fi, rn, bl, a, p, i, fc, rc -> tn != rn }
+
+    output:
+    set val(target_name),
+        val(ref_name),
+        file("${name}_${ref_name}_preds.gff3") into indivGemomaPredictions
+
+    script:
+    // option g= allows genetic code to be provided as some kind of file.
+    """
+    mkdir -p out
+    java -jar \${GEMOMA_JAR} CLI GeMoMa \
+      s=matches.tsv \
       t=${fasta} \
-      s=pre-extracted \
-      i=${ref_name} \
       c=cds-parts.fasta \
       a=assignment.tabular \
-      r=EXTRACTED \
-      introns=introns.gff \
+      q=proteins.fasta \
+      outdir=out \
+      sort=true \
+      i=introns.gff \
+      r=2 \
       coverage=STRANDED \
-      coverage_forward=forward.bedgraph \
-      coverage_reverse=reverse.bedgraph \
-      tblastn=false \
-      GeMoMa.r=3 \
-      GeMoMa.m=${max_intron} \
-      AnnotationFinalizer.u=YES \
-      AnnotationFinalizer.p=g \
-      p=false \
-      pc=false \
-      threads=${task.cpus}
+      coverage_forward=coverage_forward.bedgraph \
+      coverage_reverse=coverage_reverse.bedgraph
+
+    mv out/predicted_annotation.gff "${name}_${ref_name}_preds.gff3"
+
+    rm -rf -- GeMoMa_temp out
+    """
+}
+
+
+process combineGemomaPredictions {
+
+    label "gemoma"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        val(ref_names),
+        file(pred_gffs) from indivGemomaPredictions
+
+    output:
+    set val(name), file("${name}_gemoma.gff3") into gemomaPredictions
+
+    script:
+    def preds = [ref_names, pred_gffs]
+        .transpose()
+        .collect { rn, pred -> "p=${rn} g=${pred}" }.join(' ')
+
+    """
+    mkdir -p gaf
+    java -jar \${GEMOMA_JAR} CLI GAF \
+      ${preds} \
+      outdir=gaf
+
+    mkdir -p finalised
+    java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
+      g=${target} \
+      a=gaf/filtered_predictions.gff \
+      u=YES \
+      i=introns.gff \
+      c=STRANDED \
+      coverage_forward=coverage_forward.bedgraph \
+      coverage_reverse=coverage_reverse.bedgraph \
+      outdir=finalised \
+      rename=NO
+
+    mv finalised/final_annotation.gff "${name}_gemoma.gff3"
+    rm -rf -- gaf finalised GeMoMa_temp
     """
 }
 
