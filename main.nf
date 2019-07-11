@@ -663,6 +663,9 @@ alignedReads
     }
 
 
+/*
+ * Extract hints to be used for augustus and genemark.
+ */
 process extractAugustusRnaseqHints {
 
     label "braker"
@@ -1014,8 +1017,10 @@ process trinityAssembleGuided {
 //
 
 
-// Might be good to keep track of which assemblies come from trinity denovo?
-// Pasa can use this somehow.
+/*
+ * Might be good to keep track of which assemblies come from trinity denovo?
+ * Pasa can use this somehow.
+ */
 process combineTranscripts {
 
     label "python3"
@@ -1042,6 +1047,7 @@ process combineTranscripts {
 
 
 /*
+ * Filters transcripts against univec and extracts poly-A sequences.
  */
 process cleanTranscripts {
     label "pasa"
@@ -1072,6 +1078,7 @@ cleanedTranscripts.into {
 
 
 /*
+ * Align transcripts using Spaln
  */
 process alignSpalnTranscripts {
     label "spaln"
@@ -1120,6 +1127,7 @@ process alignSpalnTranscripts {
 
 
 /*
+ * Align transcripts using gmap
  */
 process alignGmapTranscripts {
 
@@ -1198,7 +1206,9 @@ process combineProteins {
     """
 }
 
+
 /*
+ * Align all proteins to genome with Spaln
  */
 process alignSpalnProteins {
     label "spaln"
@@ -1278,6 +1288,7 @@ process runBusco {
     """
 }
 
+
 //
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
 //
@@ -1332,8 +1343,9 @@ process runPASA {
 
     script:
     def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
-    def use_stringtie = stringtie_gtf.name == "WAS_NULL" ? '' : "--trans_gtf ${stringtie_gtf} "
-    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L -annots ${known_sites} "
+    // Don't use stringtie if it is fungus
+    def use_stringtie = (stringtie_gtf.name == "WAS_NULL" || !params.notfungus) ? '' : "--trans_gtf ${stringtie_gtf} "
+    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
     """
     echo "DATABASE=\${PWD}/pasa.sqlite" > align_assembly.config
@@ -1369,20 +1381,10 @@ process runPASA {
 }
 
 
-// To find "complete" cdss for training augustus...
-// awk '\$0 ~ /^>.*type:complete/ {
-//   r = gensub(/^>[[:space:]]?([^[:space:]]+).*/, "\\1", "g", $0);
-//   print r;
-// }' ${name}_cds.fna > complete.orfs
-//
-// grep -F -f complete.orfs "${name}.gff3" \
-// | awk '$3 == "exon" || $3 == "CDS"' \
-// | 's/cds\.//; s/\.exon[[:digit:]]*//' \
-// | sort -s -n -k 1,1 -k 4 -k 9 \
-// > training_set_complete.gff3
 
 
 /*
+ * Do denovo gene prediction with intron hints.
  */
 process runGenemark {
 
@@ -1424,53 +1426,10 @@ process runGenemark {
     """
 }
 
+
 /*
-process runBraker {
-
-    label "braker"
-    label "small_task"
-
-    tag { name }
-
-    input:
-    genome
-    genemark_gtf
-    spaln_protein_alignments
-    transcripts
-    bams
-
-    output:
-    braker.gff
-    species file
-
-    script:
-    def species = "Pnodorum"
-    def use_softmasking = params.softmasked ? "--softmasking --UTR=on"
-
-    // Input GFFs have specific format requirements.
-    // NB braker uses spaln output 0
-    // Might need to separate bams into different strands? using --stranded
-    // --crf might be good to try for the "reference" isolate?.
-    // --AUGUSTUS_CONFIG_PATH can set this instead of env-var.
-    """
-    braker.pl \
-      --cores="${task.cpus}" \
-      --species="${species}" \
-      --alternatives-from-evidence=true \
-      --genome="${genome}" \
-      --bam="one.bam,two.bam" \
-      --hints="one.gff,two.gff" \
-      --prot_aln=proteins.gff \
-      --prg=spaln \
-      --geneMarkGtf=file.gtf \
-      --skipGetAnnoFromFasta \
-      --verbosity=3 \
-      --splice_sites=GTAG,ATAC \
-    """
-}
-*/
-
-
+ * First pass of coding quarry
+ */
 process runCodingQuarry {
 
     label "codingquarry"
@@ -1515,9 +1474,7 @@ codingQuarryPredictions.into {
 
 
 /*
- * CQPM looks for genes that might not be predicted main set because of
- * genome compartmentalisation.
- * NOTE: This fails if there are fewer than 500 secreted genes to train from.
+ * Predict signal peptides from CodingQuarry first pass predicted proteins.
  */
 process getCodingQuarrySignalP {
 
@@ -1553,6 +1510,9 @@ process getCodingQuarrySignalP {
 
 
 /*
+ * CQPM looks for genes that might not be predicted main set because of
+ * genome compartmentalisation or differences with signal peptides.
+ * NOTE: This fails if there are fewer than 500 secreted genes to train from.
  */
 process runCodingQuarryPM {
 
@@ -1605,6 +1565,29 @@ process runCodingQuarryPM {
     mv out "${name}"
     """
 }
+
+
+/*
+ * Train Augustus models using PASA genes
+process trainAugustus {
+
+    script:
+    """
+    // To find "complete" cdss for training augustus...
+    awk '\$0 ~ /^>.*type:complete/ {
+      r = gensub(/^>[[:space:]]?([^[:space:]]+).*/, "\\1", "g", $0);
+      print r;
+    }' ${name}_cds.fna > complete.orfs
+    
+    grep -F -f complete.orfs "${name}.gff3" \
+    | awk '$3 == "exon" || $3 == "CDS"' \
+    | 's/cds\.//; s/\.exon[[:digit:]]*//' \
+    | sort -s -n -k 1,1 -k 4 -k 9 \
+    > training_set_complete.gff3
+    """
+}
+ */
+
 
 // 6 If no genome alignment, run sibelliaz
 
