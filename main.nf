@@ -270,7 +270,6 @@ if ( params.crams ) {
             ]
         }
         .unique()
-        .view()
         .set { crams }
 
 } else {
@@ -286,14 +285,17 @@ process getFaidx {
     tag { name }
 
     input:
-    set val(name), file(genome) from genomes
+    set val(name), file("orig.fa") from genomes
 
     output:
-    set val(name), file(genome), file("${genome}.fai") into genomesWithFaidx
+    set val(name), file("${name}.fasta"), file("${name}.fasta.fai") into genomesWithFaidx
 
     script:
     """
-    samtools faidx "${genome}"
+    # braker panics if the genome has descriptions
+    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' orig.fa > "${name}.fasta"
+
+    samtools faidx "${name}.fasta"
     """
 }
 
@@ -358,7 +360,6 @@ crams
         };
         [n, rg, fa, fi, c, st]
     }
-    .view()
     .set { userCrams }
 
 
@@ -575,7 +576,7 @@ process starAlignReads {
 
     label "star"
     label "medium_task"
-    publishDir "${params.outdir}/aligned_reads"
+    publishDir "${params.outdir}/aligned/${name}"
 
     tag "${name} - ${read_group}"
 
@@ -666,238 +667,6 @@ alignedReads
     }
 
 
-process extractAugustusRnaseqHints {
-
-    label "braker"
-    label "medium_task"
-
-    tag "${name} - ${read_group}"
-
-    input:
-    set val(name),
-        val(read_group),
-        file(fasta),
-        file(faidx),
-        file(cram),
-        val(strand) from crams4ExtractAugustusRnaseqHints
-
-    output:
-    set val(name),
-        val(read_group),
-        file("${name}_${read_group}_intron_hints.gff3"),
-        file("${name}_${read_group}_exon_hints.gff3") into augustusRnaseqHints
-
-    script:
-    if (strand == "fr") {
-        fst = "forward"
-        snd = "reverse"
-    } else {
-        fst = "reverse"
-        snd = "forward"
-    }
-
-    """
-    mkdir tmp
-
-    # Convert cram to bam and sort by read name.
-    # The -n is the important bit here
-    samtools view \
-        -u \
-        -b \
-        -T "${fasta}" \
-        "${cram}" \
-    | samtools sort \
-        -O BAM \
-        -@ "${task.cpus}" \
-        -T tmp \
-        -n \
-        -l 9 \
-        -o "my.bam"
-    rm -rf -- tmp
-
-    filterBam \
-      --uniq \
-      --paired \
-      --pairwiseAlignment \
-      --in "my.bam" \
-      --out "my_filtered.bam"
-
-    rm -f my.bam
-
-    # Sort by position.
-    mkdir -p tmp
-    samtools view \
-        -u \
-        -b \
-        -T "${fasta}" \
-        "my_filtered.bam" \
-    | samtools sort \
-        -O bam \
-        -@ "${task.cpus}" \
-        -T tmp \
-        -l 9 \
-        -o "sorted_filtered.bam"
-
-    rm -rf -- tmp
-    rm -f my_filtered.bam
-
-    # Extract introns
-    bam2hints \
-      --intronsonly \
-      --in="sorted_filtered.bam" \
-      --out="tmp.gff3"
-
-    # braker panics if the genome has descriptions
-    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' "${fasta}" > tmp.fasta
-
-    filterIntronsFindStrand.pl \
-      tmp.fasta \
-      tmp.gff3 \
-      --score \
-      > "${name}_${read_group}_intron_hints.gff3"
-
-    rm -f tmp.fasta tmp.gff3
-
-    # Extract exons
-    bam2hints () {
-          bam2wig "\${1}.bam" \
-        | wig2hints.pl \
-            --width=10 \
-            --margin=10 \
-            --minthresh=2 \
-            --minscore=4 \
-            --prune=0.1 \
-            --src=W \
-            --type=ep \
-            --UCSC="\${1}.track" \
-            --radius=4.5 \
-            --pri=4 \
-            --strand="\${2}" \
-        > "\${1}_hints.gff3"
-    }
-
-    if [ ${fst} == forward ]
-    then
-        samtools view -b -f 65 "sorted_filtered.bam" > "forward.bam"
-        bam2hints "forward" "+"
-        rm -f "forward.bam"
-
-        samtools view -b -f 128 "sorted_filtered.bam" > "reverse.bam"
-        bam2hints "reverse" "-"
-        rm -f "reverse.bam"
-    else
-        samtools view -b -f 128 "sorted_filtered.bam" > "forward.bam"
-        bam2hints "forward" "+"
-        rm -f "forward.bam"
-
-        samtools view -b -f 65 "sorted_filtered.bam" > "reverse.bam"
-        bam2hints "reverse" "-"
-        rm -f "reverse.bam"
-    fi
-
-    samtools view -b -F 193 "sorted_filtered.bam" > "unstranded.bam"
-    bam2hints "unstranded" "."
-    rm -f "unstranded.bam"
-
-    cat forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3 \
-      > "${name}_${read_group}_exon_hints.gff3"
-
-    rm -f sorted_filtered.bam forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3
-    """
-}
-
-augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
-
-
-process extractGemomaRnaseqHints {
-
-    label "gemoma"
-    label "medium_task"
-
-    tag "${name} - ${read_group}"
-
-    input:
-    set val(name),
-        val(read_group),
-        file(fasta),
-        file(faidx),
-        file(cram),
-        val(strand) from crams4ExtractGemomaRnaseqHints
-
-    output:
-    set val(name),
-        val(read_group),
-        file("${name}_${read_group}_introns.gff"),
-        file("${name}_${read_group}_forward.bedgraph"),
-        file("${name}_${read_group}_reverse.bedgraph") into gemomaRnaseqHints
-
-    script:
-    // FR_UNSTRANDED also valid option
-    def strand_flag = strand == "fr" ? "s=FR_SECOND_STRAND " : "s=FR_FIRST_STRAND "
-
-    """
-    # Convert cram to bam.
-    samtools view \
-        -b \
-        -T "${fasta}" \
-        -@ "${task.cpus}" \
-        -o "tmp.bam" \
-        "${cram}"
-
-    java -jar \${GEMOMA_JAR} CLI ERE ${strand_flag} m=tmp.bam c=true
-
-    # m - mapped reads file (BAM/SAM files containing the mapped reads)	= null
-    # u - use secondary alignments (allows to filter flags in the SAM or BAM, default = true)	= true
-
-    mv introns.gff "${name}_${read_group}_introns.gff"
-    mv coverage_forward.bedgraph "${name}_${read_group}_forward.bedgraph"
-    mv coverage_reverse.bedgraph "${name}_${read_group}_reverse.bedgraph"
-
-    rm -f *.bam protocol_ERE.txt
-    rm -rf -- GeMoMa_temp
-    """
-}
-
-
-process combineGemomaRnaseqHints {
-
-    label "gemoma"
-    label "medium_task"
-
-    tag "${name}"
-
-    input:
-    set val(name),
-        file("*i.gff"),
-        file("*f.bedgraph"),
-        file("*r.bedgraph") from gemomaRnaseqHints
-            .map { n, rg, i, f, r -> [n, i, f, r] }
-            .groupTuple(by: 0)
-
-    output:
-    set val(name),
-        file("introns.gff"),
-        file("forward_coverage.bedgraph"),
-        file("reverse_coverage.bedgraph") into combinedGemomaRnaseqHints
-
-    script:
-    """
-    java -cp \${GEMOMA_JAR} \
-      projects.gemoma.CombineIntronFiles \
-      introns.gff \
-      *i.gff
-
-    java -cp \${GEMOMA_JAR} \
-      projects.gemoma.CombineCoverageFiles \
-      forward_coverage.bedgraph \
-      *f.bedgraph
-
-    java -cp \${GEMOMA_JAR} \
-      projects.gemoma.CombineCoverageFiles \
-      reverse_coverage.bedgraph \
-      *r.bedgraph
-    """
-}
 
 
 /*
@@ -907,6 +676,7 @@ process assembleStringtie {
 
     label "stringtie"
     label "medium_task"
+    publishDir "${params.outdir}/aligned/${name}"
 
     tag "${name} - ${read_group}"
 
@@ -927,7 +697,7 @@ process assembleStringtie {
     output:
     set val(name),
         val(read_group),
-        file("${name}_${read_group}.gtf") into stringtieAssembledTranscripts
+        file("${name}_${read_group}_stringtie.gtf") into stringtieAssembledTranscripts
 
     script:
     def strand_flag = strand == "fr" ? "--fr" : "--rf"
@@ -946,8 +716,8 @@ process assembleStringtie {
       -p "${task.cpus}" \
       ${strand_flag} \
       ${known} \
-      -o "${name}_${read_group}.gtf" \
-      -m 200 \
+      -o "${name}_${read_group}_stringtie.gtf" \
+      -m 150 \
       "tmp.bam"
 
     rm -f tmp.bam
@@ -962,7 +732,7 @@ process mergeStringtie {
 
     label "stringtie"
     label "medium_task"
-    publishDir "${params.outdir}/stringtie"
+    publishDir "${params.outdir}/aligned/${name}"
 
     tag "${name}"
 
@@ -973,7 +743,7 @@ process mergeStringtie {
         .join( genomes4MergeStringtie.map {n, f, i, g -> [n, g]}, by: 0 )
 
     output:
-    set val(name), file("${name}.gtf") into stringtieMergedTranscripts
+    set val(name), file("${name}_stringtie.gtf") into stringtieMergedTranscripts
 
     script:
     def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
@@ -983,7 +753,7 @@ process mergeStringtie {
       -p "${task.cpus}" \
       ${known} \
       --merge \
-      -o "${name}.gtf" \
+      -o "${name}_stringtie.gtf" \
       *gtf
     """
 }
@@ -1002,7 +772,7 @@ process trinityAssemble {
 
     label "trinity"
     label "big_task"
-    publishDir "${params.outdir}/trinity"
+    publishDir "${params.outdir}/assembled"
 
     tag "${read_group}"
 
@@ -1017,7 +787,7 @@ process trinityAssemble {
             .groupTuple(by: 0)
 
     output:
-    set val(read_group), file("${read_group}.fasta") into assembledTranscripts
+    set val(read_group), file("${read_group}_trinity_denovo.fasta") into assembledTranscripts
 
     script:
     def r1_joined = r1s.join(',')
@@ -1036,7 +806,7 @@ process trinityAssemble {
       --left "${r1_joined}" \
       --right "${r2_joined}"
 
-    mv trinity_assembly/Trinity.fasta "${read_group}.fasta"
+    mv trinity_assembly/Trinity.fasta "${read_group}_trinity_denovo.fasta"
     rm -rf -- trinity_assembly
     """
 }
@@ -1044,12 +814,11 @@ process trinityAssemble {
 
 /*
  * Perform genome guided assembly with Trinity.
- */
 process trinityAssembleGuided {
 
     label "trinity"
     label "big_task"
-    publishDir "${params.outdir}/trinity"
+    publishDir "${params.outdir}/assembled"
 
     tag "${name}"
 
@@ -1067,7 +836,7 @@ process trinityAssembleGuided {
             .groupTuple(by: [0, 1, 2])
 
     output:
-    set val(name), val(read_group), file("${name}_${read_group}.fasta") into guidedAssembledTranscripts
+    set val(name), val(read_group), file("${name}_${read_group}_trinity_guided.fasta") into guidedAssembledTranscripts
 
     script:
     def use_jaccard = params.notfungus ? '' : "--jaccard_clip "
@@ -1096,10 +865,11 @@ process trinityAssembleGuided {
       --genome_guided_max_intron 15000 \
       --genome_guided_bam "merged.bam"
 
-    mv trinity_assembly/Trinity-GG.fasta "${name}.fasta"
+    mv trinity_assembly/Trinity-GG.fasta "${name}_trinity_guided.fasta"
     rm -rf -- *bam merged.bam.bai trinity_assembly
     """
 }
+ */
 
 
 //
@@ -1107,8 +877,10 @@ process trinityAssembleGuided {
 //
 
 
-// Might be good to keep track of which assemblies come from trinity denovo?
-// Pasa can use this somehow.
+/*
+ * Might be good to keep track of which assemblies come from trinity denovo?
+ * Pasa can use this somehow.
+ */
 process combineTranscripts {
 
     label "python3"
@@ -1117,7 +889,6 @@ process combineTranscripts {
     input:
     file "*fasta" from transcripts
         .mix(assembledTranscripts.map { rg, f -> f } )
-        .mix(guidedAssembledTranscripts.map { n, rg, f -> f } )
         .collect()
 
     output:
@@ -1135,6 +906,7 @@ process combineTranscripts {
 
 
 /*
+ * Filters transcripts against univec and extracts poly-A sequences.
  */
 process cleanTranscripts {
     label "pasa"
@@ -1165,30 +937,31 @@ cleanedTranscripts.into {
 
 
 /*
+ * Align transcripts using Spaln
  */
 process alignSpalnTranscripts {
     label "spaln"
     label "medium_task"
 
-    publishDir "${params.outdir}/aligned/spaln"
+    publishDir "${params.outdir}/aligned/${name}"
 
     tag { name }
 
     input:
     set file(fasta),
         file(fasta_cln),
-        file(fasta_clean) from transcripts4AlignSpalnTranscripts
-
-    set val(name),
+        file(fasta_clean),
+        val(name),
         file(bkn),
         file(ent),
         file(idx),
         file(bkp),
         file(grp),
-        file(seq) from spalnIndices4AlignSpalnTranscripts
+        file(seq) from transcripts4AlignSpalnTranscripts
+            .combine(spalnIndices4AlignSpalnTranscripts)
 
     output:
-    set val(name), file("${name}_transcripts.gff3") into spalnAlignedTranscripts
+    set val(name), file("${name}_spaln_transcripts.gff3") into spalnAlignedTranscripts
 
     script:
     def species = "Dothideo"
@@ -1207,31 +980,33 @@ process alignSpalnTranscripts {
       -t ${task.cpus} \
       -d "${name}" \
       "${fasta_clean}" \
-    > "${name}_transcripts.gff3"
+    > "${name}_spaln_transcripts.gff3"
     """
 }
 
 
 /*
+ * Align transcripts using gmap
  */
 process alignGmapTranscripts {
 
     label "gmap"
     label "medium_task"
 
-    publishDir "${params.outdir}/aligned/gmap"
+    publishDir "${params.outdir}/aligned/${name}"
 
     tag { name }
 
     input:
     set file(fasta),
         file(fasta_cln),
-        file(fasta_clean) from transcripts4AlignGmapTranscripts
-
-    set val(name), file("db") from gmapIndices
+        file(fasta_clean),
+        val(name),
+        file("db") from transcripts4AlignGmapTranscripts
+            .combine(gmapIndices)
 
     output:
-    set val(name), file("${name}_transcripts.gff3") into gmapAlignedTranscripts
+    set val(name), file("${name}_gmap_transcripts.gff3") into gmapAlignedTranscripts
 
     script:
     def min_intronlength = 6
@@ -1258,7 +1033,7 @@ process alignGmapTranscripts {
       -D db \
       -d "${name}" \
       ${fasta_clean} \
-    > ${name}_transcripts.gff3
+    > ${name}_gmap_transcripts.gff3
     """
 }
 
@@ -1291,43 +1066,48 @@ process combineProteins {
     """
 }
 
+
 /*
+ * Align all proteins to genome with Spaln
  */
 process alignSpalnProteins {
     label "spaln"
     label "medium_task"
 
-    publishDir "${params.outdir}/aligned/spaln"
+    publishDir "${params.outdir}/aligned/${name}"
 
     tag { name }
 
     input:
-    file "proteins.fasta" from combinedProteins
     set val(name),
         file(bkn),
         file(ent),
         file(idx),
         file(bkp),
         file(grp),
-        file(seq) from spalnIndices4AlignSpalnProteins
+        file(seq),
+        file("proteins.fasta") from spalnIndices4AlignSpalnProteins
+            .combine(combinedProteins)
 
     output:
-    set val(name), file("${name}_proteins.gff3")
+    set val(name), file("${name}_spaln_proteins.gff3")
 
     script:
+    def species = "Dothideo"
+
     """
     spaln \
       -L \
       -M3 \
       -O2 \
       -Q7 \
-      -TDothideo \
+      -T${species} \
       -ya2 \
       -t ${task.cpus} \
       -a \
       -d "${name}" \
       "proteins.fasta" \
-    > "${name}_proteins.gff3"
+    > "${name}_spaln_proteins.gff3"
     """
 }
 
@@ -1371,6 +1151,7 @@ process runBusco {
     """
 }
 
+
 //
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
 //
@@ -1402,6 +1183,7 @@ process runPASA {
 
     label "pasa"
     label "medium_task"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
@@ -1411,22 +1193,23 @@ process runPASA {
         file(genome_faidx),
         file(known_sites),
         file(stringtie_gtf),
-        file(gmap_aligned) from processed4RunPASA
-
-    set file(transcripts_fasta),
+        file(gmap_aligned),
+        file(transcripts_fasta),
         file(transcripts_fasta_cln),
-        file(transcripts_fasta_clean) from transcripts4RunPasa
+        file(transcripts_fasta_clean) from processed4RunPASA
+            .combine(transcripts4RunPasa)
 
     output:
     set val(name),
-        file("${name}.gff3"),
-        file("${name}_cds.fna"),
-        file("${name}_protein.faa") into pasaPredictions
+        file("${name}_pasa.gff3"),
+        file("${name}_pasa_cds.fna"),
+        file("${name}_pasa_protein.faa") into pasaPredictions
 
     script:
     def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
-    def use_stringtie = stringtie_gtf.name == "WAS_NULL" ? '' : "--trans_gtf ${stringtie_gtf} "
-    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L -annots ${known_sites} "
+    // Don't use stringtie if it is fungus
+    def use_stringtie = (stringtie_gtf.name == "WAS_NULL" || !params.notfungus) ? '' : "--trans_gtf ${stringtie_gtf} "
+    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
     """
     echo "DATABASE=\${PWD}/pasa.sqlite" > align_assembly.config
@@ -1455,32 +1238,135 @@ process runPASA {
       --pasa_transcripts_fasta pasa.sqlite.assemblies.fasta \
       --pasa_transcripts_gff3 pasa.sqlite.pasa_assemblies.gff3
 
-    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.genome.gff3 \${PWD}/${name}.gff3
-    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.cds \${PWD}/${name}_cds.fna
-    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.pep \${PWD}/${name}_protein.faa
+    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.genome.gff3 \${PWD}/${name}_pasa.gff3
+    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.cds \${PWD}/${name}_pasa_cds.fna
+    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.pep \${PWD}/${name}_pasa_protein.faa
     """
 }
 
 
-// To find "complete" cdss for training augustus...
-// awk '\$0 ~ /^>.*type:complete/ {
-//   r = gensub(/^>[[:space:]]?([^[:space:]]+).*/, "\\1", "g", $0);
-//   print r;
-// }' ${name}_cds.fna > complete.orfs
-//
-// grep -F -f complete.orfs "${name}.gff3" \
-// | awk '$3 == "exon" || $3 == "CDS"' \
-// | 's/cds\.//; s/\.exon[[:digit:]]*//' \
-// | sort -s -n -k 1,1 -k 4 -k 9 \
-// > training_set_complete.gff3
+/*
+ * Extract hints to be used for augustus and genemark.
+ */
+process extractAugustusRnaseqHints {
+
+    label "braker"
+    label "medium_task"
+    publishDir "${params.outdir}/hints/${name}"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file(fasta),
+        file(faidx),
+        file(cram),
+        val(strand) from crams4ExtractAugustusRnaseqHints
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}_intron_hints.gff3"),
+        file("${name}_${read_group}_exon_hints.gff3") into augustusRnaseqHints
+
+    script:
+    if (strand == "fr") {
+        fst = "forward"
+        snd = "reverse"
+    } else {
+        fst = "reverse"
+        snd = "forward"
+    }
+
+    """
+    # Convert cram to bam.
+    # `-F 3328`  excludes these flags
+    # not primary alignment (0x100)
+    # read is PCR or optical duplicate (0x400)
+    # supplementary alignment (0x800)
+    samtools view \
+        -b \
+        -T "${fasta}" \
+        -F 3328 \
+        -q 25 \
+        -@ "${task.cpus}" \
+        -o "tmp.bam" \
+        "${cram}"
+
+    # Extract introns
+    bam2hints \
+      --intronsonly \
+      --in="tmp.bam" \
+      --out="tmp.gff3"
+
+    filterIntronsFindStrand.pl \
+      "${fasta}" \
+      tmp.gff3 \
+      --score \
+      > "${name}_${read_group}_intron_hints.gff3"
+
+    rm -f tmp.gff3
+
+    # Extract exons
+    bam2hints () {
+          bam2wig "\${1}.bam" \
+        | wig2hints.pl \
+            --width=10 \
+            --margin=10 \
+            --minthresh=2 \
+            --minscore=4 \
+            --prune=0.1 \
+            --src=W \
+            --type=ep \
+            --UCSC="\${1}.track" \
+            --radius=4.5 \
+            --pri=4 \
+            --strand="\${2}" \
+        > "\${1}_hints.gff3"
+    }
+
+    if [ ${fst} == forward ]
+    then
+        samtools view -b -f 65 -@ "${task.cpus}" "tmp.bam" > "forward.bam"
+        bam2hints "forward" "+"
+        rm -f "forward.bam"
+
+        samtools view -b -f 128 -@ "${task.cpus}" "tmp.bam" > "reverse.bam"
+        bam2hints "reverse" "-"
+        rm -f "reverse.bam"
+    else
+        samtools view -b -f 128 -@ "${task.cpus}" "tmp.bam" > "forward.bam"
+        bam2hints "forward" "+"
+        rm -f "forward.bam"
+
+        samtools view -b -f 65 -@ "${task.cpus}" "tmp.bam" > "reverse.bam"
+        bam2hints "reverse" "-"
+        rm -f "reverse.bam"
+    fi
+
+    samtools view -b -F 193 -@ "${task.cpus}" "tmp.bam" > "unstranded.bam"
+    bam2hints "unstranded" "."
+    rm -f "unstranded.bam"
+
+    cat forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3 \
+      > "${name}_${read_group}_exon_hints.gff3"
+
+    rm -f tmp.bam forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3
+    """
+}
+
+augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
 
 
 /*
+ * Do denovo gene prediction with intron hints.
  */
 process runGenemark {
 
     label "genemarkes"
     label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
@@ -1517,58 +1403,15 @@ process runGenemark {
     """
 }
 
+
 /*
-process runBraker {
-
-    label "braker"
-    label "small_task"
-
-    tag { name }
-
-    input:
-    genome
-    genemark_gtf
-    spaln_protein_alignments
-    transcripts
-    bams
-
-    output:
-    braker.gff
-    species file
-
-    script:
-    def species = "Pnodorum"
-    def use_softmasking = params.softmasked ? "--softmasking --UTR=on"
-
-    // Input GFFs have specific format requirements.
-    // NB braker uses spaln output 0
-    // Might need to separate bams into different strands? using --stranded
-    // --crf might be good to try for the "reference" isolate?.
-    // --AUGUSTUS_CONFIG_PATH can set this instead of env-var.
-    """
-    braker.pl \
-      --cores="${task.cpus}" \
-      --species="${species}" \
-      --alternatives-from-evidence=true \
-      --genome="${genome}" \
-      --bam="one.bam,two.bam" \
-      --hints="one.gff,two.gff" \
-      --prot_aln=proteins.gff \
-      --prg=spaln \
-      --geneMarkGtf=file.gtf \
-      --skipGetAnnoFromFasta \
-      --verbosity=3 \
-      --splice_sites=GTAG,ATAC \
-    """
-}
-*/
-
-
+ * First pass of coding quarry
+ */
 process runCodingQuarry {
 
     label "codingquarry"
     label "medium_task"
-    publishDir "${params.outdir}/codingquarry"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
 
@@ -1583,7 +1426,13 @@ process runCodingQuarry {
             .combine(genomes4RunCodingQuarry, by: 0)
 
     output:
-    set val(name), file("${name}") into codingQuarryPredictions
+    set val(name),
+        file("${name}_codingquarry.gff3"),
+        file("${name}_codingquarry_cds.fna"),
+        file("${name}_codingquarry_proteins.faa"),
+        file("${name}_codingquarry_dubiousset.gff3"),
+        file("${name}_codingquarry_fusions.txt"),
+        file("${name}_codingquarry_overlapreport.txt") into codingQuarryPredictions
 
     script:
     """
@@ -1596,10 +1445,21 @@ process runCodingQuarry {
     | sed 's/*\$//g' > Predicted_Proteins.faa
 
     \${QUARRY_PATH}/scripts/gene_errors_Xs.py Predicted_Proteins.faa out/Predicted_Proteins.faa
+    rm Predicted_Proteins.faa
 
-    mv out "${name}"
+    mv out/DubiousSet.gff3 "${name}_codingquarry_dubiousset.gff3"
+    mv out/PredictedPass.gff3 "${name}_codingquarry.gff3"
+    mv out/Predicted_CDS.fa "${name}_codingquarry_cds.fna"
+    mv out/Predicted_Proteins.faa "${name}_codingquarry_proteins.faa"
+    mv out/fusions.txt "${name}_codingquarry_fusions.txt"
+    mv out/overlapReport.txt "${name}_codingquarry_overlapreport.txt"
+
+    rm -rf -- out
     """
 }
+
+
+
 
 codingQuarryPredictions.into {
     codingQuarryPredictions4SignalP;
@@ -1608,15 +1468,12 @@ codingQuarryPredictions.into {
 
 
 /*
- * CQPM looks for genes that might not be predicted main set because of
- * genome compartmentalisation.
- * NOTE: This fails if there are fewer than 500 secreted genes to train from.
+ * Predict signal peptides from CodingQuarry first pass predicted proteins.
  */
 process getCodingQuarrySignalP {
 
     label "signalp"
     label "medium_task"
-    publishDir "${params.outdir}/codingquarry"
 
     tag "${name}"
 
@@ -1624,7 +1481,8 @@ process getCodingQuarrySignalP {
     !params.notfungus && params.signalp
 
     input:
-    set val(name), file("cq") from codingQuarryPredictions4SignalP
+    set val(name), file("proteins.faa") from codingQuarryPredictions4SignalP
+        .map { n, g, c, p, d, f, o -> [n, p] }
 
     output:
     set val(name), file("${name}.signalp5") into codingQuarryPredictionsSecreted
@@ -1633,7 +1491,7 @@ process getCodingQuarrySignalP {
     """
     mkdir tmp
     signalp \
-      -fasta "cq/Predicted_Proteins.faa" \
+      -fasta "proteins.faa" \
       -prefix "${name}" \
       -org euk \
       -tmp tmp
@@ -1646,12 +1504,15 @@ process getCodingQuarrySignalP {
 
 
 /*
+ * CQPM looks for genes that might not be predicted main set because of
+ * genome compartmentalisation or differences with signal peptides.
+ * NOTE: This fails if there are fewer than 500 secreted genes to train from.
  */
 process runCodingQuarryPM {
 
     label "codingquarry"
     label "medium_task"
-    publishDir "${params.outdir}/codingquarry"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
 
@@ -1663,14 +1524,19 @@ process runCodingQuarryPM {
         file("transcripts.gtf"),
         file("genome.fasta"),
         file("genome.fasta.fai"),
-        file("first"),
+        file("${name}_codingquarry.gff3"),
+        file("${name}_codingquarry_cds.fna"),
+        file("${name}_codingquarry_proteins.faa"),
+        file("${name}_codingquarry_dubiousset.gff3"),
+        file("${name}_codingquarry_fusions.txt"),
+        file("${name}_codingquarry_overlapreport.txt"),
         file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
             .combine(codingQuarryPredictionsSecreted, by: 0)
 
     output:
-    set val(name), file("${name}") into codingQuarryPMPredictions
+    set val(name), file("cqpm") into codingQuarryPMPredictions
 
     script:
     """
@@ -1690,15 +1556,114 @@ process runCodingQuarryPM {
     CodingQuarry \
       -f genome.fasta \
       -t transcripts.gff3 \
-      -2 "first/PredictedPass.gff3" \
+      -2 "${name}_codingquarry.gff3" \
       -p "${task.cpus}" \
       -g secretome.txt \
       -h
 
-    mv out "${name}"
+    mv out cqpm
     """
 }
 
+
+/*
+ * Run the GeMoMa pipeline
+ */
+process extractGemomaRnaseqHints {
+
+    label "gemoma"
+    label "medium_task"
+
+    tag "${name} - ${read_group}"
+
+    input:
+    set val(name),
+        val(read_group),
+        file(fasta),
+        file(faidx),
+        file(cram),
+        val(strand) from crams4ExtractGemomaRnaseqHints
+
+    output:
+    set val(name),
+        val(read_group),
+        file("${name}_${read_group}_introns.gff"),
+        file("${name}_${read_group}_forward.bedgraph"),
+        file("${name}_${read_group}_reverse.bedgraph") into gemomaRnaseqHints
+
+    script:
+    // FR_UNSTRANDED also valid option
+    def strand_flag = strand == "fr" ? "s=FR_SECOND_STRAND " : "s=FR_FIRST_STRAND "
+
+    """
+    # Convert cram to bam.
+    # `-F 3328`  excludes these flags
+    # not primary alignment (0x100)
+    # read is PCR or optical duplicate (0x400)
+    # supplementary alignment (0x800)
+    samtools view \
+        -b \
+        -T "${fasta}" \
+        -F 3328 \
+        -q 25 \
+        -@ "${task.cpus}" \
+        -o "tmp.bam" \
+        "${cram}"
+
+    java -jar \${GEMOMA_JAR} CLI ERE ${strand_flag} m=tmp.bam c=true
+
+    # m - mapped reads file (BAM/SAM files containing the mapped reads)	= null
+    # u - use secondary alignments (allows to filter flags in the SAM or BAM, default = true)	= true
+
+    mv introns.gff "${name}_${read_group}_introns.gff"
+    mv coverage_forward.bedgraph "${name}_${read_group}_forward.bedgraph"
+    mv coverage_reverse.bedgraph "${name}_${read_group}_reverse.bedgraph"
+
+    rm -f *.bam protocol_ERE.txt
+    rm -rf -- GeMoMa_temp
+    """
+}
+
+
+process combineGemomaRnaseqHints {
+
+    label "gemoma"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file("*i.gff"),
+        file("*f.bedgraph"),
+        file("*r.bedgraph") from gemomaRnaseqHints
+            .map { n, rg, i, f, r -> [n, i, f, r] }
+            .groupTuple(by: 0)
+
+    output:
+    set val(name),
+        file("introns.gff"),
+        file("forward_coverage.bedgraph"),
+        file("reverse_coverage.bedgraph") into combinedGemomaRnaseqHints
+
+    script:
+    """
+    java -cp \${GEMOMA_JAR} \
+      projects.gemoma.CombineIntronFiles \
+      introns.gff \
+      *i.gff
+
+    java -cp \${GEMOMA_JAR} \
+      projects.gemoma.CombineCoverageFiles \
+      forward_coverage.bedgraph \
+      *f.bedgraph
+
+    java -cp \${GEMOMA_JAR} \
+      projects.gemoma.CombineCoverageFiles \
+      reverse_coverage.bedgraph \
+      *r.bedgraph
+    """
+}
 
 
 process extractGemomaCDSParts {
@@ -1803,9 +1768,9 @@ process alignGemomaCDSParts {
     """
 }
 
+
 /*
 */
-
 process runGemoma {
 
     label "gemoma"
@@ -1862,6 +1827,7 @@ process combineGemomaPredictions {
 
     label "gemoma"
     label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
@@ -1900,6 +1866,28 @@ process combineGemomaPredictions {
     rm -rf -- gaf finalised GeMoMa_temp
     """
 }
+
+/*
+ * Train Augustus models using PASA genes
+process trainAugustus {
+
+    script:
+    """
+    // To find "complete" cdss for training augustus...
+    awk '\$0 ~ /^>.*type:complete/ {
+      r = gensub(/^>[[:space:]]?([^[:space:]]+).*<REMOVETHIS>/, "\\1", "g", $0);
+      print r;
+    }' ${name}_cds.fna > complete.orfs
+    
+    grep -F -f complete.orfs "${name}.gff3" \
+    | awk '$3 == "exon" || $3 == "CDS"' \
+    | 's/cds\.//; s/\.exon[[:digit:]]*<REMOVETHIS>//' \
+    | sort -s -n -k 1,1 -k 4 -k 9 \
+    > training_set_complete.gff3
+    """
+}
+ */
+
 
 
 // 6 If no genome alignment, run sibelliaz
