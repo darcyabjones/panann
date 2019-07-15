@@ -1485,18 +1485,12 @@ process getCodingQuarrySignalP {
         .map { n, g, c, p, d, f, o -> [n, p] }
 
     output:
-    set val(name), file("${name}.signalp5") into codingQuarryPredictionsSecreted
+    set val(name), file("${name}.signalp") into codingQuarryPredictionsSecreted
 
     script:
     """
     mkdir tmp
-    signalp \
-      -fasta "proteins.faa" \
-      -prefix "${name}" \
-      -org euk \
-      -tmp tmp
-
-    mv "${name}_summary.signalp5" "${name}.signalp5"
+    signalp proteins.faa > "${name}.signalp"
 
     rm -rf -- tmp
     """
@@ -1530,7 +1524,7 @@ process runCodingQuarryPM {
         file("${name}_codingquarry_dubiousset.gff3"),
         file("${name}_codingquarry_fusions.txt"),
         file("${name}_codingquarry_overlapreport.txt"),
-        file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
+        file("secretome.signalp") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
             .combine(codingQuarryPredictionsSecreted, by: 0)
@@ -1551,7 +1545,7 @@ process runCodingQuarryPM {
         match(\$0, /CS pos: ([0-9]*)-/, x)
         print \$1, x[1]
       }
-    ' < "secretome.signalp5" > secretome.txt
+    ' < "secretome.signalp" > secretome.txt
 
     CodingQuarry \
       -f genome.fasta \
