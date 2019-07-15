@@ -1,6 +1,7 @@
 PWD=$(shell pwd)
-DEBIAN_VERSION=stretch-20190228-slim
+DEBIAN_VERSION=buster-20190708-slim
 TAG=panann-v0.0.1
+MAINTAINER="Darcy Jones <darcy.ab.jones@gmail.com>"
 DOCKER_USER=darcyabjones
 BASE_IMAGE=$(DOCKER_USER)/base:$(TAG)
 
@@ -11,6 +12,7 @@ $(DOCKER_USER)/$(notdir $1):$(TAG)
 endef
 
 # SOFTWARE_VERSIONs
+
 JELLYFISH_VERSION=2.2.10
 JELLYFISH_URL=https://github.com/gmarcais/Jellyfish/releases/download/v$(JELLYFISH_VERSION)/jellyfish-$(JELLYFISH_VERSION).tar.gz
 JELLYFISH_PREFIX_ARG=$(INSTALL_BASE)/jellyfish/$(JELLYFISH_VERSION)
@@ -110,52 +112,9 @@ GENEMARKES_KEY=sources/gm_key_64
 GENEMARKES_PREFIX_ARG=$(INSTALL_BASE)/genemarkes/$(GENEMARKES_VERSION)
 
 
-SIGNALP_VERSION=5.0
-SIGNALP_PREFIX_ARG=$(INSTALL_BASE)/signalp/$(SIGNALP_VERSION)
-SIGNALP_TAR=sources/signalp-5.0.Linux.tar.gz
-
-# Repeat masking stuff
-RED_TAG=v2.0
-RED_REPO=https://github.com/TulsaBioinformaticsToolsmith/Red.git
-RED_PREFIX_ARG=$(INSTALL_BASE)/red/$(RED_TAG)
-
-RMBLAST_VERSION=2.9.0+
-RMBLAST_URL=ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.9.0/ncbi-blast-2.9.0+-src.tar.gz
-RMBLAST_PATCH_URL=http://www.repeatmasker.org/isb-2.9.0+-rmblast.patch.gz
-RMBLAST_PREFIX_ARG=$(INSTALL_BASE)/rmblast/$(RMBLAST_VERSION)
-
-TRF_VERSION=409
-TRF_URL=http://tandem.bu.edu/trf/downloads/trf409.linux64
-TRF_PREFIX_ARG=$(INSTALL_BASE)/trf/$(TRF_VERSION)
-
-NSEG_URL=ftp://ftp.ncbi.nih.gov/pub/seg/nseg/
-NSEG_PREFIX_ARG=$(INSTALL_BASE)/nseg
-
-REPEATSCOUT_VERSION=1.0.5
-REPEATSCOUT_URL=http://www.repeatmasker.org/RepeatScout-1.0.5.tar.gz
-REPEATSCOUT_PREFIX_ARG=$(INSTALL_BASE)/repeatscout/$(REPEATSCOUT_VERSION)
-
-RECON_VERSION=1.08
-RECON_URL=http://www.repeatmasker.org/RepeatModeler/RECON-1.08.tar.gz
-RECON_PREFIX_ARG=$(INSTALL_BASE)/recon/$(RECON_VERSION)
-
-RMASK_VERSION=4-0-9
-RMASK_URL=http://www.repeatmasker.org/RepeatMasker-open-$(RMASK_VERSION).tar.gz
-RMASK_PREFIX_ARG=$(INSTALL_BASE)/repeatmasker/$(RMASK_VERSION)
-
-RMOD_VERSION=1.0.11
-RMOD_URL=http://www.repeatmasker.org/RepeatModeler/RepeatModeler-open-$(RMOD_VERSION).tar.gz
-RMOD_PREFIX_ARG=$(INSTALL_BASE)/repeatmodeller/$(RMOD_VERSION)
-
-RM_LIB_ARG=/data/rmlib
-
-RMASK_META_TAR=RepeatMaskerMetaData-20181026.tar.gz
-RMASK_META_URL=http://www.repeatmasker.org/libraries/RepeatMaskerMetaData-20181026.tar.gz
-
-REPBASE_TAR=RepBaseRepeatMaskerEdition-20181026.tar.gz
-REPBASE_URL=http://www.girinst.org/server/RepBase/protected/repeatmaskerlibraries/RepBaseRepeatMaskerEdition-20181026.tar.gz
-REPBASE_USERNAME:=
-REPBASE_PASSWORD:=
+SIGNALP4_VERSION=4.1f
+SIGNALP4_PREFIX_ARG=$(INSTALL_BASE)/signalp/$(SIGNALP4_VERSION)
+SIGNALP4_TAR=sources/signalp-4.1f.Linux.tar.gz
 
 
 all: docker
@@ -181,7 +140,6 @@ clean:
 
 tidy:
 	# Just removes untagged images to free up space
-	#docker rmi -f $(shell docker images -f "dangling=true" -q) || true
 	docker image prune -f
 
 # Generic rules
@@ -197,6 +155,8 @@ docker/%.tar.gz: docker/%
 docker/base: base.Dockerfile
 	docker build \
 	  --build-arg DEBIAN_VERSION=$(DEBIAN_VERSION) \
+	  --build-arg MAINTAINER="$(MAINTAINER)" \
+	  --build-arg PIPELINE_VERSION="$(TAG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
@@ -204,7 +164,7 @@ docker/base: base.Dockerfile
 	@touch $@
 
 
-docker/python3: python3.Dockerfile
+docker/python3: python3.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
 	  --file $< \
@@ -214,7 +174,7 @@ docker/python3: python3.Dockerfile
 	@touch $@
 
 
-docker/posix: posix.Dockerfile
+docker/posix: posix.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
 	  --file $< \
@@ -266,19 +226,19 @@ docker/trinity: docker/jellyfish docker/bowtie2 docker/htslib docker/salmon
 docker/trinity: trinity.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg JELLYFISH_IMAGE="$(call make_image_name,jellyfish)" \
-	  --build-arg BOWTIE2_IMAGE="$(call make_image_name,bowtie2)" \
-	  --build-arg SALMON_IMAGE="$(call make_image_name,salmon)" \
-	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg TRINITY_TAG="$(TRINITY_TAG)" \
 	  --build-arg TRINITY_REPO="$(TRINITY_REPO)" \
 	  --build-arg TRINITY_PREFIX_ARG="$(TRINITY_PREFIX_ARG)" \
+	  --build-arg JELLYFISH_IMAGE="$(call make_image_name,jellyfish)" \
 	  --build-arg JELLYFISH_VERSION="$(JELLYFISH_VERSION)" \
 	  --build-arg JELLYFISH_PREFIX_ARG="$(JELLYFISH_PREFIX_ARG)" \
+	  --build-arg BOWTIE2_IMAGE="$(call make_image_name,bowtie2)" \
 	  --build-arg BOWTIE2_TAG="$(BOWTIE2_TAG)" \
 	  --build-arg BOWTIE2_PREFIX_ARG="$(BOWTIE2_PREFIX_ARG)" \
+	  --build-arg SALMON_IMAGE="$(call make_image_name,salmon)" \
 	  --build-arg SALMON_TAG="$(SALMON_TAG)" \
 	  --build-arg SALMON_PREFIX_ARG="$(SALMON_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
 	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
@@ -292,10 +252,10 @@ docker/trinity: trinity.Dockerfile docker/base
 docker/star: star.Dockerfile docker/base docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg STAR_VERSION="$(STAR_VERSION)" \
 	  --build-arg STAR_URL="$(STAR_URL)" \
 	  --build-arg STAR_PREFIX_ARG="$(STAR_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
 	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
@@ -309,10 +269,10 @@ docker/star: star.Dockerfile docker/base docker/htslib
 docker/stringtie: stringtie.Dockerfile docker/base docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg STRINGTIE_VERSION="$(STRINGTIE_VERSION)" \
 	  --build-arg STRINGTIE_URL="$(STRINGTIE_URL)" \
 	  --build-arg STRINGTIE_PREFIX_ARG="$(STRINGTIE_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
 	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
@@ -441,10 +401,10 @@ docker/mmseqs: mmseqs.Dockerfile docker/base
 docker/augustus: augustus.Dockerfile docker/base docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
 	  --build-arg AUGUSTUS_REPO="$(AUGUSTUS_REPO)" \
 	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
 	  --build-arg HTSLIB_REPO="$(HTSLIB_REPO)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
@@ -460,16 +420,16 @@ docker/augustus: augustus.Dockerfile docker/base docker/htslib
 docker/pasa: pasa.Dockerfile docker/base docker/gmap docker/fasta docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg GMAP_IMAGE="$(call make_image_name,gmap)" \
-	  --build-arg FASTA_IMAGE="$(call make_image_name,fasta)" \
-	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg PASA_TAG="$(PASA_TAG)" \
 	  --build-arg PASA_REPO="$(PASA_REPO)" \
 	  --build-arg PASA_PREFIX_ARG="$(PASA_PREFIX_ARG)" \
+	  --build-arg GMAP_IMAGE="$(call make_image_name,gmap)" \
 	  --build-arg GMAP_VERSION="$(GMAP_VERSION)" \
 	  --build-arg GMAP_PREFIX_ARG="$(GMAP_PREFIX_ARG)" \
+	  --build-arg FASTA_IMAGE="$(call make_image_name,fasta)" \
 	  --build-arg FASTA_VERSION="$(FASTA_VERSION)" \
 	  --build-arg FASTA_PREFIX_ARG="$(FASTA_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
 	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
 	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
@@ -521,6 +481,9 @@ docker/braker: braker.Dockerfile docker/base docker/augustus docker/htslib docke
 docker/gemoma: gemoma.Dockerfile docker/base docker/mmseqs docker/htslib
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg GEMOMA_VERSION="$(GEMOMA_VERSION)" \
+	  --build-arg GEMOMA_URL="$(GEMOMA_URL)" \
+	  --build-arg GEMOMA_PREFIX_ARG="$(GEMOMA_PREFIX_ARG)" \
 	  --build-arg MMSEQS_IMAGE="$(call make_image_name,mmseqs)" \
 	  --build-arg MMSEQS_TAG="$(MMSEQS_TAG)" \
 	  --build-arg MMSEQS_PREFIX_ARG="$(MMSEQS_PREFIX_ARG)" \
@@ -529,9 +492,6 @@ docker/gemoma: gemoma.Dockerfile docker/base docker/mmseqs docker/htslib
 	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
 	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
-	  --build-arg GEMOMA_VERSION="$(GEMOMA_VERSION)" \
-	  --build-arg GEMOMA_URL="$(GEMOMA_URL)" \
-	  --build-arg GEMOMA_PREFIX_ARG="$(GEMOMA_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
@@ -542,10 +502,10 @@ docker/gemoma: gemoma.Dockerfile docker/base docker/mmseqs docker/htslib
 docker/busco: busco.Dockerfile docker/base docker/augustus
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg AUGUSTUS_IMAGE="$(call make_image_name,augustus)" \
 	  --build-arg BUSCO_COMMIT="$(BUSCO_COMMIT)" \
 	  --build-arg BUSCO_REPO="$(BUSCO_REPO)" \
 	  --build-arg BUSCO_PREFIX_ARG="$(BUSCO_PREFIX_ARG)" \
+	  --build-arg AUGUSTUS_IMAGE="$(call make_image_name,augustus)" \
 	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
 	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
 	  --file $< \
@@ -596,12 +556,12 @@ docker/braker_genemarkes: braker_genemarkes.Dockerfile docker/base docker/braker
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-docker/signalp: signalp.Dockerfile docker/base
+docker/signalp4: signalp4.Dockerfile docker/base $(SIGNALP4_TAR)
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg SIGNALP_VERSION="$(SIGNALP_VERSION)" \
-	  --build-arg SIGNALP_TAR="$(SIGNALP_TAR)" \
-	  --build-arg SIGNALP_PREFIX_ARG="$(SIGNALP_PREFIX_ARG)" \
+	  --build-arg SIGNALP4_VERSION="$(SIGNALP4_VERSION)" \
+	  --build-arg SIGNALP4_TAR="$(SIGNALP4_TAR)" \
+	  --build-arg SIGNALP4_PREFIX_ARG="$(SIGNALP4_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
@@ -666,118 +626,3 @@ docker/panann: panann.Dockerfile docker/base docker/jellyfish docker/bowtie2 doc
 	  .
 	@mkdir -p "$(dir $@)"
 	@touch $@
-
-
-# Repeat masking stuff
-
-docker/edge_base: base.Dockerfile
-	docker build \
-	  --build-arg DEBIAN_VERSION="buster-20190228-slim" \
-	  --file $< \
-	  -t "$(call make_image_name,$@)" \
-	  .
-	@mkdir -p "$(dir $@)"
-	@touch $@
-
-
-docker/red: red.Dockerfile docker/edge_base docker/base
-	docker build \
-	  --build-arg BUILD_IMAGE="$(call make_image_name,edge_base)" \
-	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg RED_TAG="$(RED_TAG)" \
-	  --build-arg RED_REPO="$(RED_REPO)" \
-	  --build-arg RED_PREFIX_ARG="$(RED_PREFIX_ARG)" \
-	  --file $< \
-	  -t "$(call make_image_name,$@)" \
-	  .
-	@mkdir -p "$(dir $@)"
-	@touch $@
-
-
-docker/rmblast: rmblast.Dockerfile docker/base
-	docker build \
-	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg RMBLAST_VERSION="$(RMBLAST_VERSION)" \
-	  --build-arg RMBLAST_URL="$(RMBLAST_URL)" \
-	  --build-arg RMBLAST_PATCH_URL="$(RMBLAST_PATCH_URL)" \
-	  --build-arg RMBLAST_PREFIX_ARG="$(RMBLAST_PREFIX_ARG)" \
-	  --file $< \
-	  -t "$(call make_image_name,$@)" \
-	  .
-	@mkdir -p "$(dir $@)"
-	@touch $@
-
-
-docker/repeatmasker: repeatmasker.Dockerfile docker/base docker/rmblast
-	docker build \
-	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg RMBLAST_IMAGE="$(call make_image_name,rmblast)" \
-	  --build-arg RMBLAST_VERSION="$(RMBLAST_VERSION)" \
-	  --build-arg RMBLAST_PREFIX_ARG="$(RMBLAST_PREFIX_ARG)" \
-	  --build-arg TRF_VERSION="$(TRF_VERSION)" \
-	  --build-arg TRF_URL="$(TRF_URL)" \
-	  --build-arg TRF_PREFIX_ARG="$(TRF_PREFIX_ARG)" \
-	  --build-arg NSEG_URL="$(NSEG_URL)" \
-	  --build-arg NSEG_PREFIX_ARG="$(NSEG_PREFIX_ARG)" \
-	  --build-arg REPEATSCOUT_VERSION="$(REPEATSCOUT_VERSION)" \
-	  --build-arg REPEATSCOUT_URL="$(REPEATSCOUT_URL)" \
-	  --build-arg REPEATSCOUT_PREFIX_ARG="$(REPEATSCOUT_PREFIX_ARG)" \
-	  --build-arg RECON_VERSION="$(RECON_VERSION)" \
-	  --build-arg RECON_URL="$(RECON_URL)" \
-	  --build-arg RECON_PREFIX_ARG="$(RECON_PREFIX_ARG)" \
-	  --build-arg RMASK_VERSION="$(RMASK_VERSION)" \
-	  --build-arg RMASK_URL="$(RMASK_URL)" \
-	  --build-arg RMOD_VERSION="$(RMOD_VERSION)" \
-	  --build-arg RMOD_URL="$(RMOD_URL)" \
-	  --build-arg RMOD_PREFIX_ARG="$(RMOD_PREFIX_ARG)" \
-	  --build-arg RM_LIB_ARG="$(RM_LIB_ARG)" \
-	  --file $< \
-	  -t "$(call make_image_name,$@)" \
-	  .
-	@mkdir -p "$(dir $@)"
-	@touch $@
-
-
-downloads/Dfam.hmm.gz:
-	mkdir -p downloads
-	cd downloads \
-	&& wget http://dfam.org/releases/Dfam_3.0/families/Dfam.hmm.gz
-
-
-downloads/Dfam.embl.gz:
-	mkdir -p downloads
-	cd downloads \
-	&& wget http://dfam.org/releases/Dfam_3.0/families/Dfam.embl.gz
-
-
-downloads/$(RMASK_META_TAR):
-	mkdir -p downloads
-	cd downloads \
-	&& wget -O $@ $(RMASK_META_URL)
-
-
-downloads/$(REPBASE_TAR):
-	mkdir -p downloads
-	cd downloads \
-	&& wget \
-	     --user $(REPBASE_USERNAME) \
-	     --password $(REPBASE_PASSWORD) \
-	     -O $@ \
-	     $(REPBASE_URL)
-
-
-rmlib: downloads/Dfam.hmm.gz downloads/Dfam.embl.gz
-rmlib: downloads/$(RMASK_META_TAR) downloads/$(REPBASE_TAR)
-rmlib: docker/repeatmasker
-	docker run \
-	  --rm \
-	  -v "$(PWD)/downloads:/downloads:rw" \
-	  -v "$(PWD)/rmlib:$(RM_LIB_ARG):rw" \
-	  -w /downloads \
-	  $(call make_image_name,repeatmasker) \
-	  prep_repeatmasker_lib.sh \
-	    $(REPBASE_TAR) \
-	    $(RMASK_META_TAR) \
-	    Dfam.hmm.gz \
-	    Dfam.embl.gz \
-	    $(RM_LIB_ARG)

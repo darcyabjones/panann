@@ -56,6 +56,7 @@ LABEL maintainer="darcy.ab.jones@gmail.com"
 ARG MMSEQS_TAG="7-4e23d"
 ARG MMSEQS_PREFIX_ARG="/opt/mmseqs/${MMSEQS_TAG}"
 ENV MMSEQS_PREFIX="${MMSEQS_PREFIX_ARG}"
+LABEL mmseqs.version="${MMSEQS_TAG}"
 
 ENV PATH="${MMSEQS_PREFIX}/bin:${PATH}"
 
