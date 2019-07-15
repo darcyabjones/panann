@@ -753,7 +753,7 @@ process mergeStringtie {
       -p "${task.cpus}" \
       ${known} \
       --merge \
-      -o "${name}.gtf" \
+      -o "${name}_stringtie.gtf" \
       *gtf
     """
 }
@@ -1426,7 +1426,13 @@ process runCodingQuarry {
             .combine(genomes4RunCodingQuarry, by: 0)
 
     output:
-    set val(name), file("codingquarry") into codingQuarryPredictions
+    set val(name),
+        file("${name}_codingquarry.gff3"),
+        file("${name}_codingquarry_cds.fna"),
+        file("${name}_codingquarry_proteins.faa"),
+        file("${name}_codingquarry_dubiousset.gff3"),
+        file("${name}_codingquarry_fusions.txt"),
+        file("${name}_codingquarry_overlapreport.txt") into codingQuarryPredictions
 
     script:
     """
@@ -1439,10 +1445,21 @@ process runCodingQuarry {
     | sed 's/*\$//g' > Predicted_Proteins.faa
 
     \${QUARRY_PATH}/scripts/gene_errors_Xs.py Predicted_Proteins.faa out/Predicted_Proteins.faa
+    rm Predicted_Proteins.faa
 
-    mv out codingquarry
+    mv out/DubiousSet.gff3 "${name}_codingquarry_dubiousset.gff3"
+    mv out/PredictedPass.gff3 "${name}_codingquarry.gff3"
+    mv out/Predicted_CDS.fa "${name}_codingquarry_cds.fna"
+    mv out/Predicted_Proteins.faa "${name}_codingquarry_proteins.faa"
+    mv out/fusions.txt "${name}_codingquarry_fusions.txt"
+    mv out/overlapReport.txt "${name}_codingquarry_overlapreport.txt"
+
+    rm -rf -- out
     """
 }
+
+
+
 
 codingQuarryPredictions.into {
     codingQuarryPredictions4SignalP;
@@ -1464,7 +1481,8 @@ process getCodingQuarrySignalP {
     !params.notfungus && params.signalp
 
     input:
-    set val(name), file("cq") from codingQuarryPredictions4SignalP
+    set val(name), file("proteins.faa") from codingQuarryPredictions4SignalP
+        .map { n, g, c, p, d, f, o -> [n, p] }
 
     output:
     set val(name), file("${name}.signalp5") into codingQuarryPredictionsSecreted
@@ -1473,7 +1491,7 @@ process getCodingQuarrySignalP {
     """
     mkdir tmp
     signalp \
-      -fasta "cq/Predicted_Proteins.faa" \
+      -fasta "proteins.faa" \
       -prefix "${name}" \
       -org euk \
       -tmp tmp
@@ -1506,7 +1524,12 @@ process runCodingQuarryPM {
         file("transcripts.gtf"),
         file("genome.fasta"),
         file("genome.fasta.fai"),
-        file("first"),
+        file("${name}_codingquarry.gff3"),
+        file("${name}_codingquarry_cds.fna"),
+        file("${name}_codingquarry_proteins.faa"),
+        file("${name}_codingquarry_dubiousset.gff3"),
+        file("${name}_codingquarry_fusions.txt"),
+        file("${name}_codingquarry_overlapreport.txt"),
         file("secretome.signalp5") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
@@ -1533,7 +1556,7 @@ process runCodingQuarryPM {
     CodingQuarry \
       -f genome.fasta \
       -t transcripts.gff3 \
-      -2 "first/PredictedPass.gff3" \
+      -2 "${name}_codingquarry.gff3" \
       -p "${task.cpus}" \
       -g secretome.txt \
       -h
