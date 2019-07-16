@@ -23,6 +23,7 @@ RUN  set -eu \
        ca-certificates \
        git \
        python3 \
+       python3-distutils \
   && rm -rf /var/lib/apt/lists/* \
   && update-ca-certificates \
   && git clone "${BUSCO_REPO}" "${BUSCO_PREFIX}" \

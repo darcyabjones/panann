@@ -1,7 +1,7 @@
 PWD=$(shell pwd)
 DEBIAN_VERSION=buster-20190708-slim
 TAG=panann-v0.0.1
-MAINTAINER="Darcy Jones <darcy.ab.jones@gmail.com>"
+MAINTAINER=darcy.ab.jones@gmail.com
 DOCKER_USER=darcyabjones
 BASE_IMAGE=$(DOCKER_USER)/base:$(TAG)
 
@@ -112,26 +112,67 @@ GENEMARKES_KEY=sources/gm_key_64
 GENEMARKES_PREFIX_ARG=$(INSTALL_BASE)/genemarkes/$(GENEMARKES_VERSION)
 
 
-SIGNALP4_VERSION=4.1f
-SIGNALP4_PREFIX_ARG=$(INSTALL_BASE)/signalp/$(SIGNALP4_VERSION)
-SIGNALP4_TAR=sources/signalp-4.1f.Linux.tar.gz
+SIGNALP5_VERSION=5.0
+SIGNALP5_PREFIX_ARG=$(INSTALL_BASE)/signalp/$(SIGNALP5_VERSION)
+SIGNALP5_TAR=sources/signalp-5.0.Linux.tar.gz
 
+DEEPSIG_COMMIT=69e01cb
+DEEPSIG_PREFIX_ARG=$(INSTALL_BASE)/deepsig/$(DEEPSIG_COMMIT)
+DEEPSIG_REPO=https://github.com/BolognaBiocomp/deepsig.git
 
-all: docker
+TENSORFLOW_VERSION=1.5.0
+TENSORFLOW_PREFIX_ARG=$(INSTALL_BASE)/tensorflow/$(TENSORFLOW_VERSION)
 
-docker: docker/general docker/alignment docker/rnaseq docker/annotation
+KERAS_VERSION=2.2.4
+KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
-# Singularity is distributed as a monolith
-singularity: singularity/panann.sif
+GENERAL=htslib python3 posix
+ALIGNMENT=spaln gmap mmseqs
+RNASEQ=trinity star stringtie
+ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
+OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION)
 
-docker/general: docker/htslib docker/genometools docker/python3 docker/posix
-docker/alignment: docker/minimap2 docker/spaln docker/gmap
-docker/rnaseq: docker/trinity docker/star docker/stringtie
-docker/annotation: docker/augustus docker/codingquarry docker/busco docker/pasa
+PROPRIETARY=genemarkes signalp
+
+all: docker/all singularity/all
+
+# Docker targets
+docker: docker/panann
+docker/all: docker/general docker/alignment docker/rnaseq docker/annotation
+	@echo "WARNING: proprietary software will not be built by default."
+	@echo "WARNING: call `make docker/proprietary` explicitly to create them."
+
+docker/general: $(addprefix docker/,$(GENERAL))
+docker/alignment: $(addprefix docker/,$(ALIGNMENT))
+docker/rnaseq: $(addprefix docker/,$(RNASEQ))
+docker/annotation: $(addprefix docker/,$(ANNOTATION))
 
 # Proprietary software won't be built by default.
-docker/proprietary: docker/genemarkes docker/signalp
+docker/proprietary: $(addprefix docker/,$(PROPRIETARY))
 
+# Singularity targets
+singularity: singularity/panann.sif
+singularity/all: singularity/general singularity/alignment singularity/rnaseq singularity/annotation
+	@echo "WARNING: proprietary software will not be built by default."
+	@echo "WARNING: call `make singularity/proprietary` explicitly to create them."
+singularity/general: $(addprefix singularity/,$(addsuffix .sif,$(GENERAL)))
+singularity/alignment: $(addprefix singularity/,$(addsuffix .sif,$(ALIGNMENT)))
+singularity/rnaseq: $(addprefix singularity/,$(addsuffix .sif,$(RNASEQ)))
+singularity/annotation: $(addprefix singularity/,$(addsuffix .sif,$(ANNOTATION)))
+
+# Proprietary software won't be built by default.
+singularity/proprietary: $(addprefix singularity/,$(addsuffix .sif,$(PROPRIETARY)))
+
+# Pull containers for dockerhub
+dockerpull: dockerpull/panann
+dockerpull/all: dockerpull/general dockerpull/alignment dockerpull/rnaseq dockerpull/annotation
+dockerpull/general: $(addprefix dockerpull/,$(GENERAL))
+dockerpull/alignment: $(addprefix dockerpull/,$(ALIGNMENT))
+dockerpull/rnaseq: $(addprefix dockerpull/,$(RNASEQ))
+dockerpull/annotation: $(addprefix dockerpull/,$(ANNOTATION))
+
+
+# Utils
 clean:
 	docker stop $(shell docker ps -aq) || true
 	docker rm $(shell docker ps -a -q) || true
@@ -150,6 +191,11 @@ singularity/%.sif: docker/%
 docker/%.tar.gz: docker/%
 	@mkdir -p "$(dir $@)"
 	docker save "$(call make_image_name,$(basename $(basename $@)))" | gzip > $@
+
+dockerpull/%:
+	docker pull "$(call make_image_name,$(notdir $@))"
+	@mkdir -p "$(dir $@)"
+	@touch docker/$(notdir $@)
 
 
 docker/base: base.Dockerfile
@@ -527,41 +573,30 @@ docker/genemarkes: genemarkes.Dockerfile docker/base
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-docker/braker_genemarkes: braker_genemarkes.Dockerfile docker/base docker/braker docker/augustus docker/htslib docker/bamtools docker/spaln docker/genemarkes
+
+docker/signalp: signalp5.Dockerfile docker/base $(SIGNALP5_TAR)
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg BRAKER_IMAGE="$(call make_image_name,braker)" \
-	  --build-arg BRAKER_COMMIT="$(BRAKER_COMMIT)" \
-	  --build-arg BRAKER_PREFIX_ARG="$(BRAKER_PREFIX_ARG)" \
-	  --build-arg AUGUSTUS_IMAGE="$(call make_image_name,augustus)" \
-	  --build-arg AUGUSTUS_COMMIT="$(AUGUSTUS_COMMIT)" \
-	  --build-arg AUGUSTUS_PREFIX_ARG="$(AUGUSTUS_PREFIX_ARG)" \
-	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
-	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
-	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
-	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
-	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
-	  --build-arg BAMTOOLS_IMAGE="$(call make_image_name,bamtools)" \
-	  --build-arg BAMTOOLS_TAG="$(BAMTOOLS_TAG)" \
-	  --build-arg BAMTOOLS_PREFIX_ARG="$(BAMTOOLS_PREFIX_ARG)" \
-	  --build-arg SPALN_IMAGE="$(call make_image_name,spaln)" \
-	  --build-arg SPALN_TAG="$(SPALN_TAG)" \
-	  --build-arg SPALN_PREFIX_ARG="$(SPALN_PREFIX_ARG)" \
-	  --build-arg GENEMARKES_IMAGE="$(call make_image_name,genemarkes)" \
-	  --build-arg GENEMARKES_VERSION="$(GENEMARKES_VERSION)" \
-	  --build-arg GENEMARKES_PREFIX_ARG="$(GENEMARKES_PREFIX_ARG)" \
+	  --build-arg SIGNALP5_VERSION="$(SIGNALP5_VERSION)" \
+	  --build-arg SIGNALP5_TAR="$(SIGNALP5_TAR)" \
+	  --build-arg SIGNALP5_PREFIX_ARG="$(SIGNALP5_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-docker/signalp4: signalp4.Dockerfile docker/base $(SIGNALP4_TAR)
+
+docker/deepsig: deepsig.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --build-arg SIGNALP4_VERSION="$(SIGNALP4_VERSION)" \
-	  --build-arg SIGNALP4_TAR="$(SIGNALP4_TAR)" \
-	  --build-arg SIGNALP4_PREFIX_ARG="$(SIGNALP4_PREFIX_ARG)" \
+	  --build-arg DEEPSIG_COMMIT="$(DEEPSIG_COMMIT)" \
+	  --build-arg DEEPSIG_REPO="$(DEEPSIG_REPO)" \
+	  --build-arg DEEPSIG_PREFIX_ARG="$(DEEPSIG_PREFIX_ARG)" \
+	  --build-arg TENSORFLOW_VERSION="$(TENSORFLOW_VERSION)" \
+	  --build-arg TENSORFLOW_PREFIX_ARG="$(TENSORFLOW_PREFIX_ARG)" \
+	  --build-arg KERAS_VERSION="$(KERAS_VERSION)" \
+	  --build-arg KERAS_PREFIX_ARG="$(KERAS_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .

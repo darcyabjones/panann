@@ -1462,7 +1462,7 @@ process runCodingQuarry {
 
 
 codingQuarryPredictions.into {
-    codingQuarryPredictions4SignalP;
+    codingQuarryPredictions4SecretionPred;
     codingQuarryPredictions4PM;
 }
 
@@ -1470,30 +1470,88 @@ codingQuarryPredictions.into {
 /*
  * Predict signal peptides from CodingQuarry first pass predicted proteins.
  */
-process getCodingQuarrySignalP {
+if (params.signalp) {
 
-    label "signalp"
-    label "medium_task"
+    process getCodingQuarrySignalP {
 
-    tag "${name}"
+        label "signalp"
+        label "medium_task"
+        publishDir "${params.outdir}/annotations/${name}"
 
-    when:
-    !params.notfungus && params.signalp
+        tag "${name}"
 
-    input:
-    set val(name), file("proteins.faa") from codingQuarryPredictions4SignalP
-        .map { n, g, c, p, d, f, o -> [n, p] }
+        when:
+        !params.notfungus
 
-    output:
-    set val(name), file("${name}.signalp") into codingQuarryPredictionsSecreted
+        input:
+        set val(name), file("proteins.faa") from codingQuarryPredictions4SecretionPred
+            .map { n, g, c, p, d, f, o -> [n, p] }
 
-    script:
-    """
-    mkdir tmp
-    signalp proteins.faa > "${name}.signalp"
+        output:
+        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecreted
 
-    rm -rf -- tmp
-    """
+        script:
+        """
+        mkdir tmp
+        signalp \
+          -fasta "proteins.faa" \
+          -prefix "${name}" \
+          -org euk \
+          -tmp tmp
+
+        gawk '
+          BEGIN {
+            OFS=" "
+          }
+          \$2 ~ /^SP/ {
+            match(\$0, /CS pos: ([0-9]*)-/, x)
+            print \$1, x[1]
+          }
+        ' < "${name}_summary.signalp5" > "${name}_codingquarry_proteins_secreted.txt"
+
+        rm -rf -- tmp
+        """
+    }
+
+} else {
+
+    process getCodingQuarryDeepsig {
+
+        label "deepsig"
+        label "medium_task"
+        publishDir "${params.outdir}/annotations/${name}"
+
+        tag "${name}"
+
+        when:
+        !params.notfungus
+
+        input:
+        set val(name), file("proteins.faa") from codingQuarryPredictions4SecretionPred
+            .map { n, g, c, p, d, f, o -> [n, p] }
+
+        output:
+        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecreted
+
+        script:
+        """
+        deepsig.py \
+          -fasta "proteins.faa" \
+          -o secretome.txt \
+          -k euk
+
+        gawk '
+          BEGIN {
+            OFS=" "
+          }
+          \$2 == "SignalPeptide" {
+            print \$1, \$4
+          }
+        ' < secretome.txt > "${name}_codingquarry_proteins_secreted.txt"
+
+        rm -rf -- tmp
+        """
+    }
 }
 
 
@@ -1511,7 +1569,7 @@ process runCodingQuarryPM {
     tag "${name}"
 
     when:
-    !params.notfungus && params.signalp
+    !params.notfungus
 
     input:
     set val(name),
@@ -1524,28 +1582,21 @@ process runCodingQuarryPM {
         file("${name}_codingquarry_dubiousset.gff3"),
         file("${name}_codingquarry_fusions.txt"),
         file("${name}_codingquarry_overlapreport.txt"),
-        file("secretome.signalp") from stringtieMergedTranscripts4CodingQuarryPM
+        file("secretome.txt") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
             .combine(codingQuarryPredictionsSecreted, by: 0)
 
     output:
-    set val(name), file("cqpm") into codingQuarryPMPredictions
+    set val(name),
+        file("${name}_codingquarrypm.gff3"),
+        file("${name}_codingquarrypm_cds.fna"),
+        file("${name}_codingquarrypm_proteins.faa") into codingQuarryPMPredictions
 
     script:
     """
     grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
     CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
-
-    gawk '
-      BEGIN {
-        OFS=" "
-      }
-      \$2 ~ /^SP/ {
-        match(\$0, /CS pos: ([0-9]*)-/, x)
-        print \$1, x[1]
-      }
-    ' < "secretome.signalp" > secretome.txt
 
     CodingQuarry \
       -f genome.fasta \
@@ -1555,7 +1606,17 @@ process runCodingQuarryPM {
       -g secretome.txt \
       -h
 
-    mv out cqpm
+    \${QUARRY_PATH}/scripts/fastaTranslate.py out/PGN_Predicted_CDS.fa \
+    | sed 's/*\$//g' > PGN_Predicted_Proteins.faa
+
+    \${QUARRY_PATH}/scripts/gene_errors_Xs.py PGN_Predicted_Proteins.faa out/PGN_Predicted_Proteins.faa
+    rm Predicted_Proteins.faa
+
+    mv out/PGN_predictedPass.gff3 "${name}_codingquarrypm.gff3"
+    mv out/PGN_predicted_CDS.fa "${name}_codingquarrypm_cds.fna"
+    mv out/PGN_predicted_Protieins.faa "${name}_codingquarrypm_proteins.faa"
+
+    # rm -rf -- out
     """
 }
 
@@ -1872,7 +1933,7 @@ process trainAugustus {
       r = gensub(/^>[[:space:]]?([^[:space:]]+).*<REMOVETHIS>/, "\\1", "g", $0);
       print r;
     }' ${name}_cds.fna > complete.orfs
-    
+
     grep -F -f complete.orfs "${name}.gff3" \
     | awk '$3 == "exon" || $3 == "CDS"' \
     | 's/cds\.//; s/\.exon[[:digit:]]*<REMOVETHIS>//' \

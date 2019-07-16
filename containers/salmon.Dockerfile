@@ -11,12 +11,12 @@ WORKDIR /tmp
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
   && . /build/base.sh \
-  && echo "deb http://deb.debian.org/debian stretch-backports main" >> /etc/apt/sources.list \
   && apt-get update \
   && apt-get install -y \
        autoconf \
        build-essential \
        ca-certificates \
+       cmake \
        curl \
        git \
        libbz2-dev \
@@ -25,7 +25,6 @@ RUN  set -eu \
        libtbb-dev \
        unzip \
        zlib1g-dev \
-  && apt-get -t stretch-backports install -y cmake \
   && rm -rf /var/lib/apt/lists/* \
   && update-ca-certificates \
   && git clone "${SALMON_REPO}" . \

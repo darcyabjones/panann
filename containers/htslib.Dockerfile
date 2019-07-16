@@ -71,7 +71,7 @@ RUN  set -eu \
        --with-htslib="${HTSLIB_PREFIX}" \
   && make -j $(grep -c ^processor /proc/cpuinfo) \
   && make -j $(grep -c ^processor /proc/cpuinfo) install \
-  && add_runtime_dep libperl5.24 libgsl2 zlib1g
+  && add_runtime_dep libperl5.28 libgsl23 zlib1g
 # Samtools also depends on htslib and it's dependencies.
 
 WORKDIR /tmp/samtools

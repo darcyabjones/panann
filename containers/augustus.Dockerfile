@@ -28,15 +28,17 @@ RUN  set -eu \
   && apt-get install -y \
        autoconf \
        build-essential \
+       ca-certificates \
        git \
        libbz2-dev \
-       libcurl4-openssl-dev \
+       libcurl4-gnutls-dev \
        liblzma-dev \
        libncurses5-dev \
        libssl-dev \
        zlib1g-dev \
        wget \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates
 
 WORKDIR /tmp/htslib
 RUN  git clone ${HTSLIB_REPO} . \
@@ -73,7 +75,7 @@ RUN  set -eu \
        libboost-all-dev \
        libboost-iostreams-dev \
        libboost-graph-dev \
-       libcurl4-openssl-dev \
+       libcurl4-gnutls-dev \
        libgsl-dev \
        liblpsolve55-dev \
        libssl-dev \
@@ -96,9 +98,9 @@ RUN  set -eu \
   && make install \
   && make test \
   && add_runtime_dep \
-       libbamtools2.4.0 \
-       libcurl3 \
-       libgsl2 \
+       libbamtools2.5.1 \
+       libcurl3-gnutls \
+       libgsl23 \
        libssl1.1 \
        libsqlite3-0 \
        lp-solve \
