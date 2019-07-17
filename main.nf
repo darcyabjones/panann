@@ -71,6 +71,9 @@ if (params.help) {
 
 params.genomes = false
 params.known_sites = false
+params.hints = false
+
+params.reference = false
 
 params.transcripts = false
 params.proteins = false
@@ -101,6 +104,10 @@ def stranded = params.fr ? "fr" : "rf"
 
 def is_null = { f -> (f == null || f == '') }
 
+if ( !params.reference ) {
+    log.error "Please nominate one isolate as a reference or provide an Augustus species."
+    exit 1
+}
 
 if ( params.genomes ) {
     Channel
@@ -314,6 +321,9 @@ genomesWithFaidx.into {
     genomes4RunCodingQuarryPM;
     genomes4AlignGemomaCDSParts;
     genomes4RunGemoma;
+    genomes4CombineGemoma;
+    genomes4ExtractCompleteTrainingSetProteins;
+    genomes4GetCompleteTrainingSetGenbank;
 }
 
 
@@ -970,7 +980,7 @@ process alignSpalnTranscripts {
     spaln \
       -L \
       -M3 \
-      -O2 \
+      -O0 \
       -Q7 \
       -S3 \
       -T${species} \
@@ -981,6 +991,32 @@ process alignSpalnTranscripts {
       -d "${name}" \
       "${fasta_clean}" \
     > "${name}_spaln_transcripts.gff3"
+    """
+}
+
+
+process extractSpalnTranscriptHints {
+
+    label "braker"
+    label "small_task"
+
+    publishDir "${params.outdir}/hints/${name}"
+
+    input:
+    set val(name), file("spaln.gff3") from spalnAlignedTranscripts
+
+    output:
+    set val(name), file("${name}_spaln_transcript_hints.gff3") into spalnTranscriptHints
+
+    script:
+    """
+    align2hints.pl \
+      --in=spaln.gff3 \
+      --out=${name}_spaln_transcript_hints.gff3 \
+      --CDSpart_cutoff=6 \
+      --priority=2 \
+      --source=E \
+      --prg=spaln 
     """
 }
 
@@ -1019,7 +1055,7 @@ process alignGmapTranscripts {
 
     """
     gmap \
-      --npaths=1 \
+      --npaths=0 \
       --chimera-margin=50 \
       --min-intronlength="${min_intronlength}" \
       --max-intronlength-middle="${max_intronlength_middle}" \
@@ -1090,7 +1126,7 @@ process alignSpalnProteins {
             .combine(combinedProteins)
 
     output:
-    set val(name), file("${name}_spaln_proteins.gff3")
+    set val(name), file("${name}_spaln_proteins.gff3") into spalnAlignedProteins
 
     script:
     def species = "Dothideo"
@@ -1099,7 +1135,7 @@ process alignSpalnProteins {
     spaln \
       -L \
       -M3 \
-      -O2 \
+      -O0 \
       -Q7 \
       -T${species} \
       -ya2 \
@@ -1111,6 +1147,30 @@ process alignSpalnProteins {
     """
 }
 
+
+process extractSpalnProteinHints {
+
+    label "braker"
+    label "small_task"
+
+    publishDir "${params.outdir}/hints/${name}"
+
+    input:
+    set val(name), file("spaln.gff3") from spalnAlignedProteins
+
+    output:
+    set val(name), file("${name}_spaln_protein_hints.gff3") into spalnProteinHints
+
+    script:
+    """
+    align2hints.pl \
+      --in=spaln.gff3 \
+      --out=${name}_spaln_protein_hints.gff3 \
+      --prg=spaln \
+      --CDSpart_cutoff=15 \
+      --priority=2
+    """
+}
 
 //
 // 3 run busco on all genomes
@@ -1244,6 +1304,9 @@ process runPASA {
     """
 }
 
+pasaPredictions.set { pasaPredictions4ExtractCompleteTrainingSet }
+
+
 
 /*
  * Extract hints to be used for augustus and genemark.
@@ -1365,7 +1428,7 @@ augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
 process runGenemark {
 
     label "genemarkes"
-    label "small_task"
+    label "medium_task"
     publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
@@ -1386,7 +1449,7 @@ process runGenemark {
             )
 
     output:
-    file "genemark.gtf"
+    set val(name), file("${name}_genemark.gtf") into genemarkPredictions
 
     script:
     def use_fungus = params.notfungus ? '' : '--fungus '
@@ -1400,6 +1463,8 @@ process runGenemark {
       --ET "hints.gff3" \
       ${use_fungus} \
       --sequence "${genome}"
+
+    mv genemark.gtf "${name}_genemark.gtf"
     """
 }
 
@@ -1476,7 +1541,6 @@ if (params.signalp) {
 
         label "signalp"
         label "medium_task"
-        publishDir "${params.outdir}/annotations/${name}"
 
         tag "${name}"
 
@@ -1488,7 +1552,7 @@ if (params.signalp) {
             .map { n, g, c, p, d, f, o -> [n, p] }
 
         output:
-        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecreted
+        set val(name), file("${name}_summary.signalp5") into codingQuarryPredictionsSecreted
 
         script:
         """
@@ -1499,6 +1563,29 @@ if (params.signalp) {
           -org euk \
           -tmp tmp
 
+        rm -rf -- tmp
+        """
+    }
+
+    process tidyCodingQuarrySignalp {
+
+	label "posix"
+	label "small_task"
+	publishDir "${params.outdir}/annotations/${name}"
+
+        tag "${name}"
+
+        when:
+        !params.notfungus
+
+        input:
+        set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
+
+        output:
+        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecretedTidy
+
+        script:
+        """
         gawk '
           BEGIN {
             OFS=" "
@@ -1507,9 +1594,7 @@ if (params.signalp) {
             match(\$0, /CS pos: ([0-9]*)-/, x)
             print \$1, x[1]
           }
-        ' < "${name}_summary.signalp5" > "${name}_codingquarry_proteins_secreted.txt"
-
-        rm -rf -- tmp
+        ' < "secreted.txt" > "${name}_codingquarry_proteins_secreted.txt"
         """
     }
 
@@ -1531,15 +1616,36 @@ if (params.signalp) {
             .map { n, g, c, p, d, f, o -> [n, p] }
 
         output:
-        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecreted
+        set val(name), file("secreted.txt") into codingQuarryPredictionsSecreted
 
         script:
         """
         deepsig.py \
           -fasta "proteins.faa" \
-          -o secretome.txt \
+          -o secreted.txt \
           -k euk
+        """
+    }
 
+    process tidyCodingQuarryDeepsig {
+
+	label "posix"
+	label "small_task"
+	publishDir "${params.outdir}/annotations/${name}"
+
+        tag "${name}"
+
+        when:
+        !params.notfungus
+
+        input:
+        set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
+
+        output:
+        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecretedTidy
+
+        script:
+        """
         gawk '
           BEGIN {
             OFS=" "
@@ -1547,9 +1653,7 @@ if (params.signalp) {
           \$2 == "SignalPeptide" {
             print \$1, \$4
           }
-        ' < secretome.txt > "${name}_codingquarry_proteins_secreted.txt"
-
-        rm -rf -- tmp
+        ' < secreted.txt > "${name}_codingquarry_proteins_secreted.txt"
         """
     }
 }
@@ -1563,7 +1667,7 @@ if (params.signalp) {
 process runCodingQuarryPM {
 
     label "codingquarry"
-    label "medium_task"
+    label "bigmem_task"
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -1585,7 +1689,7 @@ process runCodingQuarryPM {
         file("secretome.txt") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
-            .combine(codingQuarryPredictionsSecreted, by: 0)
+            .combine(codingQuarryPredictionsSecretedTidy, by: 0)
 
     output:
     set val(name),
@@ -1595,6 +1699,8 @@ process runCodingQuarryPM {
 
     script:
     """
+    mkdir -p ParameterFiles/RNA_secreted
+
     grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
     CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
 
@@ -1606,16 +1712,17 @@ process runCodingQuarryPM {
       -g secretome.txt \
       -h
 
-    \${QUARRY_PATH}/scripts/fastaTranslate.py out/PGN_Predicted_CDS.fa \
-    | sed 's/*\$//g' > PGN_Predicted_Proteins.faa
+    \${QUARRY_PATH}/scripts/fastaTranslate.py out/PGN_predicted_CDS.fa \
+    | sed 's/*\$//g' > PGN_predicted_Proteins.faa
 
-    \${QUARRY_PATH}/scripts/gene_errors_Xs.py PGN_Predicted_Proteins.faa out/PGN_Predicted_Proteins.faa
-    rm Predicted_Proteins.faa
+    \${QUARRY_PATH}/scripts/gene_errors_Xs.py PGN_predicted_Proteins.faa out/PGN_predicted_Proteins.faa
+    rm PGN_predicted_Proteins.faa
 
     mv out/PGN_predictedPass.gff3 "${name}_codingquarrypm.gff3"
     mv out/PGN_predicted_CDS.fa "${name}_codingquarrypm_cds.fna"
-    mv out/PGN_predicted_Protieins.faa "${name}_codingquarrypm_proteins.faa"
-
+    mv out/PGN_predicted_Proteins.faa "${name}_codingquarrypm_proteins.faa"
+    mv out/fusions.txt "${name}_codingquarrypm_fusions.txt"
+    mv out/overlapReport.txt "${name}_codingquarrypm_overlapreport.txt"
     # rm -rf -- out
     """
 }
@@ -1720,6 +1827,11 @@ process combineGemomaRnaseqHints {
     """
 }
 
+combinedGemomaRnaseqHints.into {
+    combinedGemomaRnaseqHints4Run;
+    combinedGemomaRnaseqHints4Combine;
+}
+
 
 process extractGemomaCDSParts {
 
@@ -1778,6 +1890,7 @@ process alignGemomaCDSParts {
     output:
     set val(target_name),
         val(ref_name),
+        file("cds-parts.fasta"),
         file("matches.tsv"),
         file("assignment.tabular"),
         file("proteins.fasta") into alignedGemomaCDSParts
@@ -1838,20 +1951,21 @@ process runGemoma {
         file(fasta),
         file(faidx),
         val(ref_name),
+        file("cds-parts.fasta"),
         file("matches.tsv"),
         file("assignment.tabular"),
         file("proteins.fasta"),
         file("introns.gff"),
-        file("forward_coverage.bedgraph"),
-        file("reverse_coverage.bedgraph") from genomes4RunGemoma
+        file("coverage_forward.bedgraph"),
+        file("coverage_reverse.bedgraph") from genomes4RunGemoma
             .join(alignedGemomaCDSParts, by: 0)
-            .combine(combinedGemomaRnaseqHints, by: 0)
-            .filter { tn, fa, fi, rn, bl, a, p, i, fc, rc -> tn != rn }
+            .combine(combinedGemomaRnaseqHints4Run, by: 0)
+            .filter { tn, fa, fi, rn, cp, bl, a, p, i, fc, rc -> tn != rn }
 
     output:
     set val(target_name),
         val(ref_name),
-        file("${name}_${ref_name}_preds.gff3") into indivGemomaPredictions
+        file("${target_name}_${ref_name}_preds.gff3") into indivGemomaPredictions
 
     script:
     // option g= allows genetic code to be provided as some kind of file.
@@ -1871,7 +1985,7 @@ process runGemoma {
       coverage_forward=coverage_forward.bedgraph \
       coverage_reverse=coverage_reverse.bedgraph
 
-    mv out/predicted_annotation.gff "${name}_${ref_name}_preds.gff3"
+    mv out/predicted_annotation.gff "${target_name}_${ref_name}_preds.gff3"
 
     rm -rf -- GeMoMa_temp out
     """
@@ -1889,15 +2003,28 @@ process combineGemomaPredictions {
     input:
     set val(name),
         val(ref_names),
-        file(pred_gffs) from indivGemomaPredictions
+        file(pred_gffs),
+        file(fasta),
+        file(faidx),
+        file("introns.gff"),
+        file("coverage_forward.bedgraph"),
+        file("coverage_reverse.bedgraph") from indivGemomaPredictions
+            .groupTuple(by: 0)
+            .join(genomes4CombineGemoma, by: 0, remainder: false)
+            .combine(combinedGemomaRnaseqHints4Combine, by: 0)
 
     output:
     set val(name), file("${name}_gemoma.gff3") into gemomaPredictions
 
     script:
-    def preds = [ref_names, pred_gffs]
+    def ref_names_list = ref_names
+    def pred_gffs_list = (pred_gffs instanceof List) ? pred_gffs : [pred_gffs]
+    assert pred_gffs_list.size() == ref_names_list.size()
+
+    def preds = [ref_names_list, pred_gffs_list]
         .transpose()
-        .collect { rn, pred -> "p=${rn} g=${pred}" }.join(' ')
+        .collect { rn, pred -> "p=${rn} g=${pred.name}" }
+        .join(' ')
 
     """
     mkdir -p gaf
@@ -1907,7 +2034,7 @@ process combineGemomaPredictions {
 
     mkdir -p finalised
     java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
-      g=${target} \
+      g=${fasta} \
       a=gaf/filtered_predictions.gff \
       u=YES \
       i=introns.gff \
@@ -1922,28 +2049,391 @@ process combineGemomaPredictions {
     """
 }
 
-/*
- * Train Augustus models using PASA genes
-process trainAugustus {
+
+process extractGemomaHints {
+
+    label "braker"
+    label "small_task"
+
+    publishDir "${params.outdir}/hints/${name}"
+
+    input:
+    set val(name), file("gemoma.gff3") from gemomaPredictions
+
+    output:
+    set val(name), file("gemoma_hints.gff3") into gemomaHints
 
     script:
     """
-    // To find "complete" cdss for training augustus...
-    awk '\$0 ~ /^>.*type:complete/ {
-      r = gensub(/^>[[:space:]]?([^[:space:]]+).*<REMOVETHIS>/, "\\1", "g", $0);
-      print r;
-    }' ${name}_cds.fna > complete.orfs
-
-    grep -F -f complete.orfs "${name}.gff3" \
-    | awk '$3 == "exon" || $3 == "CDS"' \
-    | 's/cds\.//; s/\.exon[[:digit:]]*<REMOVETHIS>//' \
-    | sort -s -n -k 1,1 -k 4 -k 9 \
-    > training_set_complete.gff3
+    align2hints.pl \
+      --in=gemoma.gff3 \
+      --out=gemoma_hints.gff3 \
+      --prg=gemoma 
     """
 }
+
+
+/*
+ * Train Augustus models using PASA genes
  */
+process extractCompleteTrainingSet {
+
+    label "python3"
+    label "small_task"
+
+    input:
+    set val(name),
+        file("pasa.gff3") from pasaPredictions4ExtractCompleteTrainingSet
+            .map { n, g, c, p -> [n, g] }
+            .filter { n, g -> n == params.reference }
+            .first()
+
+    output:
+    set val(name), 
+        file("complete.gtf"),
+        file("both_utrs.txt") into completeTrainingSet
 
 
+    script:
+    """
+    extract_training_from_pasa.py pasa.gff3 complete.gtf both_utrs.txt
+    """
+}
+
+completeTrainingSet.into {
+    completeTrainingSet4ExtractProteins;
+    completeTrainingSet4GetGenbank;
+}
+
+
+process extractCompleteTrainingSetProteins {
+
+    label "augustus"
+    label "small_task"
+
+    input:
+    set val(name),
+        file("complete.gtf"),
+        file("both_utrs.txt"),
+        file("genome.fasta"),
+        file("genome.fasta.fai") from completeTrainingSet4ExtractProteins
+            .join(genomes4ExtractCompleteTrainingSetProteins, by: 0, remainder: false)
+            .first()
+
+    output:
+    set val(name), file("complete.faa") into completeTrainingSetProteins
+
+    script:
+    """
+    gtf2aa.pl genome.fasta complete.gtf proteins.faa
+
+    # This removes proteins with internal stop codons.
+    # Pasa should give more than enough training example anyway.
+
+    # Convert to tab-separated file
+    awk '
+      /^>/ {
+        printf("%s%s\\t", (N>0?"\\n":""), \$0);
+        N++;
+        next;
+      }
+      {
+        printf("%s", \$0)
+      }
+      END {
+        printf("\\n");
+      }
+    ' proteins.faa > linearised.tsv
+
+    # Filter internal stops and replace tabs with newlines
+    sed 's/\\*\$//g' proteins.faa \
+    | awk -F '\\t' '!(\$2 ~ /\\*/)' \
+    | tr '\\t' '\\n' \
+    > complete.faa
+    """
+}
+
+
+process removeRedundantTrainingProteins {
+
+    label "mmseqs"
+    label "medium_task"
+
+    input:
+    set val(name), file("complete.faa") from completeTrainingSetProteins
+
+    output:
+    set val(name), file("clustered.tsv") into nonRedundantTrainingSetProteins
+
+    """
+    mkdir -p proteins
+    mmseqs createdb "complete.faa" proteins/db
+
+    mkdir -p clustered
+    mkdir -p tmp
+    mmseqs cluster proteins/db clustered/db tmp --min-seq-id 0.8 -c 0.7 --cov-mode 0
+
+    mmseqs createtsv proteins/db proteins/db clustered/db clustered.tsv
+    
+    rm -rf -- tmp
+    """
+}
+
+process getCompleteTrainingSetGenbank {
+
+    label "augustus"
+    label "small_task"
+    publishDir "${params.outdir}/training"
+
+    input:
+    set val(name),
+        file("complete.gtf"),
+        file("both_utrs.txt"),
+        file("clustered.tsv"),
+        file("genome.fasta"),
+        file("genome.fasta.fai") from completeTrainingSet4GetGenbank
+            .join(nonRedundantTrainingSetProteins, by: 0, remainder: false)
+            .join(genomes4GetCompleteTrainingSetGenbank, by: 0, remainder: false)
+            .first()
+    file "augustus_config" from augustusConfig
+
+    output:
+    set val(name),
+        file("train.gb"),
+        file("test.gb"),
+        file("train_utrs.gb"),
+        file("test_utrs.gb") into completeTrainingSetGenbank
+
+    file "initial_etraining.txt"
+    file "initial_test.txt"
+
+    script:
+    """
+    SIZE=\$(
+      computeFlankingRegion.pl complete.gtf \
+      | sed -rn '/DNA value is/s/^[^[:digit:]]*([[:digit:]]*).*\$/\\1/p'
+    )
+
+    grep -v "^#" clustered.tsv | cut -f1 | uniq > non_redundant.txt
+
+    grep -vx -f both_utrs.txt non_redundant.txt > not_both_utrs.txt
+
+    gff2gbSmallDNA.pl \
+      complete.gtf \
+      genome.fasta \
+      "\${SIZE}" \
+      --good=non_redundant.txt \
+      complete.gb
+
+    NSEQS="\$(grep -c "LOCUS" complete.gb)"
+
+    if [ \${NSEQS} -gt 9000 ]; then    
+      NTEST=\$(( \${NSEQS} - 5000 ))
+    elif [ \${NSEQS} -gt 5000 ]; then
+      NTEST=\$(( (4 * \${NSEQS}) / 10 ))
+    elif [ \${NSEQS} -gt 500 ]; then
+      NTEST=\$(( (2 * \${NSEQS}) / 10 ))
+    elif [ \${NSEQS} -gt 300 ]; then
+      NTEST=100
+    else
+      echo "Not enough genes"
+      exit 500
+    fi
+
+    randomSplit.pl complete.gb \${NTEST} 
+    mv complete.gb.test test.gb
+    mv complete.gb.train train.gb
+
+    filterGenes.pl not_both_utrs.txt train.gb > train_utrs.gb
+    filterGenes.pl not_both_utrs.txt test.gb > test_utrs.gb
+
+    if [ \$(grep -c "LOCUS" train_utrs.gb) -lt 200 ]; then
+      echo "Don't have enough examples to train UTRs from. Try a different split."
+      exit 501
+    elif [ \$(grep -c "LOCUS" test_utrs.gb) -lt 100 ]; then
+      echo "Don't have enough examples to test UTRs with. Try a different split."
+      exit 501
+    fi
+
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+    rm -rf -- "\${AUGUSTUS_CONFIG_PATH}/species/${name}"
+    new_species.pl --species="${name}"
+
+    etraining --species="${name}" train.gb &> initial_etraining.txt
+    augustus --species="${name}" test.gb > initial_test.txt
+    """
+}
+
+completeTrainingSetGenbank.into {
+    completeTrainingSetGenbank4OptimiseMetaparsPass1;
+    completeTrainingSetGenbank4OptimiseMetaparsPass2;
+    completeTrainingSetGenbank4OptimiseMetaparsUTRs;
+}
+
+
+process optimiseAugustusMetaparsPass1 {
+
+    label "augustus"
+    label "biggish_task"
+    publishDir "${params.outdir}/training"
+
+    input:
+    set val(name),
+        file("train.gb"),
+        file("test.gb"),
+        file("train_utrs.gb"),
+        file("test_utrs.gb") from completeTrainingSetGenbank4OptimiseMetaparsPass1
+    file "augustus_config" from augustusConfig
+
+    output:
+    val name into optimisedAugustusMetaparsPass1
+    file "optimised_pass1_etraining.txt"
+    file "optimised_pass1_test.txt"
+    file "optimised_pass1.txt"
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    if [ \$(grep -c "LOCUS" train.gb) -gt 1000 ]; then
+      randomSplit.pl train.gb 600
+
+      optimize_augustus.pl \
+        --species="${name}" \
+        --rounds=5 \
+        --kfold=8 \
+        --UTR=off \
+        --cpus="${task.cpus}" \
+        --onlytrain=train.gb.train \
+        train.gb.test \
+      > optimised_pass1.txt
+    else
+      optimize_augustus.pl \
+        --species="${name}" \
+        --rounds=5 \
+        --kfold=8 \
+        --UTR=off \
+        --cpus="${task.cpus}" \
+        train.gb \
+      > optimised_pass1.txt
+    fi
+
+    etraining --species="${name}" train.gb &> optimised_pass1_etraining.txt
+    augustus --species="${name}" test.gb > optimised_pass1_test.txt
+    """
+}
+
+
+process optimiseAugustusMetaparsPass2 {
+
+    label "augustus"
+    label "biggish_task"
+    publishDir "${params.outdir}/training"
+
+    input:
+    set val(name),
+        file("train.gb"),
+        file("test.gb"),
+        file("train_utrs.gb"),
+        file("test_utrs.gb") from completeTrainingSetGenbank4OptimiseMetaparsPass2
+    file "augustus_config" from augustusConfig
+    val dummy from optimisedAugustusMetaparsPass1
+
+    output:
+    val name into optimisedAugustusMetaparsPass2
+    file "optimised_pass2_etraining.txt"
+    file "optimised_pass2_test.txt"
+    file "optimised_pass2.txt"
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    if [ \$(grep -c "LOCUS" train.gb) -gt 1000 ]; then
+      randomSplit.pl train.gb 600
+
+      optimize_augustus.pl \
+        --species="${name}" \
+        --rounds=5 \
+        --kfold=8 \
+        --UTR=off \
+        --cpus="${task.cpus}" \
+        --onlytrain=train.gb.train \
+        train.gb.test \
+      > optimised_pass2.txt
+    else
+      optimize_augustus.pl \
+        --species="${name}" \
+        --rounds=5 \
+        --kfold=8 \
+        --UTR=off \
+        --cpus="${task.cpus}" \
+        train.gb \
+      > optimised_pass2.txt
+    fi
+
+    etraining --species="${name}" train.gb &> optimised_pass2_etraining.txt
+    augustus --species="${name}" test.gb > optimised_pass2_test.txt
+    """
+}
+
+
+process optimiseAugustusMetaparsUTRs {
+
+    label "augustus"
+    label "biggish_task"
+    publishDir "${params.outdir}/training"
+
+    input:
+    set val(name),
+        file("train.gb"),
+        file("test.gb"),
+        file("train_utrs.gb"),
+        file("test_utrs.gb") from completeTrainingSetGenbank4OptimiseMetaparsUTRs
+    file "augustus_config" from augustusConfig
+    val dummy from optimisedAugustusMetaparsPass2
+
+    output:
+    val name into optimisedAugustusMetaparsUTRs
+    file "optimised_utrs_etraining.txt"
+    file "optimised_utrs_test.txt"
+    file "optimised_utrs.txt"
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    if [ \$(grep -c "LOCUS" train_utrs.gb) -gt 2000 ]; then
+      randomSplit.pl train_utrs.gb 1000
+
+      optimize_augustus.pl \
+        --species="${name}" \
+        --rounds=5 \
+        --kfold=8 \
+        --UTR=on \
+        --metapars="${AUGUSTUS_CONFIG_PATH}/species/${name}/${name}_metapars.utr.cfg" \
+        --trainOnlyUtr=1 \
+        --cpus="${task.cpus}" \
+        --onlytrain=train.gb.train \
+        train_utrs.gb.test \
+      > optimised_utrs.txt
+    else
+      optimize_augustus.pl \
+        --species="${name}" \
+        --rounds=5 \
+        --kfold=8 \
+        --UTR=on \
+        --metapars="${AUGUSTUS_CONFIG_PATH}/species/${name}/${name}_metapars.utr.cfg" \
+        --trainOnlyUtr=1 \
+        --cpus="${task.cpus}" \
+        train_utrs.gb \
+      > optimised_utrs.txt
+    fi
+
+    etraining --species="${name}" train_utrs.gb &> optimised_utrs_etraining.txt
+    augustus --species="${name}" --UTR=on --print_utr=on test_utrs.gb > optimised_utrs_test.txt
+    """
+}
 
 // 6 If no genome alignment, run sibelliaz
 

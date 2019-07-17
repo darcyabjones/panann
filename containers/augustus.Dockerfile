@@ -101,6 +101,7 @@ RUN  set -eu \
        libbamtools2.5.1 \
        libcurl3-gnutls \
        libgsl23 \
+       libparallel-forkmanager-perl \
        libssl1.1 \
        libsqlite3-0 \
        lp-solve \

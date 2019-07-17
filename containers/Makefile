@@ -71,7 +71,7 @@ FASTA_VERSION=36.3.8g
 FASTA_URL=http://faculty.virginia.edu/wrpearson/fasta/fasta36/fasta-36.3.8g.tar.gz
 FASTA_PREFIX_ARG=$(INSTALL_BASE)/fasta/$(FASTA_VERSION)
 
-MMSEQS_TAG=7-4e23d
+MMSEQS_TAG=9-d36de
 MMSEQS_REPO=https://github.com/soedinglab/MMseqs2.git
 MMSEQS_PREFIX_ARG=$(INSTALL_BASE)/mmseqs/$(MMSEQS_TAG)
 

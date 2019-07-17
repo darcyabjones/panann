@@ -3,7 +3,7 @@ ARG IMAGE
 FROM "${IMAGE}" as builder
 
 ## Config variables
-ARG MMSEQS_TAG="7-4e23d"
+ARG MMSEQS_TAG="9-d36de"
 ARG MMSEQS_CMAKE_OPTIONS=""
 ARG MMSEQS_REPO="https://github.com/soedinglab/MMseqs2.git"
 ARG MMSEQS_PREFIX_ARG="/opt/mmseqs/${MMSEQS_TAG}"
@@ -34,10 +34,25 @@ RUN  set -eu \
   && cmake \
        ${MMSEQS_CMAKE_OPTIONS} \
        -DHAVE_MPI=1 \
+       -DHAVE_AVX2=1 \
        -DCMAKE_BUILD_TYPE=Release \
        -DCMAKE_INSTALL_PREFIX="${MMSEQS_PREFIX}" .. \
   && make \
   && make install \
+  && mv "${MMSEQS_PREFIX}/bin/mmseqs" "${MMSEQS_PREFIX}/bin/mmseqs.avx2" \
+  && cmake \
+       ${MMSEQS_CMAKE_OPTIONS} \
+       -DHAVE_MPI=1 \
+       -DHAVE_AVX2=0 \
+       -DHAVE_SSE4_1=1 \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DCMAKE_INSTALL_PREFIX="${MMSEQS_PREFIX}" .. \
+  && make \
+  && make install \
+  && mv "${MMSEQS_PREFIX}/bin/mmseqs" "${MMSEQS_PREFIX}/bin/mmseqs.sse4" \
+  && cp ../util/mmseqs_wrapper.sh "${MMSEQS_PREFIX}/bin/mmseqs" \
+  && sed -i 's~/usr/local/bin/mmseqs_avx2~"${MMSEQS_PREFIX}/bin/mmseqs.avx2"~g' "${MMSEQS_PREFIX}/bin/mmseqs" \
+  && sed -i 's~/usr/local/bin/mmseqs_sse42~"${MMSEQS_PREFIX}/bin/mmseqs.sse4"~g' "${MMSEQS_PREFIX}/bin/mmseqs" \
   && add_runtime_dep \
        gawk \
        bash \
