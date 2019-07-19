@@ -994,7 +994,7 @@ process alignSpalnTranscripts {
     """
 }
 
-
+/*
 process extractSpalnTranscriptHints {
 
     label "braker"
@@ -1019,7 +1019,7 @@ process extractSpalnTranscriptHints {
       --prg=spaln 
     """
 }
-
+*/
 
 /*
  * Align transcripts using gmap
@@ -2146,7 +2146,7 @@ process extractCompleteTrainingSetProteins {
     ' proteins.faa > linearised.tsv
 
     # Filter internal stops and replace tabs with newlines
-    sed 's/\\*\$//g' proteins.faa \
+    sed 's/\\*\$//g' linearised.tsv \
     | awk -F '\\t' '!(\$2 ~ /\\*/)' \
     | tr '\\t' '\\n' \
     > complete.faa
