@@ -81,6 +81,7 @@ params.genome_alignment = false
 params.busco_lineage = false
 params.augustus_config = false
 params.augustus_species = false
+params.augustus_utr = false
 
 // RNAseq params
 params.fastq = false
@@ -322,6 +323,7 @@ genomesWithFaidx.into {
     genomes4RunGemoma;
     genomes4CombineGemoma;
     genomes4RunAugustusDenovo;
+    genomes4RunAugustusDenovoUTR;
 }
 
 
@@ -2084,9 +2086,57 @@ process runAugustusDenovo {
     file "augustus_config" from augustusConfig
  
     output:
-    set file("${name}.gff3"),
-        file("${name}.aa"),
-        file("${name}.codingseq") into augustusDenovoResults
+    set file("${name}_augustus_denovo.gff3"),
+        file("${name}_augustus_denovo.faa"),
+        file("${name}_augustus_denovo.fna") into augustusDenovoResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --softmasking=on \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="${name}_augustus_denovo.gff3" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    getAnnoFasta.pl "${name}_augustus_denovo.gff3"
+    mv "${name}_augustus_denovo.aa" "${name}_augustus_denovo.faa"
+    mv "${name}_augustus_denovo.codingseq" "${name}_augustus_denovo.fna"
+    """
+}
+
+
+process runAugustusDenovoUTR {
+
+    label "augustus"
+    label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag { name }
+
+    when:
+    params.augustus_utr
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx) from genomes4RunAugustusDenovoUTR
+
+    file "augustus_config" from augustusConfig
+ 
+    output:
+    set file("${name}_augustus_denovo_utr.gff3"),
+        file("${name}_augustus_denovo_utr.faa"),
+        file("${name}_augustus_denovo_utr.fna") into augustusDenovoUTRResults
 
     script:
     """
@@ -2103,11 +2153,13 @@ process runAugustusDenovo {
       --UTR=on \
       --codingseq=on \
       --protein=on \
-      --outfile="${name}.gff3" \
+      --outfile="${name}_augustus_denovo_utr.gff3" \
       --errfile=augustus.err \
       "${fasta}"
 
-    getAnnoFasta.pl "${name}.gff3"
+    getAnnoFasta.pl "${name}_augustus_denovo_utr.gff3"
+    mv "${name}_augustus_denovo.aa" "${name}_augustus_denovo_utr.faa"
+    mv "${name}_augustus_denovo.codingseq" "${name}_augustus_denovo_utr.fna"
     """
 }
 
