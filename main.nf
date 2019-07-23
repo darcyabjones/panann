@@ -2104,13 +2104,14 @@ process runAugustusDenovo {
       --gff3=on \
       --codingseq=on \
       --protein=on \
-      --outfile="${name}_augustus_denovo.gff3" \
+      --outfile="out.gff" \
       --errfile=augustus.err \
       "${fasta}"
 
-    getAnnoFasta.pl "${name}_augustus_denovo.gff3"
-    mv "${name}_augustus_denovo.aa" "${name}_augustus_denovo.faa"
-    mv "${name}_augustus_denovo.codingseq" "${name}_augustus_denovo.fna"
+    getAnnoFasta.pl "out.gff"
+    mv "out.gff" "${name}_augustus_denovo.gff3"
+    mv "out.aa" "${name}_augustus_denovo.faa"
+    mv "out.codingseq" "${name}_augustus_denovo.fna"
     """
 }
 
@@ -2153,13 +2154,14 @@ process runAugustusDenovoUTR {
       --UTR=on \
       --codingseq=on \
       --protein=on \
-      --outfile="${name}_augustus_denovo_utr.gff3" \
+      --outfile="out.gff" \
       --errfile=augustus.err \
       "${fasta}"
 
-    getAnnoFasta.pl "${name}_augustus_denovo_utr.gff3"
-    mv "${name}_augustus_denovo.aa" "${name}_augustus_denovo_utr.faa"
-    mv "${name}_augustus_denovo.codingseq" "${name}_augustus_denovo_utr.fna"
+    getAnnoFasta.pl "out.gff"
+    mv "out.gff" "${name}_augustus_denovo_utr.gff3"
+    mv "out.aa" "${name}_augustus_denovo_utr.faa"
+    mv "out.codingseq" "${name}_augustus_denovo_utr.fna"
     """
 }
 

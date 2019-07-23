@@ -208,7 +208,7 @@ class GFFAttributes(object):
         return cls(**kvpairs)
 
     def __str__(self):
-        return " ".join(f"{k}={v};" for k, v in self.inner.items())
+        return "".join(f"{k}={v};" for k, v in self.inner.items())
 
     def __getitem__(self, key):
         return self.inner[key]
@@ -663,6 +663,9 @@ def cli(prog, args):
 
 
 def parse_custom_features(features):
+    if features is None or len(features) == 0:
+        return {}
+
     assert len(features) % 2 == 0
     features = dict(f.split("=", maxsplit=1) for f in features)
 
