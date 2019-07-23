@@ -994,32 +994,61 @@ process alignSpalnTranscripts {
     """
 }
 
+
+process tidySpalnTranscripts {
+
+    label "genometools"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file("transcripts.gff3") from spalnAlignedTranscripts
+
+    output:
+    set val(name),
+        file("tidied.gff3") into spalnTidiedTranscripts
+
+    script:
+    """
+    gt gff3 \
+      -tidy \
+      -retainids \
+      -addintrons transcripts.gff3 \
+    > "tidied.gff3"
+    """
+}
+
 /*
+*/
 process extractSpalnTranscriptHints {
 
-    label "braker"
+    label "python3"
     label "small_task"
 
     publishDir "${params.outdir}/hints/${name}"
 
     input:
-    set val(name), file("spaln.gff3") from spalnAlignedTranscripts
+    set val(name), file("spaln.gff3") from spalnTidiedTranscripts
 
     output:
-    set val(name), file("${name}_spaln_transcript_hints.gff3") into spalnTranscriptHints
+    set val(name),
+        file("${name}_spaln_transcript_hints.gff3") into spalnTranscriptHints
 
     script:
     """
-    align2hints.pl \
-      --in=spaln.gff3 \
-      --out=${name}_spaln_transcript_hints.gff3 \
-      --CDSpart_cutoff=6 \
-      --priority=2 \
-      --source=E \
-      --prg=spaln 
+    gff2hints.py \
+      --source E \
+      --group-level mRNA \
+      --priority 3 \
+      --exon-trim 6 \
+      --intron-trim 0 \
+      - \
+    | awk '$3 != "genicpart"' \
+    > "${name}_spaln_transcript_hints.gff3"
     """
 }
-*/
+
 
 /*
  * Align transcripts using gmap
@@ -1167,7 +1196,7 @@ process extractSpalnProteinHints {
       --in=spaln.gff3 \
       --out=${name}_spaln_protein_hints.gff3 \
       --prg=spaln \
-      --CDSpart_cutoff=15 \
+      --CDSpart_cutoff=12 \
       --priority=2
     """
 }
@@ -1301,6 +1330,76 @@ process runPASA {
     ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.genome.gff3 \${PWD}/${name}_pasa.gff3
     ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.cds \${PWD}/${name}_pasa_cds.fna
     ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.pep \${PWD}/${name}_pasa_protein.faa
+    """
+}
+
+
+process tidyPasa {
+
+    label "aegean"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file("pasa.gff3") from pasaPredictions
+        .map { n, g, c, p -> [n, c] }
+
+    output:
+    set val(name), file("pasa_tidy.gff3") into tidiedPasa
+
+    script:
+    """
+    gt gff3 -tidy -sort -retainids pasa.gff3 \
+    | canon-gff3 -i - \
+    > pasa_tidy.gff3
+    """
+}
+
+
+process extractPasaHints {
+
+    label "python3"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file("pasa.gff3") from tidiedPasa
+
+    output:
+    set val(name),
+        file("${name}_pasa_hints.gff3"),
+        file("${name}_transdecoder_hints.gff3") into pasaHints
+
+    script:
+    """
+    awk '$3 == "exon" || $3 == "intron"' \
+      pasa.gff3 \
+    | gff2hints.py \
+      --source PR \
+      --group-level mRNA \
+      --priority 3 \
+      --exon-trim 9 \
+      --intron-trim 0 \
+      pasa.gff3 \
+    | awk '$3 != "genicpart"' \
+    | awk '{sub(/group=/, "group=pasa_", $9); print}' \
+    > "${name}_pasa_hints.gff3"
+
+
+    awk '$3 != "exon" && $3 != "intron"' \
+      pasa.gff3 \
+    | gff2hints.py \
+      --source PR \
+      --group-level mRNA \
+      --priority 2 \
+      --cds-trim 9 \
+      --utr-trim 6 \
+      pasa.gff3 \
+    | awk '$3 != "genicpart"' \
+    | awk '{sub(/group=/, "group=transdecoder_", $9); print}' \
+    > "${name}_transdecoder_hints.gff3"
     """
 }
 
@@ -1466,6 +1565,63 @@ process runGenemark {
 }
 
 
+process tidyGenemark {
+
+    label "aegean"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    params.genemark
+
+    input:
+    set val(name), file("genemark.gtf") from genemarkPredictions
+
+    output:
+    set val(name), file("genemark.gff3") into tidiedGenemark
+
+    script:
+    """
+    gt gtf_to_gff3 -tidy genemark.gtf \
+    | gt gff3 -tidy -sort -retainids \
+    | canon-gff3 -i - > genemark.gff3
+    """
+}
+
+
+process extractGenemarkHints {
+
+    label "python3"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    params.genemark
+
+    input:
+    set val(name), file("genemark.gff3") from tidiedGenemark
+
+    output:
+    set val(name), file("${name}_genemark_hints.gff3")
+
+    script:
+    """
+    gff2hints.py \
+      --source PR \
+      --group-level mRNA \
+      --priority 2 \
+      --cds-trim 9 \
+      --exon-trim 9 \
+      --intron-trim 0 \
+      genemark.gff3 \
+    | awk '$3 != "genicpart"' \
+    > "${name}_genemark_hints.gff3"
+    """
+}
+
+
 /*
  * First pass of coding quarry
  */
@@ -1521,11 +1677,69 @@ process runCodingQuarry {
 }
 
 
-
-
 codingQuarryPredictions.into {
     codingQuarryPredictions4SecretionPred;
     codingQuarryPredictions4PM;
+    codingQuarryPredictions4Tidy;
+}
+
+
+process tidyCodingQuarry {
+
+    label "aegean"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    !params.notfungus
+
+    input:
+    set val(name),
+        file("codingquarry.gff3") from codingQuarryPredictions4Tidy
+            .map { n, g, c, p, d, f, o -> [n, g] }
+
+    output:
+    set val(name), file("codingquarry_tidy.gff3") into tidiedCodingQuarry
+
+    script:
+    """
+    gt gff3 -tidy -sort -retainids codingquarry.gff3 \
+    | canon-gff3 -i - \
+    > codingquarry_tidy.gff3
+    """
+}
+
+
+process extractCodingQuarryHints {
+
+    label "python3"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    !params.notfungus
+
+    input:
+    set val(name), file("codingquarry.gff3") from tidiedCodingQuarry
+
+    output:
+    set val(name), file("${name}_codingquarry_hints.gff3")
+
+    script:
+    """
+    gff2hints.py \
+      --source PR \
+      --group-level mRNA \
+      --priority 3 \
+      --cds-trim 6 \
+      --exon-trim 6 \
+      --intron-trim 0 \
+      codingquarry.gff3 \
+    | awk '$3 != "genicpart"' \
+    > "${name}_codingquarry_hints.gff3"
+    """
 }
 
 
@@ -1566,9 +1780,9 @@ if (params.signalp) {
 
     process tidyCodingQuarrySignalp {
 
-	label "posix"
-	label "small_task"
-	publishDir "${params.outdir}/annotations/${name}"
+        label "posix"
+        label "small_task"
+        publishDir "${params.outdir}/annotations/${name}"
 
         tag "${name}"
 
@@ -1626,9 +1840,9 @@ if (params.signalp) {
 
     process tidyCodingQuarryDeepsig {
 
-	label "posix"
-	label "small_task"
-	publishDir "${params.outdir}/annotations/${name}"
+        label "posix"
+        label "small_task"
+        publishDir "${params.outdir}/annotations/${name}"
 
         tag "${name}"
 
@@ -1639,7 +1853,8 @@ if (params.signalp) {
         set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
 
         output:
-        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecretedTidy
+        set val(name),
+            file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecretedTidy
 
         script:
         """
@@ -1721,6 +1936,65 @@ process runCodingQuarryPM {
     mv out/fusions.txt "${name}_codingquarrypm_fusions.txt"
     mv out/overlapReport.txt "${name}_codingquarrypm_overlapreport.txt"
     # rm -rf -- out
+    """
+}
+
+
+process tidyCodingQuarryPM {
+
+    label "aegean"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    !params.notfungus
+
+    input:
+    set val(name),
+        file("codingquarry.gff3") from codingQuarryPMPredictions
+            .map { n, g, c, p -> [n, g] }
+
+    output:
+    set val(name), file("codingquarrypm_tidy.gff3") into tidiedCodingQuarryPM
+
+    script:
+    """
+    gt gff3 -tidy -sort -retainids codingquarry.gff3 \
+    | canon-gff3 -i - \
+    > codingquarrypm_tidy.gff3
+    """
+}
+
+
+process extractCodingQuarryPMHints {
+
+    label "python3"
+    label "small_task"
+
+    tag { name }
+
+    when:
+    !params.notfungus
+
+    input:
+    set val(name), file("codingquarry.gff3") from tidiedCodingQuarryPM
+
+    output:
+    set val(name), file("${name}_codingquarrypm_hints.gff3")
+
+    script:
+    """
+    gff2hints.py \
+      --source PR \
+      --group-level mRNA \
+      --priority 3 \
+      --cds-trim 6 \
+      --exon-trim 6 \
+      --intron-trim 0 \
+      codingquarry.gff3 \
+    | awk '$3 != "genicpart"' \
+    > "${name}_codingquarrypm_hints.gff3"
     """
 }
 
@@ -2047,25 +2321,56 @@ process combineGemomaPredictions {
 }
 
 
-process extractGemomaHints {
+process tidyGemoma {
 
-    label "braker"
+    label "aegean"
     label "small_task"
 
-    publishDir "${params.outdir}/hints/${name}"
+    tag { name }
 
     input:
     set val(name), file("gemoma.gff3") from gemomaPredictions
 
     output:
-    set val(name), file("gemoma_hints.gff3") into gemomaHints
+    set val(name), file("gemoma_tidy.gff3") into tidiedGemoma
 
     script:
     """
-    align2hints.pl \
-      --in=gemoma.gff3 \
-      --out=gemoma_hints.gff3 \
-      --prg=gemoma 
+    gt gff3 -tidy -sort -retainids gemoma.gff3 \
+    | awk 'BEGIN {OFS="\t"} $3 == "prediction" {$3="mRNA"} {print}' \
+    | canon-gff3 -i - \
+    > gemoma_tidy.gff3
+    """
+}
+
+
+process extractGemomaHints {
+
+    label "python3"
+    label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
+
+    tag { name }
+
+    input:
+    set val(name), file("gemoma.gff3") from tidiedGemoma
+
+    output:
+    set val(name), file("${name}_gemoma_hints.gff3")
+
+    script:
+    """
+    gff2hints.py \
+      --source PR \
+      --group-level mRNA \
+      --priority 3 \
+      --cds-trim 6 \
+      --exon-trim 6 \
+      --utr-trim 9 \
+      --intron-trim 0 \
+      gemoma.gff3 \
+    | awk '$3 != "genicpart"' \
+    > "${name}_gemoma_hints.gff3"
     """
 }
 
@@ -2084,7 +2389,7 @@ process runAugustusDenovo {
         file(faidx) from genomes4RunAugustusDenovo
 
     file "augustus_config" from augustusConfig
- 
+
     output:
     set file("${name}_augustus_denovo.gff3"),
         file("${name}_augustus_denovo.faa"),
@@ -2133,7 +2438,7 @@ process runAugustusDenovoUTR {
         file(faidx) from genomes4RunAugustusDenovoUTR
 
     file "augustus_config" from augustusConfig
- 
+
     output:
     set file("${name}_augustus_denovo_utr.gff3"),
         file("${name}_augustus_denovo_utr.faa"),
