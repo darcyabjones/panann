@@ -80,6 +80,10 @@ GENOMETOOLS_VERSION=1.5.10
 GENOMETOOLS_URL=http://genometools.org/pub/genometools-$(GENOMETOOLS_VERSION).tar.gz
 GENOMETOOLS_PREFIX_ARG=$(INSTALL_BASE)/genometools/$(GENOMETOOLS_VERSION)
 
+AEGEAN_VERSION=v0.15.0
+AEGEAN_URL=https://github.com/standage/AEGeAn/archive/$(AEGEAN_VERSION).tar.gz
+AEGEAN_PREFIX_ARG=$(INSTALL_BASE)/aegean/$(AEGEAN_VERSION)
+
 
 AUGUSTUS_COMMIT=8b1b14a7489e4545e89c8725dc33268f6c2a9117
 AUGUSTUS_REPO=https://github.com/Gaius-Augustus/Augustus.git
@@ -126,7 +130,7 @@ TENSORFLOW_PREFIX_ARG=$(INSTALL_BASE)/tensorflow/$(TENSORFLOW_VERSION)
 KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
-GENERAL=htslib python3 posix
+GENERAL=htslib python3 posix genometools aegean
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
@@ -356,6 +360,22 @@ docker/genometools: genometools.Dockerfile docker/base
 	  --build-arg GENOMETOOLS_VERSION="$(GENOMETOOLS_VERSION)" \
 	  --build-arg GENOMETOOLS_URL="$(GENOMETOOLS_URL)" \
 	  --build-arg GENOMETOOLS_PREFIX_ARG="$(GENOMETOOLS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/aegean: aegean.Dockerfile docker/base docker/genometools
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg GENOMETOOLS_IMAGE="$(call make_image_name,genometools)" \
+	  --build-arg GENOMETOOLS_VERSION="$(GENOMETOOLS_VERSION)" \
+	  --build-arg GENOMETOOLS_PREFIX_ARG="$(GENOMETOOLS_PREFIX_ARG)" \
+	  --build-arg AEGEAN_VERSION="$(AEGEAN_VERSION)" \
+	  --build-arg AEGEAN_URL="$(AEGEAN_URL)" \
+	  --build-arg AEGEAN_PREFIX_ARG="$(AEGEAN_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
