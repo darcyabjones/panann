@@ -22,8 +22,9 @@ RUN  set -eu \
   && tar zxf genometools.tar.gz \
   && rm genometools.tar.gz \
   && cd genometools*/ \
-  && make \
-  && make prefix="${GENOMETOOLS_PREFIX}" install \
+  && sed -i 's/-Wall//g' Makefile \
+  && make errorcheck=no \
+  && make errorcheck=no prefix="${GENOMETOOLS_PREFIX}" install \
   && add_runtime_dep libcairo2 libpango-1.0-0 libpangocairo-1.0-0
 
 

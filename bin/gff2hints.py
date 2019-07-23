@@ -2,19 +2,21 @@
 
 import sys
 import argparse
-from typing import NamedTuple
 from typing import Optional
 from typing import TypeVar
-from typing import ClassVar
 from typing import List
 from typing import Dict
+from typing import Union
 
 from enum import Enum
+from copy import deepcopy
+from collections import defaultdict
 
-FILE_FORMATS = ["gene", "match"]
 SOURCES = ["M", "E", "P", "RM", "W", "XNT", "C", "D", "T", "R", "PB"]
 
 GFF_TYPE_MAP = {
+    "gene": "genicpart",
+    "mRNA": "genicpart",
     "transcription_start_site": "transcription_start_site",
     "TSS": "transcription_start_site",
     "SO:0000315": "transcription_start_site",
@@ -123,7 +125,14 @@ HINT_TYPE = [
 ]
 
 
-StrandT = TypeVar("StrandT", bound=Strand)
+StrandT = TypeVar("StrandT", bound="Strand")
+PhaseT = TypeVar("PhaseT", bound="Phase")
+
+
+class GFFFormats(Enum):
+    GTF2 = 0
+    GFF3 = 1
+
 
 class Strand(Enum):
     PLUS = 0
@@ -131,19 +140,19 @@ class Strand(Enum):
     UNSTRANDED = 2
     UNKNOWN = 3
 
-    into_str_map: ClassVar[List[str]] = ["+", "-", ".", "?"]
-    from_str_map: ClassVar[Dict[str, StrandT]] = {
-        "+": cls.PLUS,
-        "-": cls.MINUS,
-        ".": cls.UNSTRANDED,
-        "?": cls.UNKNOWN,
-    }
-
     def __str__(self):
+        into_str_map: List[str] = ["+", "-", ".", "?"]
         return into_str_map[self.value]
 
     @classmethod
     def from_str(cls: StrandT, string: str) -> StrandT:
+        from_str_map: Dict[str, StrandT] = {
+            "+": cls.PLUS,
+            "-": cls.MINUS,
+            ".": cls.UNSTRANDED,
+            "?": cls.UNKNOWN,
+        }
+
         try:
             return from_str_map[string]
         except KeyError:
@@ -157,36 +166,311 @@ class Phase(Enum):
     THIRD = 2
     NOT_CDS = 3
 
-    into_str_map: ClassVar[List[str]] = ["0", "1", "2", "3"]
-    from_str_map: ClassVar[Dict[str, StrandT]] = {
-        "0": cls.FIRST,
-        "1": cls.SECOND,
-        "2": cls.THIRD,
-        "0": cls.NOT_CDS,
-    }
-
     def __str__(self):
+        into_str_map: List[str] = ["0", "1", "2", "."]
         return into_str_map[self.value]
 
     @classmethod
-    def from_str(cls: StrandT, string: str) -> StrandT:
+    def from_str(cls, string: str):
+        from_str_map: Dict[str, PhaseT] = {
+            "0": cls.FIRST,
+            "1": cls.SECOND,
+            "2": cls.THIRD,
+            ".": cls.NOT_CDS,
+        }
+
         try:
             return from_str_map[string]
         except KeyError:
             valid = list(from_str_map.keys())
             raise KeyError(f"Invalid option. Must be one of {valid}")
 
-class GFFRecord(NamedTuple):
 
-    seqid: str
-    source: str
-    type: str
-    start: int
-    end: int
-    score: Optional[float] = None
-    strand: Strand = Strand.UNSTRANDED
-    phase: Phase = Phase.NOT_CDS
+class GFFAttributes(object):
 
+    def __init__(self, **kwargs):
+        self.inner: Dict[str, str] = kwargs
+        return
+
+    @classmethod
+    def from_str(cls, string: str):
+        fields = (
+            f.split("=", maxsplit=1)
+            for f
+            in string.strip(" ;").split(";")
+        )
+
+        kvpairs = {
+            k: v.strip("\"' ")
+            for k, v
+            in fields
+        }
+        return cls(**kvpairs)
+
+    def __str__(self):
+        return " ".join(f"{k}={v};" for k, v in self.inner.items())
+
+    def __getitem__(self, key):
+        return self.inner[key]
+
+    def get(self, *args, **kwargs):
+        return self.inner.get(*args, **kwargs)
+
+    @property
+    def id(self):
+        return self.get("ID", None)
+
+    @id.setter
+    def id(self, value):
+        self.inner["ID"] = value
+
+    @property
+    def parent(self):
+        return self.get("Parent", None)
+
+    @parent.setter
+    def parent(self, value):
+        self.inner["Parent"] = value
+
+
+class GTFAttributes(object):
+
+    def __init__(self, **kwargs):
+        self.inner: Dict[str, str] = kwargs
+        return
+
+    @classmethod
+    def from_str(cls, string: str):
+        fields = (
+            f.split(" ", maxsplit=1)
+            for f
+            in string.strip(" ;").split(";")
+        )
+
+        kvpairs = {
+            k: v.strip("\"' ")
+            for k, v
+            in fields
+        }
+        return cls(**kvpairs)
+
+    def __str__(self):
+        return " ".join(f'{k} "{v}";' for k, v in self.inner.items())
+
+    def __getitem__(self, key):
+        return self.inner[key]
+
+    def get(self, *args, **kwargs):
+        return self.inner.get(*args, **kwargs)
+
+    @property
+    def id(self):
+        return self.get("transcript_id", None)
+
+    @id.setter
+    def id(self, value):
+        self.inner["transcript_id"] = value
+
+    @property
+    def parent(self):
+        return self.get("gene_id", None)
+
+    @parent.setter
+    def parent(self, value):
+        self.inner["gene_id"] = value
+
+
+class GFFRecord(object):
+
+    def __init__(
+        self,
+        id: int,
+        seqid: str,
+        source: str,
+        type: str,
+        start: int,
+        end: int,
+        score: Optional[float] = None,
+        strand: Strand = Strand.UNSTRANDED,
+        phase: Phase = Phase.NOT_CDS,
+        attributes: Union[GFFAttributes, GTFAttributes, None] = None,
+        parent: Optional[int] = None,
+    ):
+        self.id = id
+        self.parent = parent
+        self.seqid = seqid
+        self.source = source
+        self.type = type
+        self.start = start
+        self.end = end
+        self.score = score
+        self.strand = strand
+        self.phase = phase
+        self.attributes = attributes
+        return
+
+    @classmethod
+    def from_str(
+        cls,
+        id: int,
+        string: str,
+        format: GFFFormats = GFFFormats.GFF3,
+        parent: Optional[int] = None
+    ):
+        names = [
+            "seqid",
+            "source",
+            "type",
+            "start",
+            "end",
+            "score",
+            "strand",
+            "phase",
+            "attributes"
+        ]
+        fields = dict(zip(names, string.strip().split("\t")))
+        fields["id"] = id
+        fields["start"] = int(fields["start"])
+        fields["end"] = int(fields["end"])
+
+        if fields["start"] > fields["end"]:
+            tmp = fields["start"]
+            fields["start"] = fields["end"]
+            fields["end"] = tmp
+            del tmp
+
+        if fields["score"] == ".":
+            fields["score"] = None
+        else:
+            fields["score"] = float(fields["score"])
+
+        fields["strand"] = Strand.from_str(fields["strand"])
+        fields["phase"] = Phase.from_str(fields["phase"])
+
+        if format == GFFFormats.GFF3:
+            fields["attributes"] = GFFAttributes.from_str(fields["attributes"])
+        elif format == GFFFormats.GTF2:
+            fields["attributes"] = GTFAttributes.from_str(fields["attributes"])
+        else:
+            raise ValueError("Currently only support GFF3 and GTF2 formats.")
+
+        return cls(**fields)
+
+    def length(self):
+        return self.end - self.start
+
+    def trim_ends(self, length):
+        from math import ceil
+
+        if self.length() <= 2:
+            length = 0
+        elif self.length() < (2 * length):
+            length = ceil(self.length() / 4)
+
+        self.start += length
+        self.end -= length
+        return
+
+    def __str__(self):
+        names = [
+            "seqid",
+            "source",
+            "type",
+            "start",
+            "end",
+            "score",
+            "strand",
+            "phase",
+            "attributes"
+        ]
+
+        values = []
+        for name in names:
+            value = getattr(self, name)
+            if value is None:
+                values.append(".")
+            else:
+                values.append(str(value))
+        return "\t".join(values)
+
+
+class GFF(object):
+
+    def __init__(self, records):
+        self.i: int = 0
+        self.inner: List[GFFRecord] = list(records)
+        self.reindex()
+        return
+
+    def reindex(self):
+        index = defaultdict(list)
+        children = defaultdict(set)
+
+        for i, record in enumerate(self):
+            record.id = i
+
+            if record.attributes.id is not None:
+                index[record.attributes.id].append(record)
+
+        for record in self:
+            parent = record.attributes.parent
+            if parent is not None:
+                if len(index[parent]) >= 1:
+                    record.parent = index[parent][0].id
+
+        for record in self:
+            if record.parent is not None:
+                children[record.parent].add(record.id)
+
+        self.index = index
+        self.children = children
+        return
+
+    def get(self, key, default=[]):
+        indices = self.index.get(key, None)
+        if indices is None or len(indices) == 0:
+            return default
+        else:
+            return GFF([self.inner[i] for i in indices])
+
+    def get_children(self, key):
+        seen = {key}
+        to_visit = deepcopy(self.children.get(key, seen))
+
+        while len(to_visit) > 0:
+            child = to_visit.pop()
+            if child in seen:
+                continue
+            else:
+                seen.add(child)
+
+            to_visit.update(deepcopy(self.children.get(child, set())))
+        return GFF([self.inner[s] for s in seen])
+
+    def __str__(self):
+        return "\n".join(str(r) for r in self.inner)
+
+    @classmethod
+    def from_file(cls, handle):
+        out = []
+        for i, line in enumerate(handle):
+            if line.startswith("#"):
+                continue
+            out.append(GFFRecord.from_str(i, line))
+
+        return cls(out)
+
+    def __getitem__(self, key):
+        return self.inner[key]
+
+    def __iter__(self):
+        return iter(self.inner)
+
+    def select_type(self, type):
+        for f in self:
+            if f.type == type:
+                yield f
+        return
 
 
 def cli(prog, args):
@@ -211,16 +495,22 @@ def cli(prog, args):
     )
 
     parser.add_argument(
-        "-f", "--format",
-        default="gene",
-        choices=FILE_FORMATS,
-        help="The format of the input gff.",
-    )
-
-    parser.add_argument(
         "-s", "--source",
         default="M",
         help=f"The type of hint to create. Usually one of {SOURCES}.",
+    )
+
+    parser.add_argument(
+        "-p", "--priority",
+        default=1,
+        type=int,
+        help="The priority to give all hints.",
+    )
+
+    parser.add_argument(
+        "-g", "--group_level",
+        default="mRNA",
+        help="The level to group features at.",
     )
 
     parser.add_argument(
@@ -265,7 +555,121 @@ def cli(prog, args):
         help="The type to map UTR features to."
     )
 
+    parser.add_argument(
+        "-f", "--feature",
+        nargs="+",
+        help="Pairs to map between.",
+    )
+
+    parser.add_argument(
+        "--cds-trim",
+        default=6,
+        type=int,
+        help="Trim cds hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--intron-trim",
+        default=0,
+        type=int,
+        help="Trim intronpart hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--exon-trim",
+        default=0,
+        type=int,
+        help="Trim exon hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--utr-trim",
+        default=0,
+        type=int,
+        help="Trim utr hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--ir-trim",
+        default=50,
+        type=int,
+        help="Trim genepart hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--nonexon-trim",
+        default=0,
+        type=int,
+        help="Trim nonexonpart hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--gene-trim",
+        default=9,
+        type=int,
+        help="Trim genepart hints by this many basepairs.",
+    )
+
+    parser.add_argument(
+        "--cds-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
+    parser.add_argument(
+        "--intron-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
+    parser.add_argument(
+        "--exon-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
+    parser.add_argument(
+        "--utr-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
+    parser.add_argument(
+        "--ir-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
+    parser.add_argument(
+        "--nonexon-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
+    parser.add_argument(
+        "--gene-priority",
+        default=0,
+        type=int,
+        help="Give this hint a priority.",
+    )
+
     return parser.parse_args(args)
+
+
+def parse_custom_features(features):
+    assert len(features) % 2 == 0
+    features = dict(f.split("=", maxsplit=1) for f in features)
+
+    for feature in features.values():
+        if feature not in HINT_TYPE:
+            raise ValueError("custom features must map to valid hint type.")
+    return features
 
 
 def main():
@@ -293,7 +697,57 @@ def main():
         "genicpart": "genicpart",
     }
 
+    gff_to_hints.update(parse_custom_features(args.feature))
+
+    gff = GFF.from_file(args.infile)
+    for group in gff.select_type(args.group_level):
+        group_name = group.attributes.id
+        if group_name is None:
+            group_name = group.id
+
+        for feature in gff.get_children(group.id):
+            if feature.type in gff_to_hints:
+                type_ = gff_to_hints[feature.type]
+            else:
+                type_ = GFF_TYPE_MAP.get(feature.type, None)
+                type_ = gff_to_hints.get(type_, None)
+
+            if type_ is None:
+                continue
+
+            feature.type = type_
+
+            if feature.type == "exonpart":
+                feature.trim_ends(args.exon_trim)
+                priority = args.exon_priority
+            elif feature.type == "CDSpart":
+                feature.trim_ends(args.cds_trim)
+                priority = args.cds_priority
+            elif feature.type == "UTRpart":
+                feature.trim_ends(args.utr_trim)
+                priority = args.utr_priority
+            elif feature.type == "intronpart":
+                feature.trim_ends(args.intron_trim)
+                priority = args.intron_priority
+            elif feature.type == "genicpart":
+                feature.trim_ends(args.gene_trim)
+                priority = args.gene_priority
+            elif feature.type == "irpart":
+                feature.trim_ends(args.ir_trim)
+                priority = args.ir_priority
+            elif feature.type == "nonexonpart":
+                feature.trim_ends(args.nonexon_trim)
+                priority = args.nonexon_priority
+
+            attr = GFFAttributes(
+                source=args.source,
+                group=group_name,
+                priority=args.priority + priority
+            )
+            feature.attributes = attr
+            print(feature, file=args.outfile)
     return
+
 
 if __name__ == "__main__":
     main()
