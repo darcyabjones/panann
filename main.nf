@@ -322,10 +322,7 @@ genomesWithFaidx.into {
     genomes4AlignGemomaCDSParts;
     genomes4RunGemoma;
     genomes4CombineGemoma;
-    genomes4RunAugustusDenovo;
-    genomes4RunAugustusDenovoUTR;
-    genomes4RunAugustusHints;
-    genomes4RunAugustusHintsUTR;
+    genomes4ChunkifyGenomes;
 }
 
 
@@ -2401,25 +2398,53 @@ process extractGemomaHints {
 }
 
 
-process runAugustusDenovo {
+process chunkifyGenomes {
 
-    label "augustus"
+    label "python3"
     label "small_task"
-    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
     input:
     set val(name),
-        file(fasta),
-        file(faidx) from genomes4RunAugustusDenovo
+        file("input.fasta"),
+        file("input.fasta.fai") from genomes4ChunkifyGenomes
 
+    output:
+    set val(name), file("out_*.fasta") into chunkifiedGenomes
+
+    script:
+    """
+    chunk_genomes.py -n 12 --prefix "out_" input.fasta
+    """
+}
+
+
+chunkifiedGenomes
+    .flatMap { n, fs -> fs.collect {f -> [n, f]} }
+    .into {
+        genomes4RunAugustusDenovo;
+        genomes4RunAugustusDenovoUTR;
+        genomes4RunAugustusHints;
+        genomes4RunAugustusHintsUTR;
+    }
+
+
+process runAugustusDenovo {
+
+    label "augustus"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file(fasta) from genomes4RunAugustusDenovo
     file "augustus_config" from augustusConfig
 
     output:
-    set file("${name}_augustus_denovo.gff3"),
-        file("${name}_augustus_denovo.faa"),
-        file("${name}_augustus_denovo.fna") into augustusDenovoResults
+    set val(name),
+        val("augustus_denovo"),
+        file("out.gff") into augustusDenovoResults
 
     script:
     """
@@ -2439,11 +2464,6 @@ process runAugustusDenovo {
       --outfile="out.gff" \
       --errfile=augustus.err \
       "${fasta}"
-
-    getAnnoFasta.pl "out.gff"
-    mv "out.gff" "${name}_augustus_denovo.gff3"
-    mv "out.aa" "${name}_augustus_denovo.faa"
-    mv "out.codingseq" "${name}_augustus_denovo.fna"
     """
 }
 
@@ -2452,7 +2472,6 @@ process runAugustusDenovoUTR {
 
     label "augustus"
     label "small_task"
-    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
@@ -2460,16 +2479,13 @@ process runAugustusDenovoUTR {
     params.augustus_utr
 
     input:
-    set val(name),
-        file(fasta),
-        file(faidx) from genomes4RunAugustusDenovoUTR
-
+    set val(name), file(fasta) from genomes4RunAugustusDenovoUTR
     file "augustus_config" from augustusConfig
 
     output:
-    set file("${name}_augustus_denovo_utr.gff3"),
-        file("${name}_augustus_denovo_utr.faa"),
-        file("${name}_augustus_denovo_utr.fna") into augustusDenovoUTRResults
+    set val(name),
+        val("augustus_denovo_utr"),
+        file("out.gff") into augustusDenovoUTRResults
 
     script:
     """
@@ -2489,11 +2505,6 @@ process runAugustusDenovoUTR {
       --outfile="out.gff" \
       --errfile=augustus.err \
       "${fasta}"
-
-    getAnnoFasta.pl "out.gff"
-    mv "out.gff" "${name}_augustus_denovo_utr.gff3"
-    mv "out.aa" "${name}_augustus_denovo_utr.faa"
-    mv "out.codingseq" "${name}_augustus_denovo_utr.fna"
     """
 }
 
@@ -2518,7 +2529,6 @@ process runAugustusHintsUTR {
 
     label "augustus"
     label "small_task"
-    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
@@ -2528,22 +2538,26 @@ process runAugustusHintsUTR {
     input:
     set val(name),
         file(fasta),
-        file(faidx),
         file("*hints") from genomes4RunAugustusHintsUTR
-            .join(augustusExtrinsicHints.groupTuple(by: 0), by: 0)
+            .combine(augustusExtrinsicHints.groupTuple(by: 0), by: 0)
 
     file "augustus_config" from augustusConfig
 
     output:
-    set file("${name}_augustus_hints_utr.gff3"),
-        file("${name}_augustus_hints_utr.faa"),
-        file("${name}_augustus_hints_utr.fna") into augustusHintsUTRResults
+    set val(name),
+        val("augustus_hints_utr"),
+        file("out.gff") into augustusHintsUTRResults
 
     script:
     """
     export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
 
-    cat *hints > hints.gff
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
+    cat *hints \
+    | getLinesMatching.pl seqids.txt 1 \
+    > hints.gff
+
     cp "\${AUGUSTUS_CONFIG_PATH}/extrinsic/extrinsic.M.RM.E.W.P.cfg" extrinsic.cfg
 
     augustus \
@@ -2564,10 +2578,47 @@ process runAugustusHintsUTR {
       --errfile=augustus.err \
       "${fasta}"
 
-    getAnnoFasta.pl "out.gff"
-    mv "out.gff" "${name}_augustus_hints_utr.gff3"
-    mv "out.aa" "${name}_augustus_hints_utr.faa"
-    mv "out.codingseq" "${name}_augustus_hints_utr.fna"
+    rm hints.gff
+    """
+}
+
+
+augustusDenovoResults
+    .mix(
+        augustusDenovoUTRResults,
+        augustusHintsUTRResults
+    )
+    .groupTuple(by: [0, 1])
+    .set {augustusChunks}
+
+
+process joinAugustusChunks {
+
+    label "augustus"
+    label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag "${name} - ${paramset}"
+ 
+    input:
+    set val(name),
+        val(paramset),
+        file("*chunks.gff") from augustusChunks
+
+    output:
+    set val(name),
+        val(paramset),
+        file("${name}_${paramset}.gff3"),
+        file("${name}_${paramset}.faa"),
+        file("${name}_${paramset}.fna") into augustusJoinedChunks
+    
+    script:
+    """
+    cat *chunks.gff | join_aug_pred.pl > joined.gff
+    getAnnoFasta.pl "joined.gff"
+    mv "joined.gff" "${name}_${paramset}.gff3"
+    mv "joined.aa" "${name}_${paramset}.faa"
+    mv "joined.codingseq" "${name}_${paramset}.fna"
     """
 }
 
