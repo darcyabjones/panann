@@ -324,6 +324,8 @@ genomesWithFaidx.into {
     genomes4CombineGemoma;
     genomes4RunAugustusDenovo;
     genomes4RunAugustusDenovoUTR;
+    genomes4RunAugustusHints;
+    genomes4RunAugustusHintsUTR;
 }
 
 
@@ -1014,7 +1016,7 @@ process tidySpalnTranscripts {
     gt gff3 \
       -tidy \
       -retainids \
-      -addintrons transcripts.gff3 \
+      -addintrons <(grep -v "^#" transcripts.gff3) \
     > "tidied.gff3"
     """
 }
@@ -1027,6 +1029,8 @@ process extractSpalnTranscriptHints {
     label "small_task"
 
     publishDir "${params.outdir}/hints/${name}"
+
+    tag { name }
 
     input:
     set val(name), file("spaln.gff3") from spalnTidiedTranscripts
@@ -1043,8 +1047,9 @@ process extractSpalnTranscriptHints {
       --priority 3 \
       --exon-trim 6 \
       --intron-trim 0 \
-      - \
-    | awk '$3 != "genicpart"' \
+      spaln.gff3 \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_spaln_transcripts_", \$9); print}' \
     > "${name}_spaln_transcript_hints.gff3"
     """
 }
@@ -1194,10 +1199,14 @@ process extractSpalnProteinHints {
     """
     align2hints.pl \
       --in=spaln.gff3 \
-      --out=${name}_spaln_protein_hints.gff3 \
+      --out=hints.gff3 \
       --prg=spaln \
       --CDSpart_cutoff=12 \
       --priority=2
+
+    awk 'BEGIN {OFS="\\t"} {sub(/grp=/, "grp=${name}_spaln_proteins_", \$9); print}' \
+      hints.gff3 \
+    > "${name}_spaln_protein_hints.gff3"
     """
 }
 
@@ -1343,7 +1352,7 @@ process tidyPasa {
 
     input:
     set val(name), file("pasa.gff3") from pasaPredictions
-        .map { n, g, c, p -> [n, c] }
+        .map { n, g, c, p -> [n, g] }
 
     output:
     set val(name), file("pasa_tidy.gff3") into tidiedPasa
@@ -1362,6 +1371,8 @@ process extractPasaHints {
     label "python3"
     label "small_task"
 
+    publishDir "${params.outdir}/hints/${name}"
+
     tag { name }
 
     input:
@@ -1374,7 +1385,7 @@ process extractPasaHints {
 
     script:
     """
-    awk '$3 == "exon" || $3 == "intron"' \
+    awk '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' \
       pasa.gff3 \
     | gff2hints.py \
       --source PR \
@@ -1382,13 +1393,13 @@ process extractPasaHints {
       --priority 3 \
       --exon-trim 9 \
       --intron-trim 0 \
-      pasa.gff3 \
-    | awk '$3 != "genicpart"' \
-    | awk '{sub(/group=/, "group=pasa_", $9); print}' \
+      - \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_pasa_", \$9); print}' \
     > "${name}_pasa_hints.gff3"
 
 
-    awk '$3 != "exon" && $3 != "intron"' \
+    awk '\$3 != "exon" && \$3 != "intron"' \
       pasa.gff3 \
     | gff2hints.py \
       --source PR \
@@ -1396,9 +1407,9 @@ process extractPasaHints {
       --priority 2 \
       --cds-trim 9 \
       --utr-trim 6 \
-      pasa.gff3 \
-    | awk '$3 != "genicpart"' \
-    | awk '{sub(/group=/, "group=transdecoder_", $9); print}' \
+      - \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_transdecoder_", \$9); print}' \
     > "${name}_transdecoder_hints.gff3"
     """
 }
@@ -1515,7 +1526,10 @@ process extractAugustusRnaseqHints {
     """
 }
 
-augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
+augustusRnaseqHints.into {
+    augustusRnaseqHints4RunGenemark;
+    augustusRnaseqHints4JoinHints;
+}
 
 
 /*
@@ -1594,6 +1608,7 @@ process extractGenemarkHints {
 
     label "python3"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag { name }
 
@@ -1604,7 +1619,7 @@ process extractGenemarkHints {
     set val(name), file("genemark.gff3") from tidiedGenemark
 
     output:
-    set val(name), file("${name}_genemark_hints.gff3")
+    set val(name), file("${name}_genemark_hints.gff3") into genemarkHints
 
     script:
     """
@@ -1616,7 +1631,8 @@ process extractGenemarkHints {
       --exon-trim 9 \
       --intron-trim 0 \
       genemark.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_genemark_", \$9); print}' \
     > "${name}_genemark_hints.gff3"
     """
 }
@@ -1704,7 +1720,9 @@ process tidyCodingQuarry {
 
     script:
     """
-    gt gff3 -tidy -sort -retainids codingquarry.gff3 \
+    awk 'BEGIN {OFS="\\t"} \$8 = "-1" {\$8="0"} {print}' codingquarry.gff3 \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
+    | gt gff3 -tidy -sort -retainids \
     | canon-gff3 -i - \
     > codingquarry_tidy.gff3
     """
@@ -1715,6 +1733,7 @@ process extractCodingQuarryHints {
 
     label "python3"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag { name }
 
@@ -1725,19 +1744,21 @@ process extractCodingQuarryHints {
     set val(name), file("codingquarry.gff3") from tidiedCodingQuarry
 
     output:
-    set val(name), file("${name}_codingquarry_hints.gff3")
+    set val(name), file("${name}_codingquarry_hints.gff3") into codingQuarryHints
 
     script:
     """
     gff2hints.py \
       --source PR \
-      --group-level mRNA \
+      -g mRNA \
       --priority 3 \
       --cds-trim 6 \
       --exon-trim 6 \
       --intron-trim 0 \
+      -- \
       codingquarry.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarry_", \$9); print}' \
     > "${name}_codingquarry_hints.gff3"
     """
 }
@@ -1960,7 +1981,9 @@ process tidyCodingQuarryPM {
 
     script:
     """
-    gt gff3 -tidy -sort -retainids codingquarry.gff3 \
+    awk 'BEGIN {OFS="\\t"} \$8 == "-1" {\$8="0"} {print}' codingquarry.gff3 \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
+    | gt gff3 -tidy -sort -retainids \
     | canon-gff3 -i - \
     > codingquarrypm_tidy.gff3
     """
@@ -1971,6 +1994,7 @@ process extractCodingQuarryPMHints {
 
     label "python3"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag { name }
 
@@ -1981,19 +2005,20 @@ process extractCodingQuarryPMHints {
     set val(name), file("codingquarry.gff3") from tidiedCodingQuarryPM
 
     output:
-    set val(name), file("${name}_codingquarrypm_hints.gff3")
+    set val(name), file("${name}_codingquarrypm_hints.gff3") into codingQuarryPMHints
 
     script:
     """
     gff2hints.py \
       --source PR \
-      --group-level mRNA \
+      -g mRNA \
       --priority 3 \
       --cds-trim 6 \
       --exon-trim 6 \
       --intron-trim 0 \
       codingquarry.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarrypm_", \$9); print}' \
     > "${name}_codingquarrypm_hints.gff3"
     """
 }
@@ -2337,7 +2362,7 @@ process tidyGemoma {
     script:
     """
     gt gff3 -tidy -sort -retainids gemoma.gff3 \
-    | awk 'BEGIN {OFS="\t"} $3 == "prediction" {$3="mRNA"} {print}' \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
     | canon-gff3 -i - \
     > gemoma_tidy.gff3
     """
@@ -2356,7 +2381,7 @@ process extractGemomaHints {
     set val(name), file("gemoma.gff3") from tidiedGemoma
 
     output:
-    set val(name), file("${name}_gemoma_hints.gff3")
+    set val(name), file("${name}_gemoma_hints.gff3") into gemomaHints
 
     script:
     """
@@ -2369,7 +2394,8 @@ process extractGemomaHints {
       --utr-trim 9 \
       --intron-trim 0 \
       gemoma.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_gemoma_", \$9); print}' \
     > "${name}_gemoma_hints.gff3"
     """
 }
@@ -2407,6 +2433,7 @@ process runAugustusDenovo {
       --introns=on \
       --cds=on \
       --gff3=on \
+      --UTR=off \
       --codingseq=on \
       --protein=on \
       --outfile="out.gff" \
@@ -2467,6 +2494,80 @@ process runAugustusDenovoUTR {
     mv "out.gff" "${name}_augustus_denovo_utr.gff3"
     mv "out.aa" "${name}_augustus_denovo_utr.faa"
     mv "out.codingseq" "${name}_augustus_denovo_utr.fna"
+    """
+}
+
+augustusRnaseqHints4JoinHints
+    .flatMap { n, rg, i, e -> [[n, i], [n, e]] }
+    .mix(
+        spalnTranscriptHints,
+        spalnProteinHints
+    )
+    .tap { augustusExtrinsicHints }
+    .mix(
+        genemarkHints,
+        pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
+        codingQuarryHints,
+        codingQuarryPMHints,
+        gemomaHints,
+    )
+    .set { augustusPredHints }
+
+
+process runAugustusHintsUTR {
+
+    label "augustus"
+    label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag { name }
+
+    when:
+    params.augustus_utr
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("*hints") from genomes4RunAugustusHintsUTR
+            .join(augustusExtrinsicHints.groupTuple(by: 0), by: 0)
+
+    file "augustus_config" from augustusConfig
+
+    output:
+    set file("${name}_augustus_hints_utr.gff3"),
+        file("${name}_augustus_hints_utr.faa"),
+        file("${name}_augustus_hints_utr.fna") into augustusHintsUTRResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    cat *hints > hints.gff
+    cp "\${AUGUSTUS_CONFIG_PATH}/extrinsic/extrinsic.M.RM.E.W.P.cfg" extrinsic.cfg
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
+      --softmasking=on \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="out.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    getAnnoFasta.pl "out.gff"
+    mv "out.gff" "${name}_augustus_hints_utr.gff3"
+    mv "out.aa" "${name}_augustus_hints_utr.faa"
+    mv "out.codingseq" "${name}_augustus_hints_utr.fna"
     """
 }
 

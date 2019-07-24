@@ -456,7 +456,11 @@ class GFF(object):
         for i, line in enumerate(handle):
             if line.startswith("#"):
                 continue
-            out.append(GFFRecord.from_str(i, line))
+            try:
+                out.append(GFFRecord.from_str(i, line))
+            except Exception as e:
+                print(line, file=sys.stderr)
+                raise e
 
         return cls(out)
 
@@ -508,7 +512,7 @@ def cli(prog, args):
     )
 
     parser.add_argument(
-        "-g", "--group_level",
+        "-g", "--group-level",
         default="mRNA",
         help="The level to group features at.",
     )
