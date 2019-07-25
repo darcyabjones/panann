@@ -130,6 +130,13 @@ TENSORFLOW_PREFIX_ARG=$(INSTALL_BASE)/tensorflow/$(TENSORFLOW_VERSION)
 KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
+
+ARAGORN_VERSION=1.2.38
+ARAGORN_URL=http://130.235.244.92/ARAGORN/Downloads/aragorn1.2.38.tgz
+ARAGORN_PREFIX_ARG=$(INSTALL_BASE)/aragorn/$(ARAGORN_VERSION)
+
+
+
 GENERAL=htslib python3 posix genometools aegean
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
@@ -617,6 +624,19 @@ docker/deepsig: deepsig.Dockerfile docker/base
 	  --build-arg TENSORFLOW_PREFIX_ARG="$(TENSORFLOW_PREFIX_ARG)" \
 	  --build-arg KERAS_VERSION="$(KERAS_VERSION)" \
 	  --build-arg KERAS_PREFIX_ARG="$(KERAS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/aragorn: aragorn.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg ARAGORN_VERSION="$(ARAGORN_VERSION)" \
+	  --build-arg ARAGORN_URL="$(ARAGORN_URL)" \
+	  --build-arg ARAGORN_PREFIX_ARG="$(ARAGORN_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
