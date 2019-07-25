@@ -81,7 +81,10 @@ params.genome_alignment = false
 params.busco_lineage = false
 params.augustus_config = false
 params.augustus_species = false
+params.augustus_denovo = false
 params.augustus_utr = false
+params.augustus_pred_weights = "data/extrinsic_pred.cfg"
+params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 
 // RNAseq params
 params.fastq = false
@@ -192,6 +195,17 @@ if ( params.genome_alignment ) {
     // We can align it here or can do it later.
     genomeAlignment = false
 }
+
+
+Channel
+    .fromPath(params.augustus_pred_weights, checkIfExists: true, type: "file")
+    .first()
+    .set { augustusPredWeights }
+
+Channel
+    .fromPath(params.augustus_hint_weights, checkIfExists: true, type: "file")
+    .first()
+    .set { augustusHintWeights }
 
 
 // Because augustus requires the config folder to be editable, it's easier
@@ -322,8 +336,7 @@ genomesWithFaidx.into {
     genomes4AlignGemomaCDSParts;
     genomes4RunGemoma;
     genomes4CombineGemoma;
-    genomes4RunAugustusDenovo;
-    genomes4RunAugustusDenovoUTR;
+    genomes4ChunkifyGenomes;
 }
 
 
@@ -1014,7 +1027,7 @@ process tidySpalnTranscripts {
     gt gff3 \
       -tidy \
       -retainids \
-      -addintrons transcripts.gff3 \
+      -addintrons <(grep -v "^#" transcripts.gff3) \
     > "tidied.gff3"
     """
 }
@@ -1028,6 +1041,8 @@ process extractSpalnTranscriptHints {
 
     publishDir "${params.outdir}/hints/${name}"
 
+    tag { name }
+
     input:
     set val(name), file("spaln.gff3") from spalnTidiedTranscripts
 
@@ -1040,11 +1055,12 @@ process extractSpalnTranscriptHints {
     gff2hints.py \
       --source E \
       --group-level mRNA \
-      --priority 3 \
+      --priority 4 \
       --exon-trim 6 \
       --intron-trim 0 \
-      - \
-    | awk '$3 != "genicpart"' \
+      spaln.gff3 \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_spaln_transcripts_", \$9); print}' \
     > "${name}_spaln_transcript_hints.gff3"
     """
 }
@@ -1194,10 +1210,14 @@ process extractSpalnProteinHints {
     """
     align2hints.pl \
       --in=spaln.gff3 \
-      --out=${name}_spaln_protein_hints.gff3 \
+      --out=hints.gff3 \
       --prg=spaln \
       --CDSpart_cutoff=12 \
-      --priority=2
+      --priority=3
+
+    awk 'BEGIN {OFS="\\t"} {sub(/grp=/, "grp=${name}_spaln_proteins_", \$9); print}' \
+      hints.gff3 \
+    > "${name}_spaln_protein_hints.gff3"
     """
 }
 
@@ -1343,7 +1363,7 @@ process tidyPasa {
 
     input:
     set val(name), file("pasa.gff3") from pasaPredictions
-        .map { n, g, c, p -> [n, c] }
+        .map { n, g, c, p -> [n, g] }
 
     output:
     set val(name), file("pasa_tidy.gff3") into tidiedPasa
@@ -1362,6 +1382,8 @@ process extractPasaHints {
     label "python3"
     label "small_task"
 
+    publishDir "${params.outdir}/hints/${name}"
+
     tag { name }
 
     input:
@@ -1374,7 +1396,7 @@ process extractPasaHints {
 
     script:
     """
-    awk '$3 == "exon" || $3 == "intron"' \
+    awk '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' \
       pasa.gff3 \
     | gff2hints.py \
       --source PR \
@@ -1382,23 +1404,23 @@ process extractPasaHints {
       --priority 3 \
       --exon-trim 9 \
       --intron-trim 0 \
-      pasa.gff3 \
-    | awk '$3 != "genicpart"' \
-    | awk '{sub(/group=/, "group=pasa_", $9); print}' \
+      - \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_pasa_", \$9); print}' \
     > "${name}_pasa_hints.gff3"
 
 
-    awk '$3 != "exon" && $3 != "intron"' \
+    awk '\$3 != "exon" && \$3 != "intron"' \
       pasa.gff3 \
     | gff2hints.py \
       --source PR \
       --group-level mRNA \
-      --priority 2 \
+      --priority 3 \
       --cds-trim 9 \
       --utr-trim 6 \
-      pasa.gff3 \
-    | awk '$3 != "genicpart"' \
-    | awk '{sub(/group=/, "group=transdecoder_", $9); print}' \
+      - \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_transdecoder_", \$9); print}' \
     > "${name}_transdecoder_hints.gff3"
     """
 }
@@ -1515,7 +1537,10 @@ process extractAugustusRnaseqHints {
     """
 }
 
-augustusRnaseqHints.set { augustusRnaseqHints4RunGenemark }
+augustusRnaseqHints.into {
+    augustusRnaseqHints4RunGenemark;
+    augustusRnaseqHints4JoinHints;
+}
 
 
 /*
@@ -1594,6 +1619,7 @@ process extractGenemarkHints {
 
     label "python3"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag { name }
 
@@ -1604,19 +1630,20 @@ process extractGenemarkHints {
     set val(name), file("genemark.gff3") from tidiedGenemark
 
     output:
-    set val(name), file("${name}_genemark_hints.gff3")
+    set val(name), file("${name}_genemark_hints.gff3") into genemarkHints
 
     script:
     """
     gff2hints.py \
       --source PR \
       --group-level mRNA \
-      --priority 2 \
+      --priority 3 \
       --cds-trim 9 \
       --exon-trim 9 \
       --intron-trim 0 \
       genemark.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_genemark_", \$9); print}' \
     > "${name}_genemark_hints.gff3"
     """
 }
@@ -1704,7 +1731,9 @@ process tidyCodingQuarry {
 
     script:
     """
-    gt gff3 -tidy -sort -retainids codingquarry.gff3 \
+    awk 'BEGIN {OFS="\\t"} \$8 = "-1" {\$8="0"} {print}' codingquarry.gff3 \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
+    | gt gff3 -tidy -sort -retainids \
     | canon-gff3 -i - \
     > codingquarry_tidy.gff3
     """
@@ -1715,6 +1744,7 @@ process extractCodingQuarryHints {
 
     label "python3"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag { name }
 
@@ -1725,19 +1755,21 @@ process extractCodingQuarryHints {
     set val(name), file("codingquarry.gff3") from tidiedCodingQuarry
 
     output:
-    set val(name), file("${name}_codingquarry_hints.gff3")
+    set val(name), file("${name}_codingquarry_hints.gff3") into codingQuarryHints
 
     script:
     """
     gff2hints.py \
       --source PR \
-      --group-level mRNA \
-      --priority 3 \
+      -g mRNA \
+      --priority 4 \
       --cds-trim 6 \
       --exon-trim 6 \
       --intron-trim 0 \
+      -- \
       codingquarry.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarry_", \$9); print}' \
     > "${name}_codingquarry_hints.gff3"
     """
 }
@@ -1960,7 +1992,9 @@ process tidyCodingQuarryPM {
 
     script:
     """
-    gt gff3 -tidy -sort -retainids codingquarry.gff3 \
+    awk 'BEGIN {OFS="\\t"} \$8 == "-1" {\$8="0"} {print}' codingquarry.gff3 \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
+    | gt gff3 -tidy -sort -retainids \
     | canon-gff3 -i - \
     > codingquarrypm_tidy.gff3
     """
@@ -1971,6 +2005,7 @@ process extractCodingQuarryPMHints {
 
     label "python3"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag { name }
 
@@ -1981,19 +2016,20 @@ process extractCodingQuarryPMHints {
     set val(name), file("codingquarry.gff3") from tidiedCodingQuarryPM
 
     output:
-    set val(name), file("${name}_codingquarrypm_hints.gff3")
+    set val(name), file("${name}_codingquarrypm_hints.gff3") into codingQuarryPMHints
 
     script:
     """
     gff2hints.py \
       --source PR \
-      --group-level mRNA \
-      --priority 3 \
+      -g mRNA \
+      --priority 4 \
       --cds-trim 6 \
       --exon-trim 6 \
       --intron-trim 0 \
       codingquarry.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarrypm_", \$9); print}' \
     > "${name}_codingquarrypm_hints.gff3"
     """
 }
@@ -2337,7 +2373,7 @@ process tidyGemoma {
     script:
     """
     gt gff3 -tidy -sort -retainids gemoma.gff3 \
-    | awk 'BEGIN {OFS="\t"} $3 == "prediction" {$3="mRNA"} {print}' \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
     | canon-gff3 -i - \
     > gemoma_tidy.gff3
     """
@@ -2356,44 +2392,78 @@ process extractGemomaHints {
     set val(name), file("gemoma.gff3") from tidiedGemoma
 
     output:
-    set val(name), file("${name}_gemoma_hints.gff3")
+    set val(name), file("${name}_gemoma_hints.gff3") into gemomaHints
 
     script:
     """
     gff2hints.py \
       --source PR \
       --group-level mRNA \
-      --priority 3 \
+      --priority 4 \
       --cds-trim 6 \
       --exon-trim 6 \
       --utr-trim 9 \
       --intron-trim 0 \
       gemoma.gff3 \
-    | awk '$3 != "genicpart"' \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_gemoma_", \$9); print}' \
     > "${name}_gemoma_hints.gff3"
     """
 }
+
+
+process chunkifyGenomes {
+
+    label "python3"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file("input.fasta"),
+        file("input.fasta.fai") from genomes4ChunkifyGenomes
+
+    output:
+    set val(name), file("out_*.fasta") into chunkifiedGenomes
+
+    script:
+    """
+    chunk_genomes.py -n 16 --prefix "out_" input.fasta
+    """
+}
+
+
+chunkifiedGenomes
+    .flatMap { n, fs -> fs.collect {f -> [n, f]} }
+    .into {
+        genomes4RunAugustusDenovo;
+        genomes4RunAugustusDenovoUTR;
+        genomes4RunAugustusHints;
+        genomes4RunAugustusHintsUTR;
+        genomes4RunAugustusPreds;
+        genomes4RunAugustusPredsUTR;
+    }
 
 
 process runAugustusDenovo {
 
     label "augustus"
     label "small_task"
-    publishDir "${params.outdir}/annotations/${name}"
 
     tag { name }
 
-    input:
-    set val(name),
-        file(fasta),
-        file(faidx) from genomes4RunAugustusDenovo
+    when:
+    params.augustus_denovo
 
+    input:
+    set val(name), file(fasta) from genomes4RunAugustusDenovo
     file "augustus_config" from augustusConfig
 
     output:
-    set file("${name}_augustus_denovo.gff3"),
-        file("${name}_augustus_denovo.faa"),
-        file("${name}_augustus_denovo.fna") into augustusDenovoResults
+    set val(name),
+        val("augustus_denovo"),
+        file("out.gff") into augustusDenovoResults
 
     script:
     """
@@ -2402,21 +2472,18 @@ process runAugustusDenovo {
     augustus \
       --species="${params.augustus_species}" \
       --softmasking=on \
+      --singlestrand=true \
       --start=on \
       --stop=on \
       --introns=on \
       --cds=on \
       --gff3=on \
+      --UTR=off \
       --codingseq=on \
       --protein=on \
       --outfile="out.gff" \
       --errfile=augustus.err \
       "${fasta}"
-
-    getAnnoFasta.pl "out.gff"
-    mv "out.gff" "${name}_augustus_denovo.gff3"
-    mv "out.aa" "${name}_augustus_denovo.faa"
-    mv "out.codingseq" "${name}_augustus_denovo.fna"
     """
 }
 
@@ -2425,7 +2492,153 @@ process runAugustusDenovoUTR {
 
     label "augustus"
     label "small_task"
-    publishDir "${params.outdir}/annotations/${name}"
+
+    tag { name }
+
+    when:
+    params.augustus_denovo && params.augustus_utr
+
+    input:
+    set val(name), file(fasta) from genomes4RunAugustusDenovoUTR
+    file "augustus_config" from augustusConfig
+
+    output:
+    set val(name),
+        val("augustus_denovo_utr"),
+        file("out.gff") into augustusDenovoUTRResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --softmasking=on \
+      --strand=forward \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="outf.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --softmasking=on \
+      --strand=backward \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="outr.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    cat outf.gff outr.gff | join_aug_pred.pl > out.gff
+    """
+}
+
+augustusRnaseqHints4JoinHints
+    .map { n, rg, i, e -> [n, i] }
+    .mix(
+        spalnTranscriptHints,
+        spalnProteinHints
+    )
+    .tap { augustusExtrinsicHints }
+    .mix(
+        genemarkHints,
+        pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
+        codingQuarryHints,
+        codingQuarryPMHints,
+        gemomaHints,
+    )
+    .set { augustusPredHints }
+
+augustusExtrinsicHints
+    .groupTuple(by: 0)
+    .into {
+        augustusExtrinsicHints4Hints;
+        augustusExtrinsicHints4HintsUTR;
+    }
+
+
+augustusPredHints
+    .groupTuple(by: 0)
+    .into {
+        augustusPredHints4PredUTR;
+        augustusPredHints4Pred;
+     }
+
+
+process runAugustusHints {
+
+    label "augustus"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file(fasta),
+        file("*hints") from genomes4RunAugustusHints
+            .combine(augustusExtrinsicHints4Hints, by: 0)
+
+    file "augustus_config" from augustusConfig
+    file "extrinsic.cfg" from augustusHintWeights
+
+    output:
+    set val(name),
+        val("augustus_hints"),
+        file("out.gff") into augustusHintsResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
+    cat *hints \
+    | getLinesMatching.pl seqids.txt 1 \
+    > hints.gff
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
+      --softmasking=on \
+      --singlestrand=true \
+      --alternatives-from-evidence=true \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=off \
+      --codingseq=on \
+      --protein=on \
+      --outfile="out.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    rm hints.gff
+    """
+}
+
+
+process runAugustusHintsUTR {
+
+    label "augustus"
+    label "small_task"
 
     tag { name }
 
@@ -2435,22 +2648,35 @@ process runAugustusDenovoUTR {
     input:
     set val(name),
         file(fasta),
-        file(faidx) from genomes4RunAugustusDenovoUTR
+        file("*hints") from genomes4RunAugustusHintsUTR
+            .combine(augustusExtrinsicHints4HintsUTR, by: 0)
 
     file "augustus_config" from augustusConfig
+    file "extrinsic.cfg" from augustusHintWeights
 
     output:
-    set file("${name}_augustus_denovo_utr.gff3"),
-        file("${name}_augustus_denovo_utr.faa"),
-        file("${name}_augustus_denovo_utr.fna") into augustusDenovoUTRResults
+    set val(name),
+        val("augustus_hints_utr"),
+        file("out.gff") into augustusHintsUTRResults
 
     script:
     """
     export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
 
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
+    cat *hints \
+    | getLinesMatching.pl seqids.txt 1 \
+    > hints.gff
+
     augustus \
       --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
       --softmasking=on \
+      --alternatives-from-evidence=true \
+      --strand=forward \
       --start=on \
       --stop=on \
       --introns=on \
@@ -2459,14 +2685,208 @@ process runAugustusDenovoUTR {
       --UTR=on \
       --codingseq=on \
       --protein=on \
+      --outfile="outf.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
+      --softmasking=on \
+      --alternatives-from-evidence=true \
+      --strand=backward \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="outr.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    cat outf.gff outr.gff | join_aug_pred.pl > out.gff
+    rm hints.gff
+    """
+}
+
+
+process runAugustusPreds {
+
+    label "augustus"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file(fasta),
+        file("*hints") from genomes4RunAugustusPreds
+            .combine(augustusPredHints4Pred, by: 0)
+
+    file "augustus_config" from augustusConfig
+    file "extrinsic.cfg" from augustusPredWeights
+
+    output:
+    set val(name),
+        val("augustus_preds"),
+        file("out.gff") into augustusPredsResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
+    cat *hints \
+    | getLinesMatching.pl seqids.txt 1 \
+    > hints.gff
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
+      --softmasking=on \
+      --singlestrand=true \
+      --alternatives-from-evidence=true \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=off \
+      --codingseq=on \
+      --protein=on \
       --outfile="out.gff" \
       --errfile=augustus.err \
       "${fasta}"
 
-    getAnnoFasta.pl "out.gff"
-    mv "out.gff" "${name}_augustus_denovo_utr.gff3"
-    mv "out.aa" "${name}_augustus_denovo_utr.faa"
-    mv "out.codingseq" "${name}_augustus_denovo_utr.fna"
+    rm hints.gff
+    """
+}
+
+
+process runAugustusPredsUtr {
+
+    label "augustus"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file(fasta),
+        file("*hints") from genomes4RunAugustusPredsUTR
+            .combine(augustusPredHints4PredUTR, by: 0)
+
+    file "augustus_config" from augustusConfig
+    file "extrinsic.cfg" from augustusPredWeights
+
+    output:
+    set val(name),
+        val("augustus_preds_utr"),
+        file("out.gff") into augustusPredsUTRResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
+    cat *hints \
+    | getLinesMatching.pl seqids.txt 1 \
+    > hints.gff
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
+      --softmasking=on \
+      --alternatives-from-evidence=true \
+      --strand=forward \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="outf.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints.gff \
+      --allow_hinted_splicesites=atac \
+      --softmasking=on \
+      --alternatives-from-evidence=true \
+      --strand=backward \
+      --start=on \
+      --stop=on \
+      --introns=on \
+      --cds=on \
+      --gff3=on \
+      --UTR=on \
+      --codingseq=on \
+      --protein=on \
+      --outfile="outr.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+
+    cat outf.gff outr.gff | join_aug_pred.pl > out.gff
+    rm hints.gff
+    """
+}
+
+
+augustusDenovoResults
+    .mix(
+        augustusDenovoUTRResults,
+        augustusHintsResults,
+        augustusHintsUTRResults,
+        augustusPredsResults,
+        augustusPredsUTRResults,
+    )
+    .groupTuple(by: [0, 1])
+    .set {augustusChunks}
+
+
+process joinAugustusChunks {
+
+    label "augustus"
+    label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag "${name} - ${paramset}"
+ 
+    input:
+    set val(name),
+        val(paramset),
+        file("*chunks.gff") from augustusChunks
+
+    output:
+    set val(name),
+        val(paramset),
+        file("${name}_${paramset}.gff3"),
+        file("${name}_${paramset}.faa"),
+        file("${name}_${paramset}.fna") into augustusJoinedChunks
+    
+    script:
+    """
+    cat *chunks.gff | join_aug_pred.pl > joined.gff
+    getAnnoFasta.pl "joined.gff"
+    mv "joined.gff" "${name}_${paramset}.gff3"
+    mv "joined.aa" "${name}_${paramset}.faa"
+    mv "joined.codingseq" "${name}_${paramset}.fna"
     """
 }
 
