@@ -131,9 +131,29 @@ KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
 
+INFERNAL_VERSION=1.1.2
+INFERNAL_URL=http://eddylab.org/infernal/infernal-1.1.2.tar.gz
+INFERNAL_PREFIX_ARG=$(INSTALL_BASE)/infernal/$(INFERNAL_VERSION)
+
 ARAGORN_VERSION=1.2.38
 ARAGORN_URL=http://130.235.244.92/ARAGORN/Downloads/aragorn1.2.38.tgz
 ARAGORN_PREFIX_ARG=$(INSTALL_BASE)/aragorn/$(ARAGORN_VERSION)
+
+VIENNA_VERSION=2.4.13
+VIENNA_URL=https://www.tbi.univie.ac.at/RNA/download/sourcecode/2_4_x/ViennaRNA-2.4.13.tar.gz
+VIENNA_PREFIX_ARG=$(INSTALL_BASE)/vienna/$(VIENNA_VERSION)
+
+STRUCTRNAFINDER_COMMIT=3d5479b
+STRUCTRNAFINDER_REPO=https://github.com/viniciusmaracaja/structRNAfinder.git
+STRUCTRNAFINDER_PREFIX_ARG=$(INSTALL_BASE)/structrnafinder/$(STRUCTRNAFINDER_COMMIT)
+
+TRNASCAN_VERSION=2.0.3
+TRNASCAN_URL=http://trna.ucsc.edu/software/trnascan-se-2.0.3.tar.gz
+TRNASCAN_PREFIX_ARG=$(INSTALL_BASE)/trnascan/$(TRNASCAN_VERSION)
+
+OCCULTERCUT_VERSION=1.1
+OCCULTERCUT_URL=https://downloads.sourceforge.net/project/occultercut/OcculterCut_v1.1.tar.gz
+OCCULTERCUT_PREFIX_ARG=$(INSTALL_BASE)/occultercut/$(OCCULTERCUT_VERSION)
 
 
 
@@ -637,6 +657,67 @@ docker/aragorn: aragorn.Dockerfile docker/base
 	  --build-arg ARAGORN_VERSION="$(ARAGORN_VERSION)" \
 	  --build-arg ARAGORN_URL="$(ARAGORN_URL)" \
 	  --build-arg ARAGORN_PREFIX_ARG="$(ARAGORN_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/infernal: infernal.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg INFERNAL_VERSION="$(INFERNAL_VERSION)" \
+	  --build-arg INFERNAL_URL="$(INFERNAL_URL)" \
+	  --build-arg INFERNAL_PREFIX_ARG="$(INFERNAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/structrnafinder: structrnafinder.Dockerfile docker/base docker/infernal
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg STRUCTRNAFINDER_COMMIT="$(STRUCTRNAFINDER_COMMIT)" \
+	  --build-arg STRUCTRNAFINDER_REPO="$(STRUCTRNAFINDER_REPO)" \
+	  --build-arg STRUCTRNAFINDER_PREFIX_ARG="$(STRUCTRNAFINDER_PREFIX_ARG)" \
+	  --build-arg VIENNA_VERSION="$(VIENNA_VERSION)" \
+	  --build-arg VIENNA_URL="$(VIENNA_URL)" \
+	  --build-arg VIENNA_PREFIX_ARG="$(VIENNA_PREFIX_ARG)" \
+	  --build-arg INFERNAL_IMAGE="$(call make_image_name,infernal)" \
+	  --build-arg INFERNAL_VERSION="$(INFERNAL_VERSION)" \
+	  --build-arg INFERNAL_PREFIX_ARG="$(INFERNAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/trnascan: trnascan.Dockerfile docker/base docker/infernal
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg TRNASCAN_VERSION="$(TRNASCAN_VERSION)" \
+	  --build-arg TRNASCAN_URL="$(TRNASCAN_URL)" \
+	  --build-arg TRNASCAN_PREFIX_ARG="$(TRNASCAN_PREFIX_ARG)" \
+	  --build-arg INFERNAL_IMAGE="$(call make_image_name,infernal)" \
+	  --build-arg INFERNAL_VERSION="$(INFERNAL_VERSION)" \
+	  --build-arg INFERNAL_PREFIX_ARG="$(INFERNAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/occultercut: occultercut.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg OCCULTERCUT_VERSION="$(OCCULTERCUT_VERSION)" \
+	  --build-arg OCCULTERCUT_URL="$(OCCULTERCUT_URL)" \
+	  --build-arg OCCULTERCUT_PREFIX_ARG="$(OCCULTERCUT_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
