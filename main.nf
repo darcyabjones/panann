@@ -2778,6 +2778,9 @@ process runAugustusPredsUtr {
 
     tag { name }
 
+    when:
+    params.augustus_utr
+
     input:
     set val(name),
         file(fasta),
