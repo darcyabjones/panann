@@ -86,6 +86,7 @@ params.augustus_utr = false
 params.augustus_pred_weights = "data/extrinsic_pred.cfg"
 params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 
+params.no_noncoding = false
 params.structrnafinder = false
 params.rfam = false
 params.rfam_url = "ftp://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz"
@@ -303,12 +304,12 @@ if ( params.crams ) {
 }
 
 
-if ( params.rfam ) {
+if ( params.rfam && !params.no_noncoding ) {
     Channel
         .fromPath( params.rfam, checkIfExists: true, type: "file")
         .first()
         .set { rfam }
-} else if ( params.structrnafinder ) {
+} else if ( params.structrnafinder && !params.no_noncoding ) {
 
     process getRfam {
 
@@ -455,6 +456,9 @@ process runAragorn {
 
     tag { name }
 
+    when:
+    !params.no_noncoding
+
     input:
     set val(name), file(fasta), file(faidx) from genomes4RunAragorn
 
@@ -476,6 +480,9 @@ process runTRNAScan {
     publishDir "${params.outdir}/noncoding/${name}"
 
     tag { name }
+
+    when:
+    !params.no_noncoding
 
     input:
     set val(name), file(fasta), file(faidx) from genomes4RunTRNAScan
@@ -511,7 +518,7 @@ process pressRfam {
     label "small_task"
 
     when:
-    params.structrnafinder
+    params.structrnafinder && !params.no_noncoding
 
     input:
     file "Rfam.cm" from rfam
@@ -538,7 +545,7 @@ process runStructRNAFinder {
     tag { name }
 
     when:
-    params.structrnafinder
+    params.structrnafinder && !params.no_noncoding
 
     input:
     set val(name), file(fasta), file(faidx) from genomes4RunStructRNAFinder
@@ -576,7 +583,7 @@ process runRnammer {
     tag { name }
 
     when:
-    params.rnammer
+    params.rnammer && params.no_noncoding
 
     input:
     set val(name), file(fasta), file(faidx) from genomes4RunRnammer
