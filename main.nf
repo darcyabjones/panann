@@ -2795,8 +2795,7 @@ if ( params.augustus_utr ) {
           ' \
         | sort -u -T tmp \
         > pos_ids.txt
-
-	rm -rf -- tmp
+        rm -rf -- tmp
 
         cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
         cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
@@ -2885,7 +2884,7 @@ process filterPredStrand {
     script:
     """
     mkdir tmp
-    
+
     cat *hints \
     | gawk '
         \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
@@ -2895,7 +2894,7 @@ process filterPredStrand {
       ' \
     | sort -u -T tmp \
     > neg_ids.txt
-    
+
     cat *hints \
     | gawk '
         \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
@@ -2905,20 +2904,20 @@ process filterPredStrand {
       ' \
     | sort -u -T tmp \
     > pos_ids.txt
-    
+
     rm -rf -- tmp
-    
+
     cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
     cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
-    
+
     cat *hints \
     | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
     > neg_single.gff
-    
+
     cat *hints \
     | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
     > pos_single.gff
-    
+
     cat neg_single.gff neg_groups.gff > neg_hints.gff
     cat pos_single.gff pos_groups.gff > pos_hints.gff
     """
