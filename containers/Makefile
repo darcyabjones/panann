@@ -130,13 +130,49 @@ TENSORFLOW_PREFIX_ARG=$(INSTALL_BASE)/tensorflow/$(TENSORFLOW_VERSION)
 KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
+
+INFERNAL_VERSION=1.1.2
+INFERNAL_URL=http://eddylab.org/infernal/infernal-1.1.2.tar.gz
+INFERNAL_PREFIX_ARG=$(INSTALL_BASE)/infernal/$(INFERNAL_VERSION)
+
+ARAGORN_VERSION=1.2.38
+ARAGORN_URL=http://130.235.244.92/ARAGORN/Downloads/aragorn1.2.38.tgz
+ARAGORN_PREFIX_ARG=$(INSTALL_BASE)/aragorn/$(ARAGORN_VERSION)
+
+VIENNA_VERSION=2.4.13
+VIENNA_URL=https://www.tbi.univie.ac.at/RNA/download/sourcecode/2_4_x/ViennaRNA-2.4.13.tar.gz
+VIENNA_PREFIX_ARG=$(INSTALL_BASE)/vienna/$(VIENNA_VERSION)
+
+STRUCTRNAFINDER_COMMIT=3d5479b
+STRUCTRNAFINDER_REPO=https://github.com/viniciusmaracaja/structRNAfinder.git
+STRUCTRNAFINDER_PREFIX_ARG=$(INSTALL_BASE)/structrnafinder/$(STRUCTRNAFINDER_COMMIT)
+
+TRNASCAN_VERSION=2.0.3
+TRNASCAN_URL=http://trna.ucsc.edu/software/trnascan-se-2.0.3.tar.gz
+TRNASCAN_PREFIX_ARG=$(INSTALL_BASE)/trnascan/$(TRNASCAN_VERSION)
+
+HMMER2_VERSION=2.3.2
+HMMER2_URL=http://eddylab.org/software/hmmer/hmmer-2.3.2.tar.gz
+HMMER2_PREFIX_ARG=$(INSTALL_BASE)/hmmer2/$(HMMER2_VERSION)
+
+RNAMMER_VERSION=1.2
+RNAMMER_PREFIX_ARG=$(INSTALL_BASE)/rnammer/$(RNAMMER_VERSION)
+RNAMMER_TAR=sources/rnammer-1.2.src.tar.Z
+
+OCCULTERCUT_VERSION=1.1
+OCCULTERCUT_URL=https://downloads.sourceforge.net/project/occultercut/OcculterCut_v1.1.tar.gz
+OCCULTERCUT_PREFIX_ARG=$(INSTALL_BASE)/occultercut/$(OCCULTERCUT_VERSION)
+
+
 GENERAL=htslib python3 posix genometools aegean
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
-OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION)
+NONCODING=aragorn structrnafinder trnascan
+OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION) $(NONCODING)
 
-PROPRIETARY=genemarkes signalp
+PROPRIETARY=genemarkes signalp rnammer
+
 
 all: docker/all singularity/all
 
@@ -150,6 +186,7 @@ docker/general: $(addprefix docker/,$(GENERAL))
 docker/alignment: $(addprefix docker/,$(ALIGNMENT))
 docker/rnaseq: $(addprefix docker/,$(RNASEQ))
 docker/annotation: $(addprefix docker/,$(ANNOTATION))
+docker/noncoding: $(addprefix docker/,$(NONCODING))
 
 # Proprietary software won't be built by default.
 docker/proprietary: $(addprefix docker/,$(PROPRIETARY))
@@ -163,6 +200,7 @@ singularity/general: $(addprefix singularity/,$(addsuffix .sif,$(GENERAL)))
 singularity/alignment: $(addprefix singularity/,$(addsuffix .sif,$(ALIGNMENT)))
 singularity/rnaseq: $(addprefix singularity/,$(addsuffix .sif,$(RNASEQ)))
 singularity/annotation: $(addprefix singularity/,$(addsuffix .sif,$(ANNOTATION)))
+singularity/noncoding: $(addprefix singularity/,$(addsuffix .sif,$(NONCODING)))
 
 # Proprietary software won't be built by default.
 singularity/proprietary: $(addprefix singularity/,$(addsuffix .sif,$(PROPRIETARY)))
@@ -174,6 +212,7 @@ dockerpull/general: $(addprefix dockerpull/,$(GENERAL))
 dockerpull/alignment: $(addprefix dockerpull/,$(ALIGNMENT))
 dockerpull/rnaseq: $(addprefix dockerpull/,$(RNASEQ))
 dockerpull/annotation: $(addprefix dockerpull/,$(ANNOTATION))
+dockerpull/noncoding: $(addprefix dockerpull/,$(NONCODING))
 
 
 # Utils
@@ -617,6 +656,108 @@ docker/deepsig: deepsig.Dockerfile docker/base
 	  --build-arg TENSORFLOW_PREFIX_ARG="$(TENSORFLOW_PREFIX_ARG)" \
 	  --build-arg KERAS_VERSION="$(KERAS_VERSION)" \
 	  --build-arg KERAS_PREFIX_ARG="$(KERAS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/aragorn: aragorn.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg ARAGORN_VERSION="$(ARAGORN_VERSION)" \
+	  --build-arg ARAGORN_URL="$(ARAGORN_URL)" \
+	  --build-arg ARAGORN_PREFIX_ARG="$(ARAGORN_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/infernal: infernal.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg INFERNAL_VERSION="$(INFERNAL_VERSION)" \
+	  --build-arg INFERNAL_URL="$(INFERNAL_URL)" \
+	  --build-arg INFERNAL_PREFIX_ARG="$(INFERNAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/structrnafinder: structrnafinder.Dockerfile docker/base docker/infernal
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg STRUCTRNAFINDER_COMMIT="$(STRUCTRNAFINDER_COMMIT)" \
+	  --build-arg STRUCTRNAFINDER_REPO="$(STRUCTRNAFINDER_REPO)" \
+	  --build-arg STRUCTRNAFINDER_PREFIX_ARG="$(STRUCTRNAFINDER_PREFIX_ARG)" \
+	  --build-arg VIENNA_VERSION="$(VIENNA_VERSION)" \
+	  --build-arg VIENNA_URL="$(VIENNA_URL)" \
+	  --build-arg VIENNA_PREFIX_ARG="$(VIENNA_PREFIX_ARG)" \
+	  --build-arg INFERNAL_IMAGE="$(call make_image_name,infernal)" \
+	  --build-arg INFERNAL_VERSION="$(INFERNAL_VERSION)" \
+	  --build-arg INFERNAL_PREFIX_ARG="$(INFERNAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/trnascan: trnascan.Dockerfile docker/base docker/infernal
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg TRNASCAN_VERSION="$(TRNASCAN_VERSION)" \
+	  --build-arg TRNASCAN_URL="$(TRNASCAN_URL)" \
+	  --build-arg TRNASCAN_PREFIX_ARG="$(TRNASCAN_PREFIX_ARG)" \
+	  --build-arg INFERNAL_IMAGE="$(call make_image_name,infernal)" \
+	  --build-arg INFERNAL_VERSION="$(INFERNAL_VERSION)" \
+	  --build-arg INFERNAL_PREFIX_ARG="$(INFERNAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/occultercut: occultercut.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg OCCULTERCUT_VERSION="$(OCCULTERCUT_VERSION)" \
+	  --build-arg OCCULTERCUT_URL="$(OCCULTERCUT_URL)" \
+	  --build-arg OCCULTERCUT_PREFIX_ARG="$(OCCULTERCUT_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/hmmer2: hmmer2.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg HMMER2_VERSION="$(HMMER2_VERSION)" \
+	  --build-arg HMMER2_URL="$(HMMER2_URL)" \
+	  --build-arg HMMER2_PREFIX_ARG="$(HMMER2_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+docker/rnammer: rnammer.Dockerfile docker/base docker/hmmer2
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg RNAMMER_VERSION="$(RNAMMER_VERSION)" \
+	  --build-arg RNAMMER_TAR="$(RNAMMER_TAR)" \
+	  --build-arg RNAMMER_PREFIX_ARG="$(RNAMMER_PREFIX_ARG)" \
+	  --build-arg HMMER2_IMAGE="$(call make_image_name,hmmer2)" \
+	  --build-arg HMMER2_VERSION="$(HMMER2_VERSION)" \
+	  --build-arg HMMER2_PREFIX_ARG="$(HMMER2_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
