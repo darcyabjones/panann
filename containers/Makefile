@@ -151,19 +151,28 @@ TRNASCAN_VERSION=2.0.3
 TRNASCAN_URL=http://trna.ucsc.edu/software/trnascan-se-2.0.3.tar.gz
 TRNASCAN_PREFIX_ARG=$(INSTALL_BASE)/trnascan/$(TRNASCAN_VERSION)
 
+HMMER2_VERSION=2.3.2
+HMMER2_URL=http://eddylab.org/software/hmmer/hmmer-2.3.2.tar.gz
+HMMER2_PREFIX_ARG=$(INSTALL_BASE)/hmmer2/$(HMMER2_VERSION)
+
+RNAMMER_VERSION=1.2
+RNAMMER_PREFIX_ARG=$(INSTALL_BASE)/rnammer/$(RNAMMER_VERSION)
+RNAMMER_TAR=sources/rnammer-1.2.src.tar.Z
+
 OCCULTERCUT_VERSION=1.1
 OCCULTERCUT_URL=https://downloads.sourceforge.net/project/occultercut/OcculterCut_v1.1.tar.gz
 OCCULTERCUT_PREFIX_ARG=$(INSTALL_BASE)/occultercut/$(OCCULTERCUT_VERSION)
-
 
 
 GENERAL=htslib python3 posix genometools aegean
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
-OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION)
+NONCODING=aragorn structrnafinder trnascan
+OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION) $(NONCODING)
 
-PROPRIETARY=genemarkes signalp
+PROPRIETARY=genemarkes signalp rnammer
+
 
 all: docker/all singularity/all
 
@@ -177,6 +186,7 @@ docker/general: $(addprefix docker/,$(GENERAL))
 docker/alignment: $(addprefix docker/,$(ALIGNMENT))
 docker/rnaseq: $(addprefix docker/,$(RNASEQ))
 docker/annotation: $(addprefix docker/,$(ANNOTATION))
+docker/noncoding: $(addprefix docker/,$(NONCODING))
 
 # Proprietary software won't be built by default.
 docker/proprietary: $(addprefix docker/,$(PROPRIETARY))
@@ -190,6 +200,7 @@ singularity/general: $(addprefix singularity/,$(addsuffix .sif,$(GENERAL)))
 singularity/alignment: $(addprefix singularity/,$(addsuffix .sif,$(ALIGNMENT)))
 singularity/rnaseq: $(addprefix singularity/,$(addsuffix .sif,$(RNASEQ)))
 singularity/annotation: $(addprefix singularity/,$(addsuffix .sif,$(ANNOTATION)))
+singularity/noncoding: $(addprefix singularity/,$(addsuffix .sif,$(NONCODING)))
 
 # Proprietary software won't be built by default.
 singularity/proprietary: $(addprefix singularity/,$(addsuffix .sif,$(PROPRIETARY)))
@@ -201,6 +212,7 @@ dockerpull/general: $(addprefix dockerpull/,$(GENERAL))
 dockerpull/alignment: $(addprefix dockerpull/,$(ALIGNMENT))
 dockerpull/rnaseq: $(addprefix dockerpull/,$(RNASEQ))
 dockerpull/annotation: $(addprefix dockerpull/,$(ANNOTATION))
+dockerpull/noncoding: $(addprefix dockerpull/,$(NONCODING))
 
 
 # Utils
@@ -718,6 +730,34 @@ docker/occultercut: occultercut.Dockerfile docker/base
 	  --build-arg OCCULTERCUT_VERSION="$(OCCULTERCUT_VERSION)" \
 	  --build-arg OCCULTERCUT_URL="$(OCCULTERCUT_URL)" \
 	  --build-arg OCCULTERCUT_PREFIX_ARG="$(OCCULTERCUT_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/hmmer2: hmmer2.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg HMMER2_VERSION="$(HMMER2_VERSION)" \
+	  --build-arg HMMER2_URL="$(HMMER2_URL)" \
+	  --build-arg HMMER2_PREFIX_ARG="$(HMMER2_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+docker/rnammer: rnammer.Dockerfile docker/base docker/hmmer2
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg RNAMMER_VERSION="$(RNAMMER_VERSION)" \
+	  --build-arg RNAMMER_TAR="$(RNAMMER_TAR)" \
+	  --build-arg RNAMMER_PREFIX_ARG="$(RNAMMER_PREFIX_ARG)" \
+	  --build-arg HMMER2_IMAGE="$(call make_image_name,hmmer2)" \
+	  --build-arg HMMER2_VERSION="$(HMMER2_VERSION)" \
+	  --build-arg HMMER2_PREFIX_ARG="$(HMMER2_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .

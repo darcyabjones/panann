@@ -89,6 +89,7 @@ params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 params.structrnafinder = false
 params.rfam = false
 params.rfam_url = "ftp://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz"
+params.rnammer = false
 
 // RNAseq params
 params.fastq = false
@@ -357,6 +358,7 @@ genomesWithFaidx.into {
     genomes4RunAragorn;
     genomes4RunTRNAScan;
     genomes4RunStructRNAFinder;
+    genomes4RunRnammer;
     genomes4KnownSites;
     genomes4SpalnIndex;
     genomes4GmapIndex;
@@ -560,6 +562,36 @@ process runStructRNAFinder {
       --method cmsearch \
       --tblout "${name}_structrnafinder.tsv" \
       --output "${name}_structrnafinder.txt"
+    """
+}
+
+
+process runRnammer {
+
+    label "rnammer"
+    label "small_task"
+
+    publishDir "${params.outdir}/noncoding/${name}"
+
+    tag { name }
+
+    when:
+    params.rnammer
+
+    input:
+    set val(name), file(fasta), file(faidx) from genomes4RunRnammer
+
+    output:
+    set val(name), file("${name}_rnammer.gff2") into rnammerResults
+    file "${name}_rnammer.hmmreport"
+
+    """
+    rnammer \
+      -S euk \
+      -m lsu,ssu,tsu \
+      -gff "${name}_rnammer.gff2" \
+      -h "${name}_rnammer.hmmreport" \
+      "${fasta}"
     """
 }
 
