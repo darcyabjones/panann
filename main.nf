@@ -2745,10 +2745,7 @@ if ( params.augustus_utr ) {
 
     augustusRnaseqHints4JoinHints
         .map { n, rg, i, e -> [n, i] }
-        .mix(
-            spalnTranscriptHints,
-            spalnProteinHints
-        )
+        .mix(spalnTranscriptHints, spalnProteinHints)
         .tap { augustusExtrinsicHints }
         .mix(
             genemarkHints,
@@ -2759,17 +2756,15 @@ if ( params.augustus_utr ) {
         )
         .set { augustusPredHints }
 
-
-    process filterHintStrand {
+    process filterHintStrandUTR {
 
         label "posix"
         label "small_task"
 
-        label { name }
+        tag { name }
 
         input:
-        set val(name),
-            file("*hints") from augustusExtrinsicHints
+        set val(name), file("*hints") from augustusExtrinsicHints
                 .groupTuple(by: 0)
 
         output:
@@ -2779,31 +2774,40 @@ if ( params.augustus_utr ) {
 
         script:
         """
+        mkdir tmp
+
         cat *hints \
-        | awk '
-            (\$6 == "-" && \$9 ~ /group/) {
-              b=gensub(/.*group=([^;]+).*/, "\\1", "g", \$9);
+        | gawk '
+            \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
+              b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
               print b;
             }
           ' \
-        | sort -u \
+        | sort -u -T tmp \
         > neg_ids.txt
 
         cat *hints \
-        | awk '
-            (\$6 == "+" && \$9 ~ /group/) {
-              b=gensub(/.*group=([^;]+).*/, "\\1", "g", \$9);
+        | gawk '
+            \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
+              b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
               print b;
             }
           ' \
-        | sort -u \
+        | sort -u -T tmp \
         > pos_ids.txt
 
-        grep -f pos_ids -F -v *hints > neg_groups.gff
-        grep -f neg_ids -F -v *hints > pos_groups.gff
+	rm -rf -- tmp
 
-        awk '(\$6 == "-" || \$6 == ".") && \$9 ~ !/group/' *hints > neg_single.gff
-        awk '(\$6 == "+" || \$6 == ".") && \$9 ~ !/group/' *hints > pos_single.gff
+        cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
+        cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
+
+        cat *hints \
+        | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
+        > neg_single.gff
+
+        cat *hints \
+        | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
+        > pos_single.gff
 
         cat neg_single.gff neg_groups.gff > neg_hints.gff
         cat pos_single.gff pos_groups.gff > pos_hints.gff
@@ -2836,7 +2840,6 @@ if ( params.augustus_utr ) {
         )
         .set { augustusPredHints }
 
-
     process filterHintStrand {
 
         label "posix"
@@ -2856,18 +2859,18 @@ if ( params.augustus_utr ) {
 
         script:
         """
-        cat *hints | awk '$3 != "exon"' > hints.gff
+        cat *hints | awk '\$3 != "exon"' > hints.gff
         """
     }
 }
 
 
-process filterHintStrand {
+process filterPredStrand {
 
     label "posix"
     label "small_task"
 
-    label { name }
+    tag { name }
 
     input:
     set val(name),
@@ -2881,32 +2884,41 @@ process filterHintStrand {
 
     script:
     """
+    mkdir tmp
+    
     cat *hints \
-    | awk '
-        (\$6 == "-" && \$9 ~ /group/) {
-          b=gensub(/.*group=([^;]+).*/, "\\1", "g", \$9);
+    | gawk '
+        \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
+          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
           print b;
         }
       ' \
-    | sort -u \
+    | sort -u -T tmp \
     > neg_ids.txt
-
+    
     cat *hints \
-    | awk '
-        (\$6 == "+" && \$9 ~ /group/) {
-          b=gensub(/.*group=([^;]+).*/, "\\1", "g", \$9);
+    | gawk '
+        \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
+          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
           print b;
         }
       ' \
-    | sort -u \
+    | sort -u -T tmp \
     > pos_ids.txt
-
-    grep -f pos_ids -F -v *hints > neg_groups.gff
-    grep -f neg_ids -F -v *hints > pos_groups.gff
-
-    awk '(\$6 == "-" || \$6 == ".") && \$9 ~ !/group/' *hints > neg_single.gff
-    awk '(\$6 == "+" || \$6 == ".") && \$9 ~ !/group/' *hints > pos_single.gff
-
+    
+    rm -rf -- tmp
+    
+    cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
+    cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
+    
+    cat *hints \
+    | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
+    > neg_single.gff
+    
+    cat *hints \
+    | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
+    > pos_single.gff
+    
     cat neg_single.gff neg_groups.gff > neg_hints.gff
     cat pos_single.gff pos_groups.gff > pos_hints.gff
     """
@@ -2928,8 +2940,8 @@ process runAugustusHints {
     set val(name),
         val(strand),
         file(fasta),
-        file("hints.gff") from genomes4RunAugustusHints
-            .join(augustusExtrinsicHints4Hints, by: [0, 1])
+        file("hints.gff") from augustusHintsGenomes
+            .combine(augustusExtrinsicHints4Hints, by: [0, 1])
 
     file "augustus_config" from augustusConfig
     file "extrinsic.cfg" from augustusHintWeights
@@ -2988,7 +3000,7 @@ process runAugustusPreds {
         val(strand),
         file(fasta),
         file("hints.gff") from genomes4RunAugustusPreds
-            .join(augustusPredHints4Pred, by: [0, 1])
+            .combine(augustusPredHints4Pred, by: [0, 1])
 
     file "augustus_config" from augustusConfig
     file "extrinsic.cfg" from augustusPredWeights
@@ -2997,7 +3009,7 @@ process runAugustusPreds {
     set val(name),
         val("augustus_hints"),
         val(strand),
-        file("out.gff") into augustusHintsResults
+        file("out.gff") into augustusPredsResults
 
     script:
     if ( strand == "forward" ) {
@@ -3046,7 +3058,6 @@ augustusDenovoResults
     .map { n, p, s, g -> [n, p, g] }
     .groupTuple(by: [0, 1])
     .set {augustusChunks}
-
 
 process joinAugustusChunks {
 
