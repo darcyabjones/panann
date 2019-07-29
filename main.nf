@@ -3000,6 +3000,7 @@ process runAugustusPreds {
         val(strand),
         file(fasta),
         file("hints.gff") from genomes4RunAugustusPreds
+            .flatMap { n, f -> [[n, "forward", f], [n, "reverse", f]] }
             .combine(augustusPredHints4Pred, by: [0, 1])
 
     file "augustus_config" from augustusConfig
@@ -3007,7 +3008,7 @@ process runAugustusPreds {
 
     output:
     set val(name),
-        val("augustus_hints"),
+        val("augustus_preds"),
         val(strand),
         file("out.gff") into augustusPredsResults
 
