@@ -2736,41 +2736,33 @@ process runAugustusDenovoUTR {
     """
 }
 
+augustusRnaseqHints4JoinHints
+    .map { n, rg, i, e -> [n, i] }
+    .mix(spalnTranscriptHints, spalnProteinHints)
+    .into {
+        augustusExtrinsicHints4Hints;
+        augustusExtrinsicHints4Preds;
+    }
+
 
 if ( params.augustus_utr ) {
-
-    genomes4RunAugustusHints
-        .flatMap { n, f -> [[n, "forward", f], [n, "reverse", f]] }
-        .set { augustusHintsGenomes }
-
-    augustusRnaseqHints4JoinHints
-        .map { n, rg, i, e -> [n, i] }
-        .mix(spalnTranscriptHints, spalnProteinHints)
-        .tap { augustusExtrinsicHints }
-        .mix(
-            genemarkHints,
-            pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
-            codingQuarryHints,
-            codingQuarryPMHints,
-            gemomaHints,
-        )
-        .set { augustusPredHints }
 
     process filterHintStrandUTR {
 
         label "posix"
         label "small_task"
+        publishDir "${params.outdir}/hints/${name}"
 
         tag { name }
 
         input:
-        set val(name), file("*hints") from augustusExtrinsicHints
+        set val(name), file("*hints") from augustusExtrinsicHints4Hints
                 .groupTuple(by: 0)
 
         output:
         set val(name),
-            file("pos_hints.gff"),
-            file("neg_hints.gff") into augustusExtrinsicHints4HintsTmp
+            file("${name}_pos_hints_for_augustus_hints.gff"),
+            file("${name}_neg_hints_for_augustus_hints.gff") into augustusFilteredHints4Hints
 
         script:
         """
@@ -2808,124 +2800,41 @@ if ( params.augustus_utr ) {
         | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
         > pos_single.gff
 
-        cat neg_single.gff neg_groups.gff > neg_hints.gff
-        cat pos_single.gff pos_groups.gff > pos_hints.gff
+        cat neg_single.gff neg_groups.gff > "${name}_neg_hints_for_augustus_hints.gff"
+        cat pos_single.gff pos_groups.gff > "${name}_pos_hints_for_augustus_hints.gff"
         """
     }
 
-    augustusExtrinsicHints4HintsTmp
+    augustusFilteredHints4Hints
         .flatMap { n, f, r -> [[n, "forward", f], [n, "reverse", r]]}
-        .set { augustusExtrinsicHints4Hints }
+        .set { augustusFilteredHints4Hints }
 
 } else {
-
-    genomes4RunAugustusHints
-        .map { n, f -> [n, "both", f] }
-        .set { augustusHintsGenomes }
-
-    augustusRnaseqHints4JoinHints
-        .map { n, rg, i, e -> [n, i] }
-        .mix(
-            spalnProteinHints,
-            spalnTranscriptHints
-        )
-        .tap { augustusExtrinsicHints }
-        .mix(
-            genemarkHints,
-            pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
-            codingQuarryHints,
-            codingQuarryPMHints,
-            gemomaHints,
-        )
-        .set { augustusPredHints }
 
     process filterHintStrand {
 
         label "posix"
         label "small_task"
+        publishDir "${params.outdir}/hints/${name}"
 
         label { name }
 
         input:
         set val(name),
-            file("*hints") from augustusExtrinsicHints
+            file("*hints") from augustusExtrinsicHints4Hints
                 .groupTuple(by: 0)
 
         output:
         set val(name),
             val("both"),
-            file("hints.gff") into augustusExtrinsicHints4Hints
+            file("hints.gff") into augustusFilteredHints4Hints
 
         script:
         """
-        cat *hints | awk '\$3 != "exon"' > hints.gff
+        cat *hints | awk '\$3 != "exon"' > "${name}_augustus_hints_hints.gff"
         """
     }
 }
-
-
-process filterPredStrand {
-
-    label "posix"
-    label "small_task"
-
-    tag { name }
-
-    input:
-    set val(name),
-        file("*hints") from augustusPredHints
-            .groupTuple(by: 0)
-
-    output:
-    set val(name),
-        file("pos_hints.gff"),
-        file("neg_hints.gff") into augustusPredHints4PredTmp
-
-    script:
-    """
-    mkdir tmp
-
-    cat *hints \
-    | gawk '
-        \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
-          print b;
-        }
-      ' \
-    | sort -u -T tmp \
-    > neg_ids.txt
-
-    cat *hints \
-    | gawk '
-        \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
-          print b;
-        }
-      ' \
-    | sort -u -T tmp \
-    > pos_ids.txt
-
-    rm -rf -- tmp
-
-    cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
-    cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
-
-    cat *hints \
-    | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
-    > neg_single.gff
-
-    cat *hints \
-    | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
-    > pos_single.gff
-
-    cat neg_single.gff neg_groups.gff > neg_hints.gff
-    cat pos_single.gff pos_groups.gff > pos_hints.gff
-    """
-}
-
-augustusPredHints4PredTmp
-    .flatMap { n, f, r -> [[n, "forward", f], [n, "reverse", r]]}
-    .set { augustusPredHints4Pred }
 
 
 process runAugustusHints {
@@ -2937,10 +2846,10 @@ process runAugustusHints {
 
     input:
     set val(name),
-        val(strand),
         file(fasta),
-        file("hints.gff") from augustusHintsGenomes
-            .combine(augustusExtrinsicHints4Hints, by: [0, 1])
+        val(strand),
+        file("hints.gff") from genomes4RunAugustusHints
+            .combine(augustusFilteredHints4Hints, by: 0)
 
     file "augustus_config" from augustusConfig
     file "extrinsic.cfg" from augustusHintWeights
@@ -2987,26 +2896,173 @@ process runAugustusHints {
 }
 
 
+augustusDenovoResults
+    .mix(
+        augustusDenovoUTRResults,
+        augustusHintsResults,
+    )
+    .map { n, p, s, g -> [n, p, g] }
+    .groupTuple(by: [0, 1])
+    .set {augustusChunks}
+
+process joinAugustusChunks {
+
+
+    label "genometools"
+    label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag "${name} - ${paramset}"
+
+    input:
+    set val(name),
+        val(paramset),
+        file("*chunks.gff") from augustusChunks
+
+    output:
+    set val(name),
+        val(paramset),
+        file("${name}_${paramset}.gff3") into augustusJoinedChunks
+
+    script:
+    """
+    for f in *chunks.gff
+    do
+      awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+      | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
+    done
+
+    gt merge -tidy -o "${name}_${paramset}.gff3" *_tidied.gff3
+    """
+}
+
+
+process extractAugustusHintsHints {
+
+    label "python3"
+    label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
+
+    tag { name }
+
+    input:
+    set val(name), file("augustus.gff3") from augustusJoinedChunks
+        .filter { n, p, g -> p == "augustus_hints" }
+        .map { n, p, g -> [n, g] }
+
+    output:
+    set val(name),
+        file("${name}_augustus_hints_hints.gff3") into augustusHintsHints
+
+    script:
+    """
+    gff2hints.py \
+      --source PR \
+      --group-level transcript \
+      --priority 4 \
+      --cds-trim 6 \
+      --exon-trim 6 \
+      --utr-trim 9 \
+      --intron-trim 0 \
+      augustus.gff3 \
+    | awk '\$3 != "genicpart"' \
+    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_augustus_", \$9); print}' \
+    > "${name}_augustus_hints.gff3"
+    """
+}
+
+
+process filterPredStrand {
+
+    label "posix"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file("*hints") from augustusPredHints
+            .mix(
+                genemarkHints,
+                pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
+                codingQuarryHints,
+                codingQuarryPMHints,
+                gemomaHints,
+                augustusHintsHints,
+            )
+            .groupTuple(by: 0)
+
+    output:
+    set val(name),
+        file("${name}_pos_hints_for_augustus_preds.gff"),
+        file("${name}_neg_hints_for_augustus_preds.gff") into augustusPredHints4PredTmp
+
+    script:
+    """
+    mkdir tmp
+
+    cat *hints \
+    | gawk '
+        \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
+          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
+          print b;
+        }
+      ' \
+    | sort -u -T tmp \
+    > neg_ids.txt
+
+    cat *hints \
+    | gawk '
+        \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
+          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
+          print b;
+        }
+      ' \
+    | sort -u -T tmp \
+    > pos_ids.txt
+
+    rm -rf -- tmp
+
+    cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
+    cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
+
+    cat *hints \
+    | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
+    > neg_single.gff
+
+    cat *hints \
+    | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
+    > pos_single.gff
+
+    cat neg_single.gff neg_groups.gff > "${name}_neg_hints_for_augustus_preds.gff"
+    cat pos_single.gff pos_groups.gff > "${name}_pos_hints_for_augustus_preds.gff"
+    """
+}
+
+augustusPredHints4PredTmp
+    .flatMap { n, f, r -> [[n, "forward", f], [n, "reverse", r]]}
+    .set { augustusPredHints4Pred }
+
+
 process runAugustusPreds {
 
     label "augustus"
     label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
 
     tag "${name} - ${strand}"
 
     input:
     set val(name),
-        val(strand),
         file(fasta),
+        val(strand),
         file("hints.gff") from genomes4RunAugustusPreds
-            .combine(augustusPredHints4Pred, by: [0, 1])
+            .combine(augustusPredHints4Pred, by: 0)
 
     file "augustus_config" from augustusConfig
     file "extrinsic.cfg" from augustusPredWeights
 
     output:
     set val(name),
-        val("augustus_hints"),
         val(strand),
         file("out.gff") into augustusPredsResults
 
@@ -3048,17 +3104,7 @@ process runAugustusPreds {
 }
 
 
-augustusDenovoResults
-    .mix(
-        augustusDenovoUTRResults,
-        augustusHintsResults,
-        augustusPredsResults,
-    )
-    .map { n, p, s, g -> [n, p, g] }
-    .groupTuple(by: [0, 1])
-    .set {augustusChunks}
-
-process joinAugustusChunks {
+process joinAugustusPredsChunks {
 
     label "genometools"
     label "small_task"
@@ -3067,23 +3113,22 @@ process joinAugustusChunks {
     tag "${name} - ${paramset}"
 
     input:
-    set val(name),
-        val(paramset),
-        file("*chunks.gff") from augustusChunks
+    set val(name), file("*chunks.gff") from augustusPredsResults
+        .map { n, s, f -> [n, f] }
 
     output:
     set val(name),
-        val(paramset),
-        file("${name}_${paramset}.gff3") into augustusJoinedChunks
+        file("${name}_${paramset}.gff3") into augustusJoinedPreds
 
     script:
     """
     for f in *chunks.gff
     do
-      gt gff3 -tidy -sort -o \${f}_tidied.gff3 \${f}
+      awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+      | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
     done
 
-    gt merge -tidy -o "${name}_${paramset}.gff3" *_tidied.gff3
+    gt merge -tidy -o "${name}_preds.gff3" *_tidied.gff3
     """
 }
 
