@@ -1418,6 +1418,36 @@ process extractSpalnProteinHints {
     """
 }
 
+
+process alignRemoteProteins {
+
+    label "spaln"
+    label "medium_task"
+
+    script:
+    """
+    awk -v SCAFFOLD="SNOR_42467" '
+      BEGIN {N=0}
+      \$0 ~ "^>"SCAFFOLD {
+        N=1;
+        print;
+        next
+      }
+      N==1 && /^>/ {N++}
+      N == 1 {print}
+    ' genomes/SN15.faa > out.fasta
+
+    spaln \
+      -O0 \
+      -Q0 \
+      -ya2 \
+      -yX \
+      -LS \
+      'genomes/SN15.fasta 1 20000' \
+      test.faa
+    """
+}
+
 //
 // 3 run busco on all genomes
 //
@@ -1602,7 +1632,6 @@ process extractPasaHints {
       --exon-trim 9 \
       --intron-trim 0 \
       - \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_pasa_", \$9); print}' \
     > "${name}_pasa_hints.gff3"
 
@@ -1616,7 +1645,6 @@ process extractPasaHints {
       --cds-trim 9 \
       --utr-trim 6 \
       - \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_transdecoder_", \$9); print}' \
     > "${name}_transdecoder_hints.gff3"
     """
@@ -1839,7 +1867,6 @@ process extractGenemarkHints {
       --exon-trim 9 \
       --intron-trim 0 \
       genemark.gff3 \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_genemark_", \$9); print}' \
     > "${name}_genemark_hints.gff3"
     """
@@ -1965,7 +1992,6 @@ process extractCodingQuarryHints {
       --intron-trim 0 \
       -- \
       codingquarry.gff3 \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarry_", \$9); print}' \
     > "${name}_codingquarry_hints.gff3"
     """
@@ -2225,7 +2251,6 @@ process extractCodingQuarryPMHints {
       --exon-trim 6 \
       --intron-trim 0 \
       codingquarry.gff3 \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarrypm_", \$9); print}' \
     > "${name}_codingquarrypm_hints.gff3"
     """
@@ -2602,7 +2627,6 @@ process extractGemomaHints {
       --utr-trim 9 \
       --intron-trim 0 \
       gemoma.gff3 \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_gemoma_", \$9); print}' \
     > "${name}_gemoma_hints.gff3"
     """
@@ -2669,6 +2693,7 @@ process runAugustusDenovo {
       --species="${params.augustus_species}" \
       --softmasking=on \
       --singlestrand=true \
+      --min_intron_length=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -2725,6 +2750,7 @@ process runAugustusDenovoUTR {
       --softmasking=on \
       ${strand_param} \
       --UTR=on \
+      --min_intron_length=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -2817,7 +2843,7 @@ if ( params.augustus_utr ) {
         label "small_task"
         publishDir "${params.outdir}/hints/${name}"
 
-        label { name }
+        tag { name }
 
         input:
         set val(name),
@@ -2827,11 +2853,13 @@ if ( params.augustus_utr ) {
         output:
         set val(name),
             val("both"),
-            file("hints.gff") into augustusFilteredHints4Hints
+            file("${name}_hints_for_augustus_hints.gff") into augustusFilteredHints4Hints
 
         script:
         """
-        cat *hints | awk '\$3 != "exon"' > "${name}_augustus_hints_hints.gff"
+        cat *hints \
+        | awk '\$3 != "exonpart" && \$3 != "exon"' \
+        > "${name}_hints_for_augustus_hints.gff"
         """
     }
 }
@@ -2884,6 +2912,7 @@ process runAugustusHints {
       --allow_hinted_splicesites=atac \
       --softmasking=on \
       --alternatives-from-evidence=true \
+      --min_intron_length=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -2965,9 +2994,8 @@ process extractAugustusHintsHints {
       --utr-trim 9 \
       --intron-trim 0 \
       augustus.gff3 \
-    | awk '\$3 != "genicpart"' \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_augustus_", \$9); print}' \
-    > "${name}_augustus_hints.gff3"
+    > "${name}_augustus_hints_hints.gff3"
     """
 }
 
@@ -2980,7 +3008,7 @@ process filterPredStrand {
     tag { name }
 
     input:
-    set val(name), file("*hints") from augustusPredHints
+    set val(name), file("*hints") from augustusExtrinsicHints4Preds
             .mix(
                 genemarkHints,
                 pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
@@ -3092,6 +3120,7 @@ process runAugustusPreds {
       --allow_hinted_splicesites=atac \
       --softmasking=on \
       --alternatives-from-evidence=true \
+      --min_intron_length=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -3110,21 +3139,23 @@ process joinAugustusPredsChunks {
     label "small_task"
     publishDir "${params.outdir}/annotations/${name}"
 
-    tag "${name} - ${paramset}"
+    tag "${name}"
 
     input:
     set val(name), file("*chunks.gff") from augustusPredsResults
         .map { n, s, f -> [n, f] }
+	.groupTuple(by: 0)
 
     output:
     set val(name),
-        file("${name}_${paramset}.gff3") into augustusJoinedPreds
+        file("${name}_preds.gff3") into augustusJoinedPreds
 
     script:
     """
     for f in *chunks.gff
     do
       awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+      | grep -v "^#" \
       | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
     done
 
