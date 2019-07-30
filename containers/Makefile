@@ -75,6 +75,10 @@ MMSEQS_TAG=9-d36de
 MMSEQS_REPO=https://github.com/soedinglab/MMseqs2.git
 MMSEQS_PREFIX_ARG=$(INSTALL_BASE)/mmseqs/$(MMSEQS_TAG)
 
+EXONERATE_VERSION=2.4.0
+EXONERATE_URL=http://ftp.ebi.ac.uk/pub/software/vertebrategenomics/exonerate/exonerate-2.4.0.tar.gz
+EXONERATE_PREFIX_ARG=$(INSTALL_BASE)/exonerate/$(EXONERATE_VERSION)
+
 
 GENOMETOOLS_VERSION=1.5.10
 GENOMETOOLS_URL=http://genometools.org/pub/genometools-$(GENOMETOOLS_VERSION).tar.gz
@@ -494,6 +498,18 @@ docker/mmseqs: mmseqs.Dockerfile docker/base
 	  --build-arg MMSEQS_TAG="$(MMSEQS_TAG)" \
 	  --build-arg MMSEQS_REPO="$(MMSEQS_REPO)" \
 	  --build-arg MMSEQS_PREFIX_ARG="$(MMSEQS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+docker/exonerate: exonerate.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg EXONERATE_VERSION="$(EXONERATE_VERSION)" \
+	  --build-arg EXONERATE_URL="$(EXONERATE_URL)" \
+	  --build-arg EXONERATE_PREFIX_ARG="$(EXONERATE_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
