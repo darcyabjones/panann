@@ -603,6 +603,99 @@ process runRnammer {
 }
 
 
+process indexRemoteProteins {
+
+    label "mmseqs"
+    label "medium_task"
+
+    input:
+    file "remote_proteins.fasta"
+
+    output:
+    file "proteins"
+
+    script:
+    """
+    mkdir -p tmp proteins
+
+    mmseqs createdb remote_proteins.fasta proteins/db
+    mmseqs createindex proteins/db tmp
+
+    rm -rf -- tmp
+    """
+}
+
+
+process alignProteinToGenome {
+
+    label "mmseqs"
+    label "large_task"
+
+    input:
+    file "proteins" from index
+    set val(name), file(fasta), file(faidx) from genomes4
+
+    output:
+    set val(name), file
+
+    script:
+    """
+    mkdir genome result tmp
+
+    mmseqs createdb \
+      "${fasta}" \
+      genome/db \
+      --dont-split-seq-by-len
+
+    mmseqs search \
+      genome/db \
+      proteins/db \
+      result/db \
+      tmp \
+      --threads "${task.cpus}" \
+      -e 0.00001 \
+      --min-length 10 \
+      --comp-bias-corr 1 \
+      --split-mode 1 \
+      --max-seqs 50 \
+      --mask 0 \
+      --orf-start-mode 1 \
+      --translation-table 1 \
+      --use-all-table-starts 
+
+    mmseqs convertalis \
+      genome/db \
+      proteins/db \
+      result/db \
+      results_unsorted.tsv \
+      --format-mode 0 \
+      --format-output "query,target,qstart,qend,qlen,tstart,tend,tlen,alnlen,pident,mismatch,gapopen,evalue,bitscore"
+
+    sort -k1,1 -k3,3n -k4,4n -k2,2 --parallel="${task.cpus}" results_unsorted.tsv > results.tsv
+
+    sed -i '1i query\ttarget\tqstart\tqend\tqlen\ttstart\ttend\ttlen\talnlen\tpident\tmismatch\tgapopen\tevalue\tbitscore' results.tsv
+
+    rm -rf -- tmp genome result
+    """
+}
+
+"""
+tail -n+2 results.tsv \
+| awk '
+  BEGIN {OFS="\t"}
+  $3 > $4 {print $1, $4, $3, $2}
+  $3 < $4 {print $1, $3, $4, $2}
+  ' \
+| sort -k1,1 -k2,2n -k3,3n \
+| sed 's/,/%2C/g' \
+| bedtools merge -d 1000 -c 4 -o distinct -i - \
+| bedtools slop -g faidx -b 20000 -i - \
+> clustered.bed
+
+tr '\n' '\t' < clustered.bed \
+| xargs -d '\t' -n 4 bash run_exonerate.sh
+"""
+
 //
 // Indexing and preprocessing
 //
