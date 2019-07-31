@@ -14,7 +14,8 @@ USAGE: exonerate_parallel.sh -g GENOME -p PROTEINS -b BED -n NCPUS -t TMPDIR > r
 
 Arguments:
 -g -- The genome in fasta format [REQUIRED].
--p -- The proteins in fasta format [REQUIRED].
+-p -- The proteins in fasta format [REQUIRED if not -q].
+-q -- The proteins in tsv format [REQUIRED if not -p]
 -b -- A bed file with regions to search in the first 3 columns
       and a comma separated list of protein ids to search against that
       region in the 4th column [REQUIRED].
@@ -73,6 +74,7 @@ do
       ;;
     g ) GENOME="${OPTARG}" ;;
     p ) PROTEINS="${OPTARG}" ;;
+    q ) PROTEINS_TSV="${OPTARG}" ;;
     b ) BED="${OPTARG}" ;;
     n ) NCPU="${OPTARG}" ;;
     t ) TMPDIR="${OPTARG}" ;;
@@ -91,12 +93,17 @@ do
 done
 
 
-if   [ -z "${GENOME-}" ] \
-  || [ -z "${PROTEINS-}" ] \
-  || [ -z "${BED-}" ]
+if   [ -z "${GENOME-}" ] || [ -z "${BED-}" ]
 then
   usage
   echo "ERROR: One or more required arguments have not been provided"
+  exit 1
+fi
+
+if [ -z "${PROTEINS-}" ] && [ -z "${PROTEINS_TSV-}"]
+then
+  usage
+  echo "ERROR: Either -p or -q must be specified."
   exit 1
 fi
 
@@ -107,15 +114,21 @@ fi
 
 mkdir -p "${TMPDIR}"
 
-# Needed for child processes
-export GENOME
-export TMPDIR
-
 # Convert proteins to tsv
-fasta_to_tsv "${PROTEINS}" > "${TMPDIR}/proteins.tsv"
+if [ -z "${PROTEINS_TSV-}" ]
+then
+  PROTEINS_TSV="${TMPDIR}/proteins.tsv"
+  fasta_to_tsv "${PROTEINS}" > "${PROTEINS_TSV}"
+fi
 
 # Get .fai to avoid race if it doesn't exist already.
 samtools faidx "${GENOME}"
+
+# Needed for child processes
+export GENOME
+export PROTEINS_TSV
+export TMPDIR
+
 
 grep -v "^#" "${BED}" \
 | cut -f1-4 \
@@ -124,7 +137,7 @@ grep -v "^#" "${BED}" \
   bash -eu -c '
     exonerate_region.sh \
       -g "${GENOME}" \
-      -p "${TMPDIR}/proteins.tsv" \
+      -p "${PROTEINS_TSV}" \
       -c "$0" \
       -s "$1" \
       -e "$2" \

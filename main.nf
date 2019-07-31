@@ -75,6 +75,7 @@ params.hints = false
 
 params.transcripts = false
 params.proteins = false
+params.remote_proteins = false
 
 params.genome_alignment = false
 
@@ -173,6 +174,17 @@ if ( params.proteins ) {
 
 } else {
     proteins = Channel.empty()
+}
+
+
+if ( params.remote_proteins ) {
+    Channel
+        .fromPath(params.remote_proteins, checkIfExists: true, type: "file")
+        .first()
+        .set { remoteProteins }
+
+} else {
+    remoteProteins = Channel.empty()
 }
 
 
@@ -326,6 +338,9 @@ genomesWithFaidx.into {
     genomes4KnownSites;
     genomes4SpalnIndex;
     genomes4GmapIndex;
+    genomes4MatchRemoteProteinsToGenome;
+    genomes4ClusterRemoteProteinsToGenome;
+    genomes4AlignRemoteProteinsToGenome;
     genomes4UserCrams;
     genomes4TidyBams;
     genomes4TidyFilteredBams;
@@ -410,47 +425,71 @@ fastq4Alignment
 process indexRemoteProteins {
 
     label "mmseqs"
-    label "medium_task"
+    label "small_task"
 
     input:
-    file "remote_proteins.fasta"
+    file fasta from remoteProteins
 
     output:
-    file "proteins"
+    file "proteins" into indexedRemoteProteins
+    file "proteins.tsv" into remoteProteinsTSV
 
     script:
     """
     mkdir -p tmp proteins
 
-    mmseqs createdb remote_proteins.fasta proteins/db
+    mmseqs createdb "${fasta}" proteins/db
     mmseqs createindex proteins/db tmp
+
+    awk '
+      /^>/ {
+        b=gensub(/^>\s*(\S+).*\$/, "\\\\1", "g", \$0);
+        printf("%s%s\t", (N>0?"\n":""), b);
+        N++;
+        next;
+      }
+      {
+        printf("%s", \$0)
+      }
+      END {
+        printf("\n");
+      }
+    ' < "${fasta}" \
+    > "proteins.tsv"
 
     rm -rf -- tmp
     """
 }
 
 
-process alignProteinToGenome {
+process matchRemoteProteinsToGenome {
 
     label "mmseqs"
     label "large_task"
 
+    tag { name }
+
     input:
-    file "proteins" from index
-    set val(name), file(fasta), file(faidx) from genomes4
+    set val(name),
+        file(fasta),
+        file(faidx) from genomes4MatchRemoteProteinsToGenome
+
+    file "proteins" from indexedRemoteProteins
 
     output:
-    set val(name), file
+    set val(name), file("${name}_remote_proteins.tsv") into matchedRemoteProteinsToGenome
 
     script:
     """
     mkdir genome result tmp
 
+    # the "dont-split" bit is important for keeping the ids correct.
     mmseqs createdb \
       "${fasta}" \
       genome/db \
       --dont-split-seq-by-len
 
+    # Searching with genome as query is ~3X faster
     mmseqs search \
       genome/db \
       proteins/db \
@@ -465,40 +504,148 @@ process alignProteinToGenome {
       --mask 0 \
       --orf-start-mode 1 \
       --translation-table 1 \
-      --use-all-table-starts 
+      --use-all-table-starts
 
+    # Extract match results.
     mmseqs convertalis \
       genome/db \
       proteins/db \
       result/db \
       results_unsorted.tsv \
+      --threads "${task.cpus}" \
       --format-mode 0 \
       --format-output "query,target,qstart,qend,qlen,tstart,tend,tlen,alnlen,pident,mismatch,gapopen,evalue,bitscore"
 
-    sort -k1,1 -k3,3n -k4,4n -k2,2 --parallel="${task.cpus}" results_unsorted.tsv > results.tsv
+    sort \
+      -k1,1 \
+      -k3,3n \
+      -k4,4n \
+      -k2,2 \
+      --parallel="${task.cpus}" \
+      --temporary-directory=tmp \
+      results_unsorted.tsv \
+    > "${name}_remote_proteins.tsv"
 
-    sed -i '1i query\ttarget\tqstart\tqend\tqlen\ttstart\ttend\ttlen\talnlen\tpident\tmismatch\tgapopen\tevalue\tbitscore' results.tsv
+    sed -i '1i query\ttarget\tqstart\tqend\tqlen\ttstart\ttend\ttlen\talnlen\tpident\tmismatch\tgapopen\tevalue\tbitscore' "${name}_remote_proteins.tsv"
 
-    rm -rf -- tmp genome result
+    rm -rf -- tmp genome result results_unsorted.tsv
     """
 }
 
-"""
-tail -n+2 results.tsv \
-| awk '
-  BEGIN { OFS="\t" }
-  $3 > $4 { print $1, $4, $3, $2 }
-  $3 < $4 { print $1, $3, $4, $2 }
-  ' \
-| sort -k1,1 -k2,2n -k3,3n \
-| sed 's/,/%2C/g' \
-| bedtools merge -d 1000 -c 4 -o distinct -i - \
-| bedtools slop -g faidx -b 20000 -i - \
-> clustered.bed
 
-tr '\n' '\t' < clustered.bed \
-| xargs -d '\t' -n 4 bash run_exonerate.sh
-"""
+process clusterRemoteProteinsToGenome {
+
+    label "bedtools"
+    label "medium_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("results.tsv") from genomes4ClusterRemoteProteinsToGenome
+            .collect(matchedRemoteProteinsToGenome, by: 0)
+
+    output:
+    set val(name), file("clustered.bed") into clusteredRemoteProteinsToGenome
+
+    script:
+    def exonerate_buffer_region = 20000
+
+    """
+    mkdir -p tmp
+
+    tail -n+2 results.tsv \
+    | awk '
+      BEGIN { OFS="\t" }
+      $3 > $4 { print $1, $4, $3, $2 }
+      $3 < $4 { print $1, $3, $4, $2 }
+      ' \
+    | sort \
+      -k1,1 -k2,2n -k3,3n \
+      --temporary-directory=tmp \
+    | sed 's/,/%2C/g' \
+    | bedtools merge -d 1000 -c 4 -o distinct -i - \
+    | bedtools slop -g "${faidx}" -b "${exonerate_buffer_region}" -i - \
+    > clustered.bed
+
+    rm -rf -- tmp
+    """
+}
+
+
+process alignRemoteProteinsToGenome {
+
+    label "exonerate"
+    label "big_task"
+
+    tag { name }
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("clustered.bed") from genomes4AlignRemoteProteinsToGenome
+            .collect(clusteredRemoteProteinsToGenome, by: 0)
+
+    file "proteins.tsv" from remoteProteinsTSV
+
+    output:
+    set val(name),
+        file("${name}_remote_proteins_exonerate.gff") into alignedRemoteProteinsToGenome
+
+    script:
+    """
+    mkdir -p tmp
+
+    exonerate_parallel.sh \
+      -g "${fasta}" \
+      -q "proteins.tsv" \
+      -b "clustered.bed" \
+      -n "${task.cpus}" \
+      -t "tmp" \
+      -o "${name}_remote_proteins_exonerate.gff"
+    """
+}
+
+
+process extractExonerateRemoteProteinHints {
+
+    label "braker"
+    label "small_task"
+
+    publishDir "${params.outdir}/hints/${name}"
+
+    input:
+    set val(name), file("exonerate.gff") from alignedRemoteProteinsToGenome
+
+    output:
+    set val(name),
+        file("${name}_exonerate_remote_protein_hints.gff3") into exonerateRemoteProteinHints
+
+    script:
+    """
+    align2hints.pl \
+      --in=exonerate.gff \
+      --out=hints.gff3 \
+      --prg=exonerate \
+      --CDSpart_cutoff=15 \
+      --minintronlen=20 \
+      --priority=2
+
+    awk '
+      BEGIN {OFS="\\t"}
+      {
+        sub(/grp=/, "grp=${name}_exonerate_remote_proteins_", \$9)
+        print
+      }
+      ' \
+      hints.gff3 \
+    > "${name}_exonerate_remote_protein_hints.gff3"
+    """
+}
+
 
 //
 // Indexing and preprocessing
@@ -1307,6 +1454,7 @@ process extractSpalnProteinHints {
       --out=hints.gff3 \
       --prg=spaln \
       --CDSpart_cutoff=12 \
+      --minintronlen=20 \
       --priority=3
 
     awk 'BEGIN {OFS="\\t"} {sub(/grp=/, "grp=${name}_spaln_proteins_", \$9); print}' \
@@ -1315,35 +1463,6 @@ process extractSpalnProteinHints {
     """
 }
 
-
-process alignRemoteProteins {
-
-    label "spaln"
-    label "medium_task"
-
-    script:
-    """
-    awk -v SCAFFOLD="SNOR_42467" '
-      BEGIN {N=0}
-      \$0 ~ "^>"SCAFFOLD {
-        N=1;
-        print;
-        next
-      }
-      N==1 && /^>/ {N++}
-      N == 1 {print}
-    ' genomes/SN15.faa > out.fasta
-
-    spaln \
-      -O0 \
-      -Q0 \
-      -ya2 \
-      -yX \
-      -LS \
-      'genomes/SN15.fasta 1 20000' \
-      test.faa
-    """
-}
 
 //
 // 3 run busco on all genomes
@@ -3041,7 +3160,7 @@ process joinAugustusPredsChunks {
     input:
     set val(name), file("*chunks.gff") from augustusPredsResults
         .map { n, s, f -> [n, f] }
-	.groupTuple(by: 0)
+        .groupTuple(by: 0)
 
     output:
     set val(name),
