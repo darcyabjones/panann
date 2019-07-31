@@ -86,11 +86,6 @@ params.augustus_utr = false
 params.augustus_pred_weights = "data/extrinsic_pred.cfg"
 params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 
-params.no_noncoding = false
-params.structrnafinder = false
-params.rfam = false
-params.rfam_url = "ftp://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz"
-params.rnammer = false
 
 // RNAseq params
 params.fastq = false
@@ -304,34 +299,6 @@ if ( params.crams ) {
 }
 
 
-if ( params.rfam && !params.no_noncoding ) {
-    Channel
-        .fromPath( params.rfam, checkIfExists: true, type: "file")
-        .first()
-        .set { rfam }
-} else if ( params.structrnafinder && !params.no_noncoding ) {
-
-    process getRfam {
-
-        label "download"
-        label "small_task"
-
-        publishDir "${params.outdir}/downloads"
-
-        output:
-        file "Rfam.cm" into rfam
-
-        script:
-        """
-        wget -O Rfam.cm.gz "${params.rfam_url}"
-        gunzip Rfam.cm.gz
-        """
-    }
-} else {
-    rfam = Channel.empty()
-}
-
-
 process getFaidx {
 
     label "samtools"
@@ -356,10 +323,6 @@ process getFaidx {
 
 
 genomesWithFaidx.into {
-    genomes4RunAragorn;
-    genomes4RunTRNAScan;
-    genomes4RunStructRNAFinder;
-    genomes4RunRnammer;
     genomes4KnownSites;
     genomes4SpalnIndex;
     genomes4GmapIndex;
@@ -442,165 +405,6 @@ fastq4Alignment
         fastq4StarFindNovelSpliceSites;
         fastq4StarAlignReads;
     }
-
-//
-// Finding non-coding RNA
-//
-
-process runAragorn {
-
-    label "aragorn"
-    label "small_task"
-
-    publishDir "${params.outdir}/noncoding/${name}"
-
-    tag { name }
-
-    when:
-    !params.no_noncoding
-
-    input:
-    set val(name), file(fasta), file(faidx) from genomes4RunAragorn
-
-    output:
-    set val(name), file("${name}_aragorn_trna.txt") into aragornResults
-
-    script:
-    """
-    aragorn -t "${fasta}" > "${name}_aragorn_trna.txt"
-    """
-}
-
-
-process runTRNAScan {
-
-    label "trnascan"
-    label "medium_task"
-
-    publishDir "${params.outdir}/noncoding/${name}"
-
-    tag { name }
-
-    when:
-    !params.no_noncoding
-
-    input:
-    set val(name), file(fasta), file(faidx) from genomes4RunTRNAScan
-
-    output:
-    set val(name), file("${name}_trnascan.txt") into tRNAScanResults
-    file "${name}_trnascan_ss.txt"
-    file "${name}_trnascan_iso.txt"
-    file "${name}_trnascan_stats.txt"
-    file "${name}_trnascan.bed"
-    file "${name}_trnascan.fasta"
-
-    script:
-    """
-    tRNAscan-SE \
-      -E \
-      -o "${name}_trnascan.txt" \
-      -f "${name}_trnascan_ss.txt" \
-      -s "${name}_trnascan_iso.txt" \
-      -m "${name}_trnascan_stats.txt" \
-      -b "${name}_trnascan.bed" \
-      -a "${name}_trnascan.fasta" \
-      --log trna.log \
-      --thread "${task.cpus}" \
-      "${fasta}"
-    """
-}
-
-
-process pressRfam {
-
-    label "infernal"
-    label "small_task"
-
-    when:
-    params.structrnafinder && !params.no_noncoding
-
-    input:
-    file "Rfam.cm" from rfam
-
-    output:
-    file "out" into pressedRfam
-
-    script:
-    """
-    mkdir out
-    cp -L Rfam.cm out/Rfam.cm
-    cmpress -F out/Rfam.cm
-    """
-}
-
-
-process runStructRNAFinder {
-
-    label "structrnafinder"
-    label "big_task"
-
-    publishDir "${params.outdir}/noncoding/${name}"
-
-    tag { name }
-
-    when:
-    params.structrnafinder && !params.no_noncoding
-
-    input:
-    set val(name), file(fasta), file(faidx) from genomes4RunStructRNAFinder
-    file "rfamdb" from pressedRfam
-
-    output:
-    set val(name),
-        file("${name}_structrnafinder.tsv") into structRNAfinderResults
-    file "${name}_structrnafinder.txt"
-    file "html"
-    file "img"
-
-    script:
-    """
-    # Do something about truncating fasta headers
-    structRNAfinder \
-      -i "${fasta}" \
-      -d rfamdb/Rfam.cm \
-      -r \
-      -c ${task.cpus} \
-      --method cmsearch \
-      --tblout "${name}_structrnafinder.tsv" \
-      --output "${name}_structrnafinder.txt"
-    """
-}
-
-
-process runRnammer {
-
-    label "rnammer"
-    label "small_task"
-
-    publishDir "${params.outdir}/noncoding/${name}"
-
-    tag { name }
-
-    when:
-    params.rnammer && params.no_noncoding
-
-    input:
-    set val(name), file(fasta), file(faidx) from genomes4RunRnammer
-
-    output:
-    set val(name), file("${name}_rnammer.gff2") into rnammerResults
-    file "${name}_rnammer.hmmreport"
-
-    """
-    rnammer \
-      -S euk \
-      -m lsu,ssu,tsu \
-      -gff "${name}_rnammer.gff2" \
-      -h "${name}_rnammer.hmmreport" \
-      "${fasta}"
-    """
-}
 
 
 //
