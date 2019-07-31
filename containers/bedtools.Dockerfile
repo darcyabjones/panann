@@ -1,0 +1,50 @@
+ARG IMAGE
+
+FROM "${IMAGE}" as bedtools_builder
+
+ARG BEDTOOLS_VERSION
+ARG BEDTOOLS_URL="https://github.com/arq5x/bedtools2/releases/download/v2.28.0/bedtools-2.28.0.tar.gz"
+ARG BEDTOOLS_PREFIX_ARG="/opt/bedtools/${BEDTOOLS_VERSION}"
+ENV BEDTOOLS_PREFIX="${BEDTOOLS_PREFIX_ARG}"
+
+WORKDIR /tmp
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+       build-essential \
+       ca-certificates \
+       wget \
+  && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
+  && wget -O bedtools.tar.gz "${BEDTOOLS_URL}" \
+  && tar zxf bedtools.tar.gz \
+  && cd bedtools*/ \
+  && make \
+  && make install prefix="${BEDTOOLS_PREFIX}"
+
+#&& add_runtime_dep zlib1g
+
+# CA cert stuff sometime required for git clone https
+
+
+FROM "${IMAGE}"
+
+ARG BEDTOOLS_VERSION
+ARG BEDTOOLS_PREFIX_ARG="/opt/bedtools/${BEDTOOLS_VERSION}"
+ENV BEDTOOLS_PREFIX="${BEDTOOLS_PREFIX_ARG}"
+LABEL bedtools.version="${BEDTOOLS_VERSION}"
+
+ENV PATH "${BEDTOOLS_PREFIX}/bin:${PATH}"
+
+COPY --from=bedtools_builder "${BEDTOOLS_PREFIX}" "${BEDTOOLS_PREFIX}"
+COPY --from=bedtools_builder "${APT_REQUIREMENTS_FILE}" /build/apt/bedtools.txt
+
+RUN  set -eu \
+  && DEBIAN_FRONTEND=noninteractive \
+  && . /build/base.sh \
+  && apt-get update \
+  && apt_install_from_file /build/apt/*.txt \
+  && rm -rf /var/lib/apt/lists/* \
+  && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"

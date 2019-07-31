@@ -88,6 +88,10 @@ AEGEAN_VERSION=v0.15.0
 AEGEAN_URL=https://github.com/standage/AEGeAn/archive/$(AEGEAN_VERSION).tar.gz
 AEGEAN_PREFIX_ARG=$(INSTALL_BASE)/aegean/$(AEGEAN_VERSION)
 
+BEDTOOLS_VERSION=2.28.0
+BEDTOOLS_URL=https://github.com/arq5x/bedtools2/releases/download/v2.28.0/bedtools-2.28.0.tar.gz
+BEDTOOLS_PREFIX_ARG=$(INSTALL_BASE)/bedtools/$(BEDTOOLS_VERSION)
+
 
 AUGUSTUS_COMMIT=8b1b14a7489e4545e89c8725dc33268f6c2a9117
 AUGUSTUS_REPO=https://github.com/Gaius-Augustus/Augustus.git
@@ -382,6 +386,19 @@ docker/aegean: aegean.Dockerfile docker/base docker/genometools
 	  --build-arg AEGEAN_VERSION="$(AEGEAN_VERSION)" \
 	  --build-arg AEGEAN_URL="$(AEGEAN_URL)" \
 	  --build-arg AEGEAN_PREFIX_ARG="$(AEGEAN_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/bedtools: bedtools.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg BEDTOOLS_VERSION="$(BEDTOOLS_VERSION)" \
+	  --build-arg BEDTOOLS_URL="$(BEDTOOLS_URL)" \
+	  --build-arg BEDTOOLS_PREFIX_ARG="$(BEDTOOLS_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
