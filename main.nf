@@ -682,9 +682,9 @@ process alignProteinToGenome {
 """
 tail -n+2 results.tsv \
 | awk '
-  BEGIN {OFS="\t"}
-  $3 > $4 {print $1, $4, $3, $2}
-  $3 < $4 {print $1, $3, $4, $2}
+  BEGIN { OFS="\t" }
+  $3 > $4 { print $1, $4, $3, $2 }
+  $3 < $4 { print $1, $3, $4, $2 }
   ' \
 | sort -k1,1 -k2,2n -k3,3n \
 | sed 's/,/%2C/g' \

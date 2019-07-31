@@ -510,6 +510,11 @@ docker/exonerate: exonerate.Dockerfile docker/base
 	  --build-arg EXONERATE_VERSION="$(EXONERATE_VERSION)" \
 	  --build-arg EXONERATE_URL="$(EXONERATE_URL)" \
 	  --build-arg EXONERATE_PREFIX_ARG="$(EXONERATE_PREFIX_ARG)" \
+	  --build-arg HTSLIB_IMAGE="$(call make_image_name,htslib)" \
+	  --build-arg HTSLIB_TAG="$(HTSLIB_TAG)" \
+	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
+	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
+	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .

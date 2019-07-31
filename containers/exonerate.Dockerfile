@@ -1,4 +1,7 @@
 ARG IMAGE
+ARG HTSLIB_IMAGE
+
+FROM "${HTSLIB_IMAGE}" as htslib_builder
 
 FROM "${IMAGE}" as exonerate_builder
 
@@ -40,6 +43,27 @@ ENV PATH "${EXONERATE_PREFIX}/bin:${PATH}"
 
 COPY --from=exonerate_builder "${EXONERATE_PREFIX}" "${EXONERATE_PREFIX}"
 COPY --from=exonerate_builder "${APT_REQUIREMENTS_FILE}" /build/apt/exonerate.txt
+
+ARG HTSLIB_TAG
+ARG SAMTOOLS_TAG
+
+ARG HTSLIB_PREFIX_ARG="/opt/htslib/${HTSLIB_TAG}"
+ARG SAMTOOLS_PREFIX_ARG="/opt/samtools/${SAMTOOLS_TAG}"
+
+ENV HTSLIB_PREFIX="${HTSLIB_PREFIX_ARG}"
+ENV SAMTOOLS_PREFIX="${SAMTOOLS_PREFIX_ARG}"
+
+LABEL htslib.version="${HTSLIB_TAG}"
+LABEL samtools.version="${SAMTOOLS_TAG}"
+
+ENV PATH="${SAMTOOLS_PREFIX}/bin:${HTSLIB_PREFIX}/bin:${PATH}"
+ENV CPATH="${HTSLIB_PREFIX}/include:${CPATH}"
+ENV LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LD_LIBRARY_PATH}"
+
+COPY --from=htslib_builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
+COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
+COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
