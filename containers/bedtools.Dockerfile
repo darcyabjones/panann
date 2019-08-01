@@ -15,17 +15,19 @@ RUN  set -eu \
   && apt-get install -y --no-install-recommends \
        build-essential \
        ca-certificates \
+       libbz2-dev \
+       liblzma-dev \
+       python \
        wget \
+       zlib1g-dev \
   && rm -rf /var/lib/apt/lists/* \
   && update-ca-certificates \
   && wget -O bedtools.tar.gz "${BEDTOOLS_URL}" \
   && tar zxf bedtools.tar.gz \
   && cd bedtools*/ \
   && make \
-  && make install prefix="${BEDTOOLS_PREFIX}"
-
-#&& add_runtime_dep zlib1g
-
+  && make install prefix="${BEDTOOLS_PREFIX}" \
+  && add_runtime_dep zlib1g libbz2-1.0 lzma
 # CA cert stuff sometime required for git clone https
 
 
