@@ -20,46 +20,42 @@ def helpMessage() {
     genome1.fasta	genome1.gff3	8
     EOF
 
-    nextflow run main.nf \
+    nextflow run -profile dev,nimbus main.nf -resume \
       --genomes "genomes/*.fasta" \
-      --known_sites known_sites.tsv \
-      --transcripts transcripts.fasta \
-      --proteins proteins.fasta \
-      --remote_proteins fungal_proteins.fasta
+      --transcripts 'transcripts/*.fasta' \
+      --proteins 'genomes/*.faa' \
+      --crams config_crams.tsv \
+      --known_sites config.tsv \
+      --outdir run \
+      --notrinity \
+      --signalp \
+      --augustus_species parastagonospora_nodorum_sn15 \
+      --augustus_config ../augustus_training/07-optimise_utr/augustus_config \
+      --genemark \
+      --remote_proteins ./uniref-identity%3A0.9.fasta
     ```
 
     ## Parameters
-    genomes - fasta genomes
-    known_sites - table. name, gff3. Note gff3 must have the exons set for star to work. Use genometools to add this.
-    transcripts - already assembled transcripts (skip assembly?)
-    proteins - predicted proteins from closely related species/isolate
+    See the comments in main for now.
+    I'll add documentation here when the interface becomes a bit more stable.
 
-    genome_alignment - A multiple genome alignment in MAF format, e.g. from cactus or sibelliaz.
-      if not provided, align the genomes with sibelliaz
+    ## Output
+    
+    You can specify the main output directory using the `--outdir` parameter.
+    Here we use <outdir> inplace of that parameter and <name> inplace of the
+    genome basenames.
 
-    busco_lineage - The busco lineage directory (un-tarred).
-    augustus_config - The augustus config directory. If not provided, assumes
-      that AUGUSTUS_CONFIG_PATH is set where the tasks will be executed.
-
-    fastq - table, rnaseq fastq files to assemble. need read_group, r1, r2. If add fasta field, do reference guided assembly.
-    bams - table, already aligned bam-files. Need name/fasta and bam.
-    cufflinks_gtf - Cufflinks assemblies, need name/fasta and gtf.
-    fr -- Use if the stranded RNA seq is not RF.
-
-    notfungus - dont use fungal specific features
-    genemark - flag to use genemark (it's installed)
-    signalp - flag to use signalp to run CodingQuarry - Pathogen mode.
-    softmasked
-
+    <outdir>/aligned/<name>/<name>_* -- Aligned reads, transcripts, and proteins to each genome.
+    <outdir>/annotations/<name>/<name>_* -- Gene predictions for each genome, including output of individual methods.
+    <outdir>/hints/<name>/<name>_*.gff3 -- GFF files from alignments and annotations configured to be provided as hints to augustus. 
+    <outdir>/assembled/<read_group>_* -- Trinity assembled reads.
+    <outdir>/qc/<name>_* -- Statistics and QC for each genome and step.
 
     ## Exit codes
 
     - 0: All ok.
     - 1: Incomplete parameter inputs.
 
-
-    ## Output
-    aligned_reads - Fastq reads aligned to each genome as bams.
     """.stripIndent()
 }
 
@@ -69,35 +65,109 @@ if (params.help) {
 }
 
 
+// Target genomes to annotate as softmasked fasta files.
+// Note the file basename (filename up to but excluding the
+// last extension) is used to match genomes with other hints.
 params.genomes = false
-params.known_sites = false
-params.hints = false
 
+// A table specifying known containing the columns name and 
+// known_sites specifying a set of high confidence genes to transfer
+// across genomes.
+params.known_sites = false
+
+// Don't allow pre-hints yet, but we will.
+// Probably need options for table style spec and directory
+// (e.g. `hints/<name>/hint1.gff`).
+// params.hints = false
+
+// A glob of transcripts fasta files to map to the genomes.
+// E.g. from prior trininty assembly.
 params.transcripts = false
+
+// A glob of protein fasta files from closely related organisms to align
+// to genomes and use as hints.
 params.proteins = false
+
+// A single fasta file of many proteins from diverse taxonomic sources
+// (E.g. uniref90). Used as weaker hints than proteins from more closely
+// related organisms.
 params.remote_proteins = false
 
+// A MAF file including all species under consideration and may include
+// additional ones. Create this using progressiveCactus or sibellia-z.
+// If this is not provided, one will be created with sibellia-z.
 params.genome_alignment = false
 
+// The busco lineage to use to evaluate gene prediction completeness.
+// If this is not provided, busco will not be run.
 params.busco_lineage = false
+
+
+// Augustus params
+
+// The folder containing trained models for augustus [required].
 params.augustus_config = false
+// The species to use within the augustus_config [required].
 params.augustus_species = false
+
+// Run augustus denovo against all genomes.
+// The denovo predictions don't form part of the output, this is only
+// used to evaluate the performance of the augustus models.
 params.augustus_denovo = false
+
+// Run all augustus prediction methods with UTR prediction.
+// Note that final combining prediction steps are always run
+// with UTR predictions so augustus MUST be trained to use UTRs.
+// Use this if the UTR model performs better than the non-UTR model.
 params.augustus_utr = false
-params.augustus_pred_weights = "data/extrinsic_pred.cfg"
+
+// The weighting config file for running augustus with hints.
 params.augustus_hint_weights = "data/extrinsic_hints.cfg"
+
+// The weighting config file for combining annotations from
+// multiple sources.
+params.augustus_pred_weights = "data/extrinsic_pred.cfg"
 
 
 // RNAseq params
-params.fastq = false
-params.crams = false
-params.fr = false
-params.cufflinks_gtf = false
 
+// A table specifying RNAseq fastq pairs.
+// At the moment RNAseq must be stranded.
+// Must contain a "read_group" and "read1" and "read2" column.
+// When provided, will assemble read groups using Trinity, and align
+// to all genomes using STAR.
+params.fastq = false
+
+// A table mapping pre-aligned RNAseq reads to the genomes.
+// Should include a "name", and "cram" column.
+params.crams = false
+
+// RNAseq is FR stranded rather than RF
+// (typical Illumina stranded configuration).
+// This can be overwritten for individual fastq pairs or crams
+// by adding a "strand" column specifying "fr" or "rf".
+// This parameter sets a default for when that column is unspecified.
+params.fr = false
+
+// Misc parameters.
+
+// Don't use parameters that are optimised for eukaryotes with
+// high-gene density.
 params.notfungus = false
+
+// Run GeneMark. This must be explicitly specified because GeneMark requires a license.
 params.genemark = false
+
+// Use signalp5 rather than deepsig to train CodingQuarryPM models.
+// This is not the default as signalp requires a license.
 params.signalp = false
+
+// Don't run trinity even if fastq files are provided.
+// Useful if you have precomputed transcripts but not cram files.
 params.notrinity = false
+
+// Don't run STAR mapping even if fastq files are provided.
+// Useful if you have precomputed cram files but not transcripts.
 params.nostar = false
 
 
@@ -421,7 +491,7 @@ fastq4Alignment
         fastq4StarAlignReads;
     }
 
-
+// TODO: specify threads for mmseqs createindex, otherwise it uses all of them.
 process indexRemoteProteins {
 
     label "mmseqs"
@@ -443,8 +513,8 @@ process indexRemoteProteins {
 
     awk '
       /^>/ {
-        b=gensub(/^>\s*(\S+).*\$/, "\\\\1", "g", \$0);
-        printf("%s%s\t", (N>0?"\n":""), b);
+        b=gensub(/^>\\s*(\\S+).*\$/, "\\\\1", "g", \$0);
+        printf("%s%s\\t", (N>0?"\\n":""), b);
         N++;
         next;
       }
@@ -452,7 +522,7 @@ process indexRemoteProteins {
         printf("%s", \$0)
       }
       END {
-        printf("\n");
+        printf("\\n");
       }
     ' < "${fasta}" \
     > "proteins.tsv"
@@ -465,7 +535,7 @@ process indexRemoteProteins {
 process matchRemoteProteinsToGenome {
 
     label "mmseqs"
-    label "large_task"
+    label "big_task"
 
     tag { name }
 
@@ -545,22 +615,21 @@ process clusterRemoteProteinsToGenome {
         file(fasta),
         file(faidx),
         file("results.tsv") from genomes4ClusterRemoteProteinsToGenome
-            .collect(matchedRemoteProteinsToGenome, by: 0)
+            .combine(matchedRemoteProteinsToGenome, by: 0)
 
     output:
     set val(name), file("clustered.bed") into clusteredRemoteProteinsToGenome
 
     script:
     def exonerate_buffer_region = 20000
-
     """
     mkdir -p tmp
 
     tail -n+2 results.tsv \
     | awk '
       BEGIN { OFS="\t" }
-      $3 > $4 { print $1, $4, $3, $2 }
-      $3 < $4 { print $1, $3, $4, $2 }
+      \$3 > \$4 { print \$1, \$4, \$3, \$2 }
+      \$3 < \$4 { print \$1, \$3, \$4, \$2 }
       ' \
     | sort \
       -k1,1 -k2,2n -k3,3n \
@@ -587,7 +656,7 @@ process alignRemoteProteinsToGenome {
         file(fasta),
         file(faidx),
         file("clustered.bed") from genomes4AlignRemoteProteinsToGenome
-            .collect(clusteredRemoteProteinsToGenome, by: 0)
+            .combine(clusteredRemoteProteinsToGenome, by: 0)
 
     file "proteins.tsv" from remoteProteinsTSV
 
@@ -1475,7 +1544,7 @@ process runBusco {
     label "medium_task"
     tag { name }
 
-    publishDir "${params.outdir}/busco"
+    publishDir "${params.outdir}/qc/${name}"
 
     when:
     params.busco_lineage
@@ -2709,7 +2778,7 @@ process runAugustusDenovo {
       --species="${params.augustus_species}" \
       --softmasking=on \
       --singlestrand=true \
-      --min_intron_length=20 \
+      --min_intron_len=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -2766,7 +2835,7 @@ process runAugustusDenovoUTR {
       --softmasking=on \
       ${strand_param} \
       --UTR=on \
-      --min_intron_length=20 \
+      --min_intron_len=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -2780,7 +2849,7 @@ process runAugustusDenovoUTR {
 
 augustusRnaseqHints4JoinHints
     .map { n, rg, i, e -> [n, i] }
-    .mix(spalnTranscriptHints, spalnProteinHints)
+    .mix(spalnTranscriptHints, spalnProteinHints, exonerateRemoteProteinHints)
     .into {
         augustusExtrinsicHints4Hints;
         augustusExtrinsicHints4Preds;
@@ -2928,7 +2997,7 @@ process runAugustusHints {
       --allow_hinted_splicesites=atac \
       --softmasking=on \
       --alternatives-from-evidence=true \
-      --min_intron_length=20 \
+      --min_intron_len=20 \
       --start=on \
       --stop=on \
       --introns=on \
@@ -3136,7 +3205,7 @@ process runAugustusPreds {
       --allow_hinted_splicesites=atac \
       --softmasking=on \
       --alternatives-from-evidence=true \
-      --min_intron_length=20 \
+      --min_intron_len=20 \
       --start=on \
       --stop=on \
       --introns=on \

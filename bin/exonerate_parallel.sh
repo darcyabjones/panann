@@ -129,7 +129,7 @@ export GENOME
 export PROTEINS_TSV
 export TMPDIR
 
-
+# The exit 255 guard is necessary because xargs ignores all other error-codes.
 grep -v "^#" "${BED}" \
 | cut -f1-4 \
 | tr '\n' '\t' \
@@ -142,7 +142,8 @@ grep -v "^#" "${BED}" \
       -s "$1" \
       -e "$2" \
       -i "$3" \
-      -o ${TMPDIR}/tmp$$
+      -o ${TMPDIR}/tmp$$ \
+    || exit 255
   '
 
 cat ${TMPDIR}/tmp*.gff > "${OUTFILE}"
