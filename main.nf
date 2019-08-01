@@ -509,7 +509,7 @@ process indexRemoteProteins {
     mkdir -p tmp proteins
 
     mmseqs createdb "${fasta}" proteins/db
-    mmseqs createindex proteins/db tmp
+    mmseqs createindex proteins/db tmp --threads "${task.cpus}"
 
     awk '
       /^>/ {
@@ -542,9 +542,9 @@ process matchRemoteProteinsToGenome {
     input:
     set val(name),
         file(fasta),
-        file(faidx) from genomes4MatchRemoteProteinsToGenome
-
-    file "proteins" from indexedRemoteProteins
+        file(faidx),
+        file("proteins") from genomes4MatchRemoteProteinsToGenome
+            .combine(indexedRemoteProteins)
 
     output:
     set val(name), file("${name}_remote_proteins.tsv") into matchedRemoteProteinsToGenome
@@ -584,7 +584,7 @@ process matchRemoteProteinsToGenome {
       results_unsorted.tsv \
       --threads "${task.cpus}" \
       --format-mode 0 \
-      --format-output "query,target,qstart,qend,qlen,tstart,tend,tlen,alnlen,pident,mismatch,gapopen,evalue,bitscore"
+      --format-output "query,target,qstart,qend,qlen,tstart,tend,tlen,alnlen,pident,mismatch,gapopen,evalue,bits"
 
     sort \
       -k1,1 \

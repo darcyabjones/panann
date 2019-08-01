@@ -65,7 +65,7 @@ then
 fi
 
 
-while getopts ":hg:p:b:n:t:" opt
+while getopts ":hg:p:q:b:n:t:o:" opt
 do
   case "${opt}" in
     h )
