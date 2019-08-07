@@ -370,7 +370,7 @@ process getFaidx {
     label "samtools"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("orig.fa") from genomes
@@ -521,7 +521,7 @@ process matchRemoteProteinsToGenome {
     label "mmseqs"
     label "big_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -592,7 +592,7 @@ process clusterRemoteProteinsToGenome {
     label "bedtools"
     label "medium_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -633,7 +633,7 @@ process alignRemoteProteinsToGenome {
     label "exonerate"
     label "big_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -667,6 +667,8 @@ process extractExonerateRemoteProteinHints {
 
     label "braker"
     label "small_task"
+
+    tag "${name}"
 
     publishDir "${params.outdir}/hints/${name}"
 
@@ -725,7 +727,7 @@ process getSpalnIndex {
     label "spaln"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file(genome), file(faidx) from genomes4SpalnIndex
@@ -757,7 +759,7 @@ process getGmapIndex {
     label "gmap"
     label "medium_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file(genome), file(faidx) from genomes4GmapIndex
@@ -784,7 +786,7 @@ process getStarIndex {
     label "star"
     label "medium_task"
 
-    tag { name }
+    tag "${name}"
 
     when:
     params.fastq && !params.nostar
@@ -1263,7 +1265,7 @@ process alignSpalnTranscripts {
 
     publishDir "${params.outdir}/aligned/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set file(fasta),
@@ -1308,7 +1310,7 @@ process tidySpalnTranscripts {
     label "genometools"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("transcripts.gff3") from spalnAlignedTranscripts
@@ -1336,7 +1338,7 @@ process extractSpalnTranscriptHints {
 
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("spaln.gff3") from spalnTidiedTranscripts
@@ -1371,7 +1373,7 @@ process alignGmapTranscripts {
 
     publishDir "${params.outdir}/aligned/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set file(fasta),
@@ -1452,7 +1454,7 @@ process alignSpalnProteins {
 
     publishDir "${params.outdir}/aligned/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -1493,6 +1495,8 @@ process extractSpalnProteinHints {
     label "braker"
     label "small_task"
 
+    tag "${name}"
+
     publishDir "${params.outdir}/hints/${name}"
 
     input:
@@ -1527,7 +1531,8 @@ process extractSpalnProteinHints {
 process runBusco {
     label "busco"
     label "medium_task"
-    tag { name }
+
+    tag "${name}"
 
     publishDir "${params.outdir}/qc/${name}"
 
@@ -1591,7 +1596,7 @@ process runPASA {
     label "medium_task"
     publishDir "${params.outdir}/annotations/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -1656,7 +1661,7 @@ process tidyPasa {
     label "aegean"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("pasa.gff3") from pasaPredictions
@@ -1681,7 +1686,7 @@ process extractPasaHints {
 
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("pasa.gff3") from tidiedPasa
@@ -1849,7 +1854,7 @@ process runGenemark {
     label "medium_task"
     publishDir "${params.outdir}/annotations/${name}"
 
-    tag { name }
+    tag "${name}"
 
     when:
     params.genemark
@@ -1892,7 +1897,7 @@ process tidyGenemark {
     label "aegean"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     when:
     params.genemark
@@ -1918,7 +1923,7 @@ process extractGenemarkHints {
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     when:
     params.genemark
@@ -2012,7 +2017,7 @@ process tidyCodingQuarry {
     label "aegean"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     when:
     !params.notfungus
@@ -2042,7 +2047,7 @@ process extractCodingQuarryHints {
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     when:
     !params.notfungus
@@ -2276,7 +2281,7 @@ process tidyCodingQuarryPM {
     label "aegean"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     when:
     !params.notfungus
@@ -2306,7 +2311,7 @@ process extractCodingQuarryPMHints {
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     when:
     !params.notfungus
@@ -2603,7 +2608,7 @@ process combineGemomaPredictions {
     label "small_task"
     publishDir "${params.outdir}/annotations/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -2660,7 +2665,7 @@ process tidyGemoma {
     label "aegean"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("gemoma.gff3") from gemomaPredictions
@@ -2684,7 +2689,7 @@ process extractGemomaHints {
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("gemoma.gff3") from tidiedGemoma
@@ -2714,7 +2719,7 @@ process chunkifyGenomes {
     label "python3"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name),
@@ -2746,7 +2751,7 @@ process runAugustusDenovo {
     label "augustus"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     when:
     params.augustus_denovo
@@ -2855,7 +2860,7 @@ if ( params.augustus_utr ) {
         label "small_task"
         publishDir "${params.outdir}/hints/${name}"
 
-        tag { name }
+        tag "${name}"
 
         input:
         set val(name), file("*hints") from augustusExtrinsicHints4Hints
@@ -2919,7 +2924,7 @@ if ( params.augustus_utr ) {
         label "small_task"
         publishDir "${params.outdir}/hints/${name}"
 
-        tag { name }
+        tag "${name}"
 
         input:
         set val(name),
@@ -3048,7 +3053,7 @@ process extractAugustusHintsHints {
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("augustus.gff3") from augustusJoinedChunks
@@ -3081,7 +3086,7 @@ process filterPredStrand {
     label "posix"
     label "small_task"
 
-    tag { name }
+    tag "${name}"
 
     input:
     set val(name), file("*hints") from augustusExtrinsicHints4Preds
