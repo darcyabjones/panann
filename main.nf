@@ -206,22 +206,6 @@ if ( params.known_sites ) {
         .unique()
         .into { knownSites; knownSites4CheckNoDups }
 
-    /*
-    knownSites4CheckNoDups
-        .groupTuple(by: 0)
-        .filter { name, gffs -> gffs.length > 1 }
-        .map { n, g -> n }
-        .collect()
-        .set { ks_duplicates }
-
-    if ( ks_duplicates.length != 0 ) {
-        log.error "There is more than one "known" GFF annotation " +
-            "provided for name ${name}. Please merge them into one " +
-            " file. E.G. using `genometools gff3`"
-        exit 1
-    }
-    */
-
 } else {
     knownSites = Channel.empty()
 }
@@ -491,7 +475,7 @@ fastq4Alignment
         fastq4StarAlignReads;
     }
 
-// TODO: specify threads for mmseqs createindex, otherwise it uses all of them.
+
 process indexRemoteProteins {
 
     label "mmseqs"
@@ -701,11 +685,12 @@ process extractExonerateRemoteProteinHints {
       --prg=exonerate \
       --CDSpart_cutoff=15 \
       --minintronlen=20 \
-      --priority=2
+      --priority=2 \
+      --source=T
 
     awk '
       BEGIN {OFS="\\t"}
-      {
+      \$3 == "CDSpart" {
         sub(/grp=/, "grp=${name}_exonerate_remote_proteins_", \$9)
         print
       }
@@ -1365,7 +1350,7 @@ process extractSpalnTranscriptHints {
     gff2hints.py \
       --source E \
       --group-level mRNA \
-      --priority 4 \
+      --priority 3 \
       --exon-trim 6 \
       --intron-trim 0 \
       spaln.gff3 \
@@ -1713,7 +1698,7 @@ process extractPasaHints {
     | gff2hints.py \
       --source PR \
       --group-level mRNA \
-      --priority 3 \
+      --priority 4 \
       --exon-trim 9 \
       --intron-trim 0 \
       - \
@@ -1726,7 +1711,7 @@ process extractPasaHints {
     | gff2hints.py \
       --source PR \
       --group-level mRNA \
-      --priority 3 \
+      --priority 4 \
       --cds-trim 9 \
       --utr-trim 6 \
       - \
@@ -1788,6 +1773,8 @@ process extractAugustusRnaseqHints {
     # Extract introns
     bam2hints \
       --intronsonly \
+      --minintronlen 20 \
+      --priority 4 \
       --in="tmp.bam" \
       --out="tmp.gff3"
 
@@ -1805,14 +1792,14 @@ process extractAugustusRnaseqHints {
         | wig2hints.pl \
             --width=10 \
             --margin=10 \
-            --minthresh=2 \
+            --minthresh=8 \
             --minscore=4 \
             --prune=0.1 \
             --src=W \
             --type=ep \
             --UCSC="\${1}.track" \
             --radius=4.5 \
-            --pri=4 \
+            --pri=3 \
             --strand="\${2}" \
         > "\${1}_hints.gff3"
     }
@@ -2220,6 +2207,10 @@ process runCodingQuarryPM {
 
     label "codingquarry"
     label "bigmem_task"
+
+    errorStrategy "retry"
+    maxRetries 10
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"

@@ -29,7 +29,12 @@ RUN  set -eu \
   && mkdir -p /usr/share/man/man1 \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
+       bash \
+       curl \
+       gawk \
        procps \
+       sed \
+       wget \
   && rm -rf /var/lib/apt/lists/* \
   && touch "${APT_REQUIREMENTS_FILE}"
 

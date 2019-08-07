@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Euo pipefail
 
 # Default output directory
 OUT_PREFIX="tmp$$"
@@ -46,7 +46,67 @@ get_proteins() {
   TSV=$1
   ID_FILE=$2
   grep -F -f "${ID_FILE}" "${TSV}" \
-  | awk -F '\t' '{ printf(">%s\n%s", $1, $2) }'
+  | awk -F '\t' '{ printf(">%s\n%s\n", $1, $2) }'
+}
+
+
+run_exonerate() {
+  PROTEINS="$2"
+  GENOME="$1"
+  exonerate \
+    --query "${PROTEINS}" \
+    --target "${GENOME}" \
+    --querytype protein \
+    --targettype dna \
+    --model protein2genome \
+    --refine region \
+    --percent 70 \
+    --score 100 \
+    --geneseed 250 \
+    --bestn 2 \
+    --minintron 20 \
+    --maxintron 50000 \
+    --geneticcode 1 \
+    --showtargetgff yes \
+    --showalignment no \
+    --showvulgar no
+}
+
+run_exonerate_loop() {
+  PROTEINS="$2"
+  GENOME="$1"
+
+  NSEQS=$(wc -l < "${PROTEINS}")
+
+  set +e
+  for i in $(seq 1 2 ${NSEQS})
+  do
+    tail -n+${i} "${PROTEINS}" | head -n2 > "${PROTEINS}_${i}.fasta"
+    run_exonerate "${PROTEINS}_${i}.fasta" "${GENOME}" || true
+  done
+
+  set -e  
+}
+
+filter_exonerate() {
+  GFF="$1"
+  SEQID="$2"
+  START="$3"
+
+  # Filter out the exonerate junk and fix the seqid, start, and end.
+  gawk -F '\t' -v seqid="${SEQID}" -v start="${START}" '
+    BEGIN { OFS="\t" }
+    !/^#|^-|^Command line|^Hostname/ {
+      $1=seqid;
+      $4=($4 + start);
+      $5=($5 + start);
+      $9=gensub(/sequence\s+([^\s;]+)\s+;/, "sequence \\1_" seqid "_" start " ;", "g", $9 );
+      $9=gensub(/gene_id\s+([^\s;]+)\s+;/, "gene_id \\1_" seqid "_" start " ;", "g", $9 );
+      print;
+      next;
+    }
+    { print }
+  ' < "${GFF}"
 }
 
 
@@ -118,36 +178,26 @@ get_proteins \
   "${OUT_PREFIX}/protein_ids.txt" \
 > "${OUT_PREFIX}/protein_queries.fasta"
 
+
+firsttry() {
+  run_exonerate "${OUT_PREFIX}/genome_target.fasta" "${OUT_PREFIX}/protein_queries.fasta" > "${OUT_PREFIX}/exonerate.gff"
+  filter_exonerate "${OUT_PREFIX}/exonerate.gff" "${SEQID}" "${START}" > "${OUT_PREFIX}.gff"
+}
+
+secondtry() {
+  run_exonerate_loop "${OUT_PREFIX}/genome_target.fasta" "${OUT_PREFIX}/protein_queries.fasta" > "${OUT_PREFIX}/exonerate.gff"
+  filter_exonerate "${OUT_PREFIX}/exonerate.gff" "${SEQID}" "${START}" > "${OUT_PREFIX}.gff"
+}
+
+
+
 # Run exonerate
-exonerate \
-  --query "${OUT_PREFIX}/protein_queries.fasta" \
-  --target "${OUT_PREFIX}/genome_target.fasta" \
-  --querytype protein \
-  --targettype dna \
-  --model protein2genome \
-  --refine region \
-  --percent 70 \
-  --score 100 \
-  --geneseed 250 \
-  --bestn 2 \
-  --minintron 20 \
-  --maxintron 50000 \
-  --geneticcode 1 \
-  --showtargetgff yes \
-  --showalignment no \
-  --showvulgar no \
-> "${OUT_PREFIX}/exonerate.gff"
+firsttry
 
-  #--softmasktarget
-
-# Filter out the exonerate junk and fix the seqid, start, and end.
-grep -v -E '^#|^-|^Command line|^Hostname' "${OUT_PREFIX}/exonerate.gff" \
-| awk -F '\t' -v seqid="${SEQID}" -v start="${START}" '
-  BEGIN { OFS="\t" }
-  {
-    $1=seqid;
-    $4=($4 + start);
-    $5=($5 + start);
-    print
-  }
-' > "${OUT_PREFIX}.gff"
+ECODE=$?
+if [ ${ECODE} -eq 139 ]
+then
+  secondtry
+else
+  exit "${ECODE}"
+fi

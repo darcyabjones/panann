@@ -191,10 +191,12 @@ clean:
 	docker stop $(shell docker ps -aq) || true
 	docker rm $(shell docker ps -a -q) || true
 	docker rmi $(shell docker images -q) || true
+	singularity cache clean -a
 	rm -rf -- docker
 
 tidy:
 	# Just removes untagged images to free up space
+	singularity cache clean -a
 	docker image prune -f
 
 # Generic rules

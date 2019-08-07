@@ -8,7 +8,7 @@ NCPU="$(grep -c '^processor' /proc/cpuinfo)"
 OUTFILE="/dev/stdout"
 
 usage() {
-  echo 'Runs exonerate in parallel within regions specified by a BED file.
+  echo 'Runs spaln in parallel within regions specified by a BED file.
 
 USAGE: exonerate_parallel.sh -g GENOME -p PROTEINS -b BED -n NCPUS -t TMPDIR > results.gff
 
@@ -25,35 +25,17 @@ Arguments:
 
 
 Requires the following on PATH:
-- samtools
-- exonerate_region.sh
-- exonerate
+- spaln_region.sh
+- tsv_to_fasta.sh fasta_to_tsv.sh
+- spaln
 - standard linux utilities: awk, xargs, sed, tr, grep, bash
 
 
 Example:
 ```
-exonerate_parallel.sh -g genome.fasta -p proteins.fasta -b merged.bed -n 16 -o results.gff
+spaln_parallel.sh -g genome.fasta -p proteins.fasta -b merged.bed -n 16 -o results.gff
 ```
 '
-}
-
-
-fasta_to_tsv() {
-  awk '
-    /^>/ {
-      b=gensub(/^>\s*(\S+).*$/, "\\1", "g", $0);
-      printf("%s%s\t", (N>0?"\n":""), b);
-      N++;
-      next;
-    }
-    {
-      printf("%s", $0)
-    }
-    END {
-      printf("\n");
-    }
-  ' < "$1"
 }
 
 
@@ -118,14 +100,15 @@ mkdir -p "${TMPDIR}"
 if [ -z "${PROTEINS_TSV-}" ]
 then
   PROTEINS_TSV="${TMPDIR}/proteins.tsv"
-  fasta_to_tsv "${PROTEINS}" > "${PROTEINS_TSV}"
+  fasta_to_tsv.sh "${PROTEINS}" > "${PROTEINS_TSV}"
 fi
 
-# Get .fai to avoid race if it doesn't exist already.
-samtools faidx "${GENOME}"
+GENOME_TSV="${TMPDIR}/genome.tsv"
+fasta_to_tsv.sh "${GENOME}" > "${GENOME_TSV}"
+
 
 # Needed for child processes
-export GENOME
+export GENOME_TSV
 export PROTEINS_TSV
 export TMPDIR
 
@@ -135,15 +118,15 @@ grep -v "^#" "${BED}" \
 | tr '\n' '\t' \
 | xargs -d '\t' -n 4 -P "${NCPU}" \
   bash -eu -c '
-    exonerate_region.sh \
-      -g "${GENOME}" \
+    spaln_region.sh \
+      -g "${GENOME_TSV}" \
       -p "${PROTEINS_TSV}" \
       -c "$0" \
       -s "$1" \
       -e "$2" \
       -i "$3" \
       -o ${TMPDIR}/tmp$$ \
-    || (echo "Failed$$"; exit 255)
+    || exit 255
   '
 
-cat ${TMPDIR}/tmp*.gff > "${OUTFILE}"
+sortgrcd -C 60 -E 2 -F 2 -H 4 -S a -O 0 ${TMPDIR}/tmp*.grd > "${OUTFILE}"
