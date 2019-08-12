@@ -122,7 +122,10 @@ then
 fi
 
 # Get .fai to avoid race if it doesn't exist already.
-samtools faidx "${GENOME}"
+if [ !-f "${GENOME}.fai" ]
+then
+  samtools faidx "${GENOME}"
+fi
 
 # Needed for child processes
 export GENOME

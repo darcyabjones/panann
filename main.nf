@@ -387,7 +387,6 @@ process getFaidx {
     """
 }
 
-
 genomesWithFaidx.into {
     genomes4KnownSites;
     genomes4SpalnIndex;
@@ -440,7 +439,6 @@ genomesWithKnownSites.into {
 }
 
 
-
 crams
     .combine(genomes4UserCrams, by: 0)
     .map { n, rg, c, st, fa, fi ->
@@ -465,242 +463,13 @@ fastq
 fastqNoGenome
     .map { rg, n, r1, r2, st -> [rg, r1, r2, st] }
     .unique()
-    .set { fastq4TrinityAssemble }
-
-fastq4Alignment
-    .map { rg, n, r1, r2, st -> [rg, r1, r2, st] }
-    .unique()
     .into {
+        fastq4TrinityAssemble;
         fastq4StarFindNovelSpliceSites;
         fastq4StarAlignReads;
     }
 
 
-process indexRemoteProteins {
-
-    label "mmseqs"
-    label "small_task"
-
-    input:
-    file fasta from remoteProteins
-
-    output:
-    file "proteins" into indexedRemoteProteins
-    file "proteins.tsv" into remoteProteinsTSV
-
-    script:
-    """
-    mkdir -p tmp proteins
-
-    mmseqs createdb "${fasta}" proteins/db
-    mmseqs createindex proteins/db tmp --threads "${task.cpus}"
-
-    awk '
-      /^>/ {
-        b=gensub(/^>\\s*(\\S+).*\$/, "\\\\1", "g", \$0);
-        printf("%s%s\\t", (N>0?"\\n":""), b);
-        N++;
-        next;
-      }
-      {
-        printf("%s", \$0)
-      }
-      END {
-        printf("\\n");
-      }
-    ' < "${fasta}" \
-    > "proteins.tsv"
-
-    rm -rf -- tmp
-    """
-}
-
-
-process matchRemoteProteinsToGenome {
-
-    label "mmseqs"
-    label "big_task"
-
-    tag "${name}"
-
-    input:
-    set val(name),
-        file(fasta),
-        file(faidx),
-        file("proteins") from genomes4MatchRemoteProteinsToGenome
-            .combine(indexedRemoteProteins)
-
-    output:
-    set val(name), file("${name}_remote_proteins.tsv") into matchedRemoteProteinsToGenome
-
-    script:
-    """
-    mkdir genome result tmp
-
-    # the "dont-split" bit is important for keeping the ids correct.
-    mmseqs createdb \
-      "${fasta}" \
-      genome/db \
-      --dont-split-seq-by-len
-
-    # Searching with genome as query is ~3X faster
-    mmseqs search \
-      genome/db \
-      proteins/db \
-      result/db \
-      tmp \
-      --threads "${task.cpus}" \
-      -e 0.00001 \
-      --min-length 10 \
-      --comp-bias-corr 1 \
-      --split-mode 1 \
-      --max-seqs 50 \
-      --mask 0 \
-      --orf-start-mode 1 \
-      --translation-table 1 \
-      --use-all-table-starts
-
-    # Extract match results.
-    mmseqs convertalis \
-      genome/db \
-      proteins/db \
-      result/db \
-      results_unsorted.tsv \
-      --threads "${task.cpus}" \
-      --format-mode 0 \
-      --format-output "query,target,qstart,qend,qlen,tstart,tend,tlen,alnlen,pident,mismatch,gapopen,evalue,bits"
-
-    sort \
-      -k1,1 \
-      -k3,3n \
-      -k4,4n \
-      -k2,2 \
-      --parallel="${task.cpus}" \
-      --temporary-directory=tmp \
-      results_unsorted.tsv \
-    > "${name}_remote_proteins.tsv"
-
-    sed -i '1i query\ttarget\tqstart\tqend\tqlen\ttstart\ttend\ttlen\talnlen\tpident\tmismatch\tgapopen\tevalue\tbitscore' "${name}_remote_proteins.tsv"
-
-    rm -rf -- tmp genome result results_unsorted.tsv
-    """
-}
-
-
-process clusterRemoteProteinsToGenome {
-
-    label "bedtools"
-    label "medium_task"
-
-    tag "${name}"
-
-    input:
-    set val(name),
-        file(fasta),
-        file(faidx),
-        file("results.tsv") from genomes4ClusterRemoteProteinsToGenome
-            .combine(matchedRemoteProteinsToGenome, by: 0)
-
-    output:
-    set val(name), file("clustered.bed") into clusteredRemoteProteinsToGenome
-
-    script:
-    def exonerate_buffer_region = 20000
-    """
-    mkdir -p tmp
-
-    tail -n+2 results.tsv \
-    | awk '
-      BEGIN { OFS="\t" }
-      \$3 > \$4 { print \$1, \$4, \$3, \$2 }
-      \$3 < \$4 { print \$1, \$3, \$4, \$2 }
-      ' \
-    | sort \
-      -k1,1 -k2,2n -k3,3n \
-      --temporary-directory=tmp \
-    | sed 's/,/%2C/g' \
-    | bedtools merge -d 1000 -c 4 -o distinct -i - \
-    | bedtools slop -g "${faidx}" -b "${exonerate_buffer_region}" -i - \
-    > clustered.bed
-
-    rm -rf -- tmp
-    """
-}
-
-
-process alignRemoteProteinsToGenome {
-
-    label "exonerate"
-    label "big_task"
-
-    tag "${name}"
-
-    input:
-    set val(name),
-        file(fasta),
-        file(faidx),
-        file("clustered.bed") from genomes4AlignRemoteProteinsToGenome
-            .combine(clusteredRemoteProteinsToGenome, by: 0)
-
-    file "proteins.tsv" from remoteProteinsTSV
-
-    output:
-    set val(name),
-        file("${name}_remote_proteins_exonerate.gff") into alignedRemoteProteinsToGenome
-
-    script:
-    """
-    mkdir -p tmp
-
-    exonerate_parallel.sh \
-      -g "${fasta}" \
-      -q "proteins.tsv" \
-      -b "clustered.bed" \
-      -n "${task.cpus}" \
-      -t "tmp" \
-      -o "${name}_remote_proteins_exonerate.gff"
-    """
-}
-
-
-process extractExonerateRemoteProteinHints {
-
-    label "braker"
-    label "small_task"
-
-    tag "${name}"
-
-    publishDir "${params.outdir}/hints/${name}"
-
-    input:
-    set val(name), file("exonerate.gff") from alignedRemoteProteinsToGenome
-
-    output:
-    set val(name),
-        file("${name}_exonerate_remote_protein_hints.gff3") into exonerateRemoteProteinHints
-
-    script:
-    """
-    align2hints.pl \
-      --in=exonerate.gff \
-      --out=hints.gff3 \
-      --prg=exonerate \
-      --CDSpart_cutoff=15 \
-      --minintronlen=20 \
-      --priority=2 \
-      --source=T
-
-    awk '
-      BEGIN {OFS="\\t"}
-      \$3 == "CDSpart" {
-        sub(/grp=/, "grp=${name}_exonerate_remote_proteins_", \$9)
-        print
-      }
-      ' \
-      hints.gff3 \
-    > "${name}_exonerate_remote_protein_hints.gff3"
-    """
-}
 
 
 //
@@ -743,7 +512,7 @@ process getSpalnIndex {
 
     script:
     """
-    makeidx.pl -inp ${genome}
+    makeidx.pl -inp "${genome}"
     """
 }
 
@@ -774,6 +543,49 @@ process getGmapIndex {
       -D db \
       -d "${name}" \
       ${genome}
+    """
+}
+
+
+/*
+ * Preindex MMSeqs remote proteins
+ */
+process indexRemoteProteins {
+
+    label "mmseqs"
+    label "small_task"
+
+    input:
+    file fasta from remoteProteins
+
+    output:
+    file "proteins" into indexedRemoteProteins
+    file "proteins.tsv" into remoteProteinsTSV
+
+    script:
+    """
+    mkdir -p tmp proteins
+
+    mmseqs createdb "${fasta}" proteins/db
+    mmseqs createindex proteins/db tmp --threads "${task.cpus}"
+
+    awk '
+      /^>/ {
+        b=gensub(/^>\\s*(\\S+).*\$/, "\\\\1", "g", \$0);
+        printf("%s%s\\t", (N>0?"\\n":""), b);
+        N++;
+        next;
+      }
+      {
+        printf("%s", \$0)
+      }
+      END {
+        printf("\\n");
+      }
+    ' < "${fasta}" \
+    > "proteins.tsv"
+
+    rm -rf -- tmp
     """
 }
 
@@ -987,8 +799,6 @@ alignedReads
     }
 
 
-
-
 /*
  * Assemble transcripts with Stringtie
  */
@@ -1008,10 +818,9 @@ process assembleStringtie {
         file(cram),
         val(strand),
         file(gff) from crams4AssembleStringtie
-            .join(
+            .combine(
                 genomes4AssembleStringtie.map { n, f, i, g -> [n, g] },
                 by: 0,
-                remainder: false
             )
 
     output:
@@ -1132,66 +941,6 @@ process trinityAssemble {
 }
 
 
-/*
- * Perform genome guided assembly with Trinity.
-process trinityAssembleGuided {
-
-    label "trinity"
-    label "big_task"
-    publishDir "${params.outdir}/assembled"
-
-    tag "${name}"
-
-    when:
-    !params.notrinity
-
-    input:
-    set val(name),
-        file(fasta),
-        file(faidx),
-        file("*cram"),
-        val(strand) from fastq4TrinityAssembleGuided
-            .join(crams4TrinityAssembleGuided, by: [0, 1])
-            .map { n, rg, fa, fi, c, st -> [n, fa, fi, c, st] }
-            .groupTuple(by: [0, 1, 2])
-
-    output:
-    set val(name), val(read_group), file("${name}_${read_group}_trinity_guided.fasta") into guidedAssembledTranscripts
-
-    script:
-    def use_jaccard = params.notfungus ? '' : "--jaccard_clip "
-    def strand_flag = strand == "fr" ? "--SS_lib_type FR " : "--SS_lib_type RF "
-
-    """
-    # Convert each cram to a bam
-    for c in *cram; do
-        samtools view \
-            -b \
-            -T "${fasta}" \
-            -@ "${task.cpus}" \
-            -o "\${c%cram}bam"
-            "\${c}"
-    done
-
-    samtools merge -r "merged.bam" *bam
-    samtools index "merged.bam"
-
-    Trinity \
-      --max_memory "${task.memory.toGiga()}G" \
-      --CPU "${task.cpus}" \
-      ${use_jaccard} \
-      ${strand_flag} \
-      --output trinity_assembly \
-      --genome_guided_max_intron 15000 \
-      --genome_guided_bam "merged.bam"
-
-    mv trinity_assembly/Trinity-GG.fasta "${name}_trinity_guided.fasta"
-    rm -rf -- *bam merged.bam.bai trinity_assembly
-    """
-}
- */
-
-
 //
 // 1 align transcripts to all genomes
 //
@@ -1305,6 +1054,9 @@ process alignSpalnTranscripts {
 }
 
 
+/*
+ * Mostly this is just to add intron features.
+ */
 process tidySpalnTranscripts {
 
     label "genometools"
@@ -1329,8 +1081,10 @@ process tidySpalnTranscripts {
     """
 }
 
+
 /*
-*/
+ * Get augustus hints from spaln results.
+ */
 process extractSpalnTranscriptHints {
 
     label "python3"
@@ -1357,7 +1111,13 @@ process extractSpalnTranscriptHints {
       --intron-trim 0 \
       spaln.gff3 \
     | awk '\$3 != "genicpart"' \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_spaln_transcripts_", \$9); print}' \
+    | awk '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_spaln_transcripts_", \$9);
+          print
+        }
+      ' \
     > "${name}_spaln_transcript_hints.gff3"
     """
 }
@@ -1387,7 +1147,7 @@ process alignGmapTranscripts {
     set val(name), file("${name}_gmap_transcripts.gff3") into gmapAlignedTranscripts
 
     script:
-    def min_intronlength = 6
+    def min_intronlength = 20
     def max_intronlength_middle = 20000
     def max_intronlength_ends = 10000
     def trim_end_exons = 12
@@ -1422,7 +1182,9 @@ gmapAlignedTranscripts.set { gmapAlignedTranscripts4RunPASA }
 // 2 align proteins to all genomes
 //
 
-
+/*
+ * Deduplicate identical proteins and concat into single file.
+ */
 process combineProteins {
 
     label "python3"
@@ -1471,18 +1233,22 @@ process alignSpalnProteins {
     set val(name), file("${name}_spaln_proteins.gff3") into spalnAlignedProteins
 
     script:
-    def species = "Dothideo"
+    def trans_table = 1
+    def min_intron_len = 20
 
     """
     spaln \
-      -L \
+      -C${trans_table} \
+      -KP \
+      -LS \
       -M3 \
       -O0 \
       -Q7 \
-      -T${species} \
-      -ya2 \
+      -ya1 \
+      -yS \
+      -yX \
+      -yL${min_intron_len} \
       -t ${task.cpus} \
-      -a \
       -d "${name}" \
       "proteins.fasta" \
     > "${name}_spaln_proteins.gff3"
@@ -1490,6 +1256,9 @@ process alignSpalnProteins {
 }
 
 
+/*
+ * Get hints for augustus.
+ */
 process extractSpalnProteinHints {
 
     label "braker"
@@ -1506,18 +1275,224 @@ process extractSpalnProteinHints {
     set val(name), file("${name}_spaln_protein_hints.gff3") into spalnProteinHints
 
     script:
+    def min_intron_len = 20
+
     """
     align2hints.pl \
       --in=spaln.gff3 \
       --out=hints.gff3 \
       --prg=spaln \
       --CDSpart_cutoff=12 \
-      --minintronlen=20 \
+      --minintronlen="${min_intron_len}" \
       --priority=3
 
     awk 'BEGIN {OFS="\\t"} {sub(/grp=/, "grp=${name}_spaln_proteins_", \$9); print}' \
       hints.gff3 \
     > "${name}_spaln_protein_hints.gff3"
+    """
+}
+
+
+/*
+ * Quickly find genomic regions with matches to remote proteins.
+ * This is an approximate method.
+ */
+process matchRemoteProteinsToGenome {
+
+    label "mmseqs"
+    label "big_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("proteins") from genomes4MatchRemoteProteinsToGenome
+            .combine(indexedRemoteProteins)
+
+    output:
+    set val(name), file("${name}_remote_proteins.tsv") into matchedRemoteProteinsToGenome
+
+    script:
+    """
+    mkdir genome result tmp
+
+    # the "dont-split" bit is important for keeping the ids correct.
+    mmseqs createdb \
+      "${fasta}" \
+      genome/db \
+      --dont-split-seq-by-len
+
+    # Searching with genome as query is ~3X faster
+    mmseqs search \
+      genome/db \
+      proteins/db \
+      result/db \
+      tmp \
+      --threads "${task.cpus}" \
+      -e 0.00001 \
+      --min-length 10 \
+      --comp-bias-corr 1 \
+      --split-mode 1 \
+      --max-seqs 50 \
+      --mask 0 \
+      --orf-start-mode 1 \
+      --translation-table 1 \
+      --use-all-table-starts
+
+    # Extract match results.
+    mmseqs convertalis \
+      genome/db \
+      proteins/db \
+      result/db \
+      results_unsorted.tsv \
+      --threads "${task.cpus}" \
+      --format-mode 0 \
+      --format-output "query,target,qstart,qend,qlen,tstart,tend,tlen,alnlen,pident,mismatch,gapopen,evalue,bits"
+
+    sort \
+      -k1,1 \
+      -k3,3n \
+      -k4,4n \
+      -k2,2 \
+      --parallel="${task.cpus}" \
+      --temporary-directory=tmp \
+      results_unsorted.tsv \
+    > "${name}_remote_proteins.tsv"
+
+    sed -i '1i query\ttarget\tqstart\tqend\tqlen\ttstart\ttend\ttlen\talnlen\tpident\tmismatch\tgapopen\tevalue\tbitscore' "${name}_remote_proteins.tsv"
+
+    rm -rf -- tmp genome result results_unsorted.tsv
+    """
+}
+
+
+/*
+ * Finds regions of genes with high density to use.
+ * We align remote proteins to each of these regions individually.
+ */
+process clusterRemoteProteinsToGenome {
+
+    label "bedtools"
+    label "medium_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("results.tsv") from genomes4ClusterRemoteProteinsToGenome
+            .combine(matchedRemoteProteinsToGenome, by: 0)
+
+    output:
+    set val(name), file("clustered.bed") into clusteredRemoteProteinsToGenome
+
+    script:
+    def exonerate_buffer_region = 20000
+
+    """
+    mkdir -p tmp
+
+    tail -n+2 results.tsv \
+    | awk '
+      BEGIN { OFS="\t" }
+      \$3 > \$4 { print \$1, \$4, \$3, \$2 }
+      \$3 < \$4 { print \$1, \$3, \$4, \$2 }
+      ' \
+    | sort \
+      -k1,1 -k2,2n -k3,3n \
+      --temporary-directory=tmp \
+    | sed 's/,/%2C/g' \
+    | bedtools merge -d 1000 -c 4 -o distinct -i - \
+    | bedtools slop -g "${faidx}" -b "${exonerate_buffer_region}" -i - \
+    > clustered.bed
+
+    rm -rf -- tmp
+    """
+}
+
+
+/*
+ * This aligns the proteins identified in the "match" step to
+ * the genomic regions that they matched. MMseqs is much faster at identifying
+ * regions but is less accurate and can't model introns. 
+ */
+process alignRemoteProteinsToGenome {
+
+    label "exonerate"
+    label "big_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("clustered.bed"),
+        file("proteins.tsv") from genomes4AlignRemoteProteinsToGenome
+            .combine(clusteredRemoteProteinsToGenome, by: 0)
+            .combine(remoteProteinsTSV)
+
+    output:
+    set val(name),
+        file("${name}_remote_proteins_exonerate.gff") into alignedRemoteProteinsToGenome
+
+    script:
+    """
+    mkdir -p tmp
+
+    exonerate_parallel.sh \
+      -g "${fasta}" \
+      -q "proteins.tsv" \
+      -b "clustered.bed" \
+      -n "${task.cpus}" \
+      -t "tmp" \
+      -o "${name}_remote_proteins_exonerate.gff"
+    """
+}
+
+
+/*
+ * Convert exonerate alignments to augustus hints
+ */
+process extractExonerateRemoteProteinHints {
+
+    label "braker"
+    label "small_task"
+
+    tag "${name}"
+
+    publishDir "${params.outdir}/hints/${name}"
+
+    input:
+    set val(name), file("exonerate.gff") from alignedRemoteProteinsToGenome
+
+    output:
+    set val(name),
+        file("${name}_exonerate_remote_protein_hints.gff3") into exonerateRemoteProteinHints
+
+    script:
+    """
+    align2hints.pl \
+      --in=exonerate.gff \
+      --out=hints.gff3 \
+      --prg=exonerate \
+      --CDSpart_cutoff=15 \
+      --minintronlen=20 \
+      --priority=2 \
+      --source=T
+
+    awk '
+      BEGIN {OFS="\\t"}
+      \$3 == "CDSpart" {
+        sub(/grp=/, "grp=${name}_exonerate_remote_proteins_", \$9)
+        print
+      }
+      ' \
+      hints.gff3 \
+    > "${name}_exonerate_remote_protein_hints.gff3"
     """
 }
 
@@ -1655,7 +1630,14 @@ process runPASA {
     """
 }
 
+pasaPredictions.into {
+    pasaPredictions4Tidy;
+    pasaPredictions4Busco;
+}
 
+
+/*
+ */
 process tidyPasa {
 
     label "aegean"
@@ -1678,7 +1660,14 @@ process tidyPasa {
     """
 }
 
+tidiedPasa.into {
+    pasaPredictions4Hints;
+    pasaPredictions4Stats;
+}
 
+
+/*
+ */
 process extractPasaHints {
 
     label "python3"
@@ -1689,7 +1678,7 @@ process extractPasaHints {
     tag "${name}"
 
     input:
-    set val(name), file("pasa.gff3") from tidiedPasa
+    set val(name), file("pasa.gff3") from pasaPredictions4Hints
 
     output:
     set val(name),
@@ -1748,8 +1737,7 @@ process extractAugustusRnaseqHints {
     output:
     set val(name),
         val(read_group),
-        file("${name}_${read_group}_intron_hints.gff3"),
-        file("${name}_${read_group}_exon_hints.gff3") into augustusRnaseqHints
+        file("${name}_${read_group}_intron_hints.gff3") into augustusRnaseqHints
 
     script:
     if (strand == "fr") {
@@ -1790,52 +1778,6 @@ process extractAugustusRnaseqHints {
       > "${name}_${read_group}_intron_hints.gff3"
 
     rm -f tmp.gff3
-
-    # Extract exons
-    bam2hints () {
-          bam2wig "\${1}.bam" \
-        | wig2hints.pl \
-            --width=10 \
-            --margin=10 \
-            --minthresh=8 \
-            --minscore=4 \
-            --prune=0.1 \
-            --src=W \
-            --type=ep \
-            --UCSC="\${1}.track" \
-            --radius=4.5 \
-            --pri=3 \
-            --strand="\${2}" \
-        > "\${1}_hints.gff3"
-    }
-
-    if [ ${fst} == forward ]
-    then
-        samtools view -b -f 65 -@ "${task.cpus}" "tmp.bam" > "forward.bam"
-        bam2hints "forward" "+"
-        rm -f "forward.bam"
-
-        samtools view -b -f 128 -@ "${task.cpus}" "tmp.bam" > "reverse.bam"
-        bam2hints "reverse" "-"
-        rm -f "reverse.bam"
-    else
-        samtools view -b -f 128 -@ "${task.cpus}" "tmp.bam" > "forward.bam"
-        bam2hints "forward" "+"
-        rm -f "forward.bam"
-
-        samtools view -b -f 65 -@ "${task.cpus}" "tmp.bam" > "reverse.bam"
-        bam2hints "reverse" "-"
-        rm -f "reverse.bam"
-    fi
-
-    samtools view -b -F 193 -@ "${task.cpus}" "tmp.bam" > "unstranded.bam"
-    bam2hints "unstranded" "."
-    rm -f "unstranded.bam"
-
-    cat forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3 \
-      > "${name}_${read_group}_exon_hints.gff3"
-
-    rm -f tmp.bam forward_hints.gff3 reverse_hints.gff3 unstranded_hints.gff3
     """
 }
 
@@ -1866,7 +1808,7 @@ process runGenemark {
         file("*introns.gff3") from genomes4RunGenemark
             .join(
                 augustusRnaseqHints4RunGenemark
-                    .map {n, rg, introns, exons -> [n, introns]}
+                    .map {n, rg, introns -> [n, introns]}
                     .groupTuple(by: 0),
                 by: 0
             )
@@ -1892,6 +1834,8 @@ process runGenemark {
 }
 
 
+/*
+ */
 process tidyGenemark {
 
     label "aegean"
@@ -1912,11 +1856,14 @@ process tidyGenemark {
     """
     gt gtf_to_gff3 -tidy genemark.gtf \
     | gt gff3 -tidy -sort -retainids \
-    | canon-gff3 -i - > genemark.gff3
+    | canon-gff3 -i - \
+    > genemark.gff3
     """
 }
 
 
+/*
+ */
 process extractGenemarkHints {
 
     label "python3"
@@ -2004,7 +1951,6 @@ process runCodingQuarry {
     """
 }
 
-
 codingQuarryPredictions.into {
     codingQuarryPredictions4SecretionPred;
     codingQuarryPredictions4PM;
@@ -2012,6 +1958,8 @@ codingQuarryPredictions.into {
 }
 
 
+/*
+ */
 process tidyCodingQuarry {
 
     label "aegean"
@@ -2041,6 +1989,8 @@ process tidyCodingQuarry {
 }
 
 
+/*
+ */
 process extractCodingQuarryHints {
 
     label "python3"
@@ -2164,7 +2114,7 @@ if (params.signalp) {
         script:
         """
         deepsig.py \
-          -fasta "proteins.faa" \
+          -f "proteins.faa" \
           -o secreted.txt \
           -k euk
         """
@@ -2243,11 +2193,17 @@ process runCodingQuarryPM {
     set val(name),
         file("${name}_codingquarrypm.gff3"),
         file("${name}_codingquarrypm_cds.fna"),
-        file("${name}_codingquarrypm_proteins.faa") into codingQuarryPMPredictions
+        file("${name}_codingquarrypm_proteins.faa") optional true into codingQuarryPMPredictions
 
     script:
     """
     mkdir -p ParameterFiles/RNA_secreted
+
+    NSECRETED=\$(wc -l < secretome.txt)
+    if [ \${NSECRETED} -lt 501 ]
+    then
+        exit 0
+    fi
 
     grep -v "^#" transcripts.gtf > transcripts.tmp.gtf
     CufflinksGTF_to_CodingQuarryGFF3.py transcripts.tmp.gtf > transcripts.gff3
@@ -2276,6 +2232,8 @@ process runCodingQuarryPM {
 }
 
 
+/*
+ */
 process tidyCodingQuarryPM {
 
     label "aegean"
@@ -2305,6 +2263,8 @@ process tidyCodingQuarryPM {
 }
 
 
+/*
+ */
 process extractCodingQuarryPMHints {
 
     label "python3"
@@ -2397,6 +2357,8 @@ process extractGemomaRnaseqHints {
 }
 
 
+/*
+ */
 process combineGemomaRnaseqHints {
 
     label "gemoma"
@@ -2443,6 +2405,7 @@ combinedGemomaRnaseqHints.into {
 }
 
 
+/*
 process extractGemomaCDSParts {
 
     label "gemoma"
@@ -2477,8 +2440,10 @@ process extractGemomaCDSParts {
 }
 
 gemomaCDSParts.set { gemomaCDSParts4AlignGemomaCDSParts }
+*/
 
 
+/*
 process alignGemomaCDSParts {
 
     label "mmseqs"
@@ -2545,10 +2510,10 @@ process alignGemomaCDSParts {
     rm -rf -- genome proteins alignment tmp
     """
 }
+*/
 
 
 /*
-*/
 process runGemoma {
 
     label "gemoma"
@@ -2600,8 +2565,10 @@ process runGemoma {
     rm -rf -- GeMoMa_temp out
     """
 }
+*/
 
 
+/*
 process combineGemomaPredictions {
 
     label "gemoma"
@@ -2658,8 +2625,10 @@ process combineGemomaPredictions {
     rm -rf -- gaf finalised GeMoMa_temp
     """
 }
+*/
 
 
+/*
 process tidyGemoma {
 
     label "aegean"
@@ -2681,8 +2650,10 @@ process tidyGemoma {
     > gemoma_tidy.gff3
     """
 }
+*/
 
 
+/*
 process extractGemomaHints {
 
     label "python3"
@@ -2712,8 +2683,10 @@ process extractGemomaHints {
     > "${name}_gemoma_hints.gff3"
     """
 }
+*/
 
 
+/*
 process chunkifyGenomes {
 
     label "python3"
@@ -2735,7 +2708,6 @@ process chunkifyGenomes {
     """
 }
 
-
 chunkifiedGenomes
     .flatMap { n, fs -> fs.collect {f -> [n, f]} }
     .into {
@@ -2744,8 +2716,10 @@ chunkifiedGenomes
         genomes4RunAugustusHints;
         genomes4RunAugustusPreds;
     }
+*/
 
 
+/*
 process runAugustusDenovo {
 
     label "augustus"
@@ -2788,8 +2762,10 @@ process runAugustusDenovo {
       "${fasta}"
     """
 }
+*/
 
 
+/*
 process runAugustusDenovoUTR {
 
     label "augustus"
@@ -2844,14 +2820,16 @@ process runAugustusDenovoUTR {
 }
 
 augustusRnaseqHints4JoinHints
-    .map { n, rg, i, e -> [n, i] }
+    .map { n, rg, i -> [n, i] }
     .mix(spalnTranscriptHints, spalnProteinHints, exonerateRemoteProteinHints)
     .into {
         augustusExtrinsicHints4Hints;
         augustusExtrinsicHints4Preds;
     }
+*/
 
 
+/*
 if ( params.augustus_utr ) {
 
     process filterHintStrandUTR {
@@ -2878,7 +2856,7 @@ if ( params.augustus_utr ) {
         cat *hints \
         | gawk '
             \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-              b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
+              b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
               print b;
             }
           ' \
@@ -2888,7 +2866,7 @@ if ( params.augustus_utr ) {
         cat *hints \
         | gawk '
             \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-              b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
+              b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
               print b;
             }
           ' \
@@ -2944,8 +2922,10 @@ if ( params.augustus_utr ) {
         """
     }
 }
+*/
 
 
+/*
 process runAugustusHints {
 
     label "augustus"
@@ -3005,7 +2985,6 @@ process runAugustusHints {
     """
 }
 
-
 augustusDenovoResults
     .mix(
         augustusDenovoUTRResults,
@@ -3014,9 +2993,11 @@ augustusDenovoResults
     .map { n, p, s, g -> [n, p, g] }
     .groupTuple(by: [0, 1])
     .set {augustusChunks}
+*/
 
+
+/*
 process joinAugustusChunks {
-
 
     label "genometools"
     label "small_task"
@@ -3045,8 +3026,10 @@ process joinAugustusChunks {
     gt merge -tidy -o "${name}_${paramset}.gff3" *_tidied.gff3
     """
 }
+*/
 
 
+/*
 process extractAugustusHintsHints {
 
     label "python3"
@@ -3079,8 +3062,10 @@ process extractAugustusHintsHints {
     > "${name}_augustus_hints_hints.gff3"
     """
 }
+*/
 
 
+/*
 process filterPredStrand {
 
     label "posix"
@@ -3112,7 +3097,7 @@ process filterPredStrand {
     cat *hints \
     | gawk '
         \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
+          b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
           print b;
         }
       ' \
@@ -3122,7 +3107,7 @@ process filterPredStrand {
     cat *hints \
     | gawk '
         \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
+          b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
           print b;
         }
       ' \
@@ -3150,8 +3135,9 @@ process filterPredStrand {
 augustusPredHints4PredTmp
     .flatMap { n, f, r -> [[n, "forward", f], [n, "reverse", r]]}
     .set { augustusPredHints4Pred }
+*/
 
-
+/*
 process runAugustusPreds {
 
     label "augustus"
@@ -3212,8 +3198,10 @@ process runAugustusPreds {
       "${fasta}"
     """
 }
+*/
 
 
+/*
 process joinAugustusPredsChunks {
 
     label "genometools"
@@ -3243,6 +3231,7 @@ process joinAugustusPredsChunks {
     gt merge -tidy -o "${name}_preds.gff3" *_tidied.gff3
     """
 }
+*/
 
 // 6 If no genome alignment, run sibelliaz
 
@@ -3251,3 +3240,39 @@ process joinAugustusPredsChunks {
 // 8 Screen proteins using database of TEs
 
 // 9 stats
+
+/*
+ */
+process runBuscoProteins {
+    label "busco"
+    label "medium_task"
+
+    tag "${name}"
+
+    publishDir "${params.outdir}/qc/${name}"
+
+    when:
+    params.busco_lineage
+
+    input:
+    set val(name), val(analysis), file(fasta) from proteins4Busco
+    file "lineage" from buscoLineage
+    file "augustus_config" from augustusConfig
+
+    output:
+    file "${name}" into buscoResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    run_BUSCO.py \
+      --in "${fasta}" \
+      --out "${name}" \
+      --cpu ${task.cpus} \
+      --mode "proteins" \
+      --lineage_path "lineage"
+
+    mv "run_${name}" "${name}"
+    """
+}
