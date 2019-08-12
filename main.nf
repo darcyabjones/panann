@@ -170,6 +170,11 @@ params.notrinity = false
 // Useful if you have precomputed cram files but not transcripts.
 params.nostar = false
 
+// Don't run codingquarry pathogen mode.
+// Use if you're not working with genomes unlikely to have tricky-to-predict
+// secreted genes, or if you don't have enough memory to run pathogen mode.
+// Note, cqpm is also not run if the `--notfungus` option is used.
+params.nocqpm = false
 
 /*
  * Sanitise the input
@@ -400,11 +405,13 @@ genomesWithFaidx.into {
     genomes4ExtractSpliceSites;
     genomes4Busco;
     genomes4RunGenemark;
+    genomes4TidyGenemark;
     genomes4RunCodingQuarry;
     genomes4RunCodingQuarryPM;
     genomes4AlignGemomaCDSParts;
     genomes4RunGemoma;
     genomes4CombineGemoma;
+    genomes4TidyGemoma;
     genomes4ChunkifyGenomes;
 }
 
@@ -476,7 +483,6 @@ fastqNoGenome
 // Indexing and preprocessing
 //
 
-
 process getUnivec {
 
     label "download"
@@ -491,6 +497,10 @@ process getUnivec {
     """
 }
 
+
+/*
+ * Index the genome for alignment with Spaln.
+ */
 process getSpalnIndex {
 
     label "spaln"
@@ -523,6 +533,9 @@ spalnIndices.into {
 }
 
 
+/*
+ * Index the genomes for GMAP
+ */
 process getGmapIndex {
 
     label "gmap"
@@ -645,7 +658,8 @@ starIndices.into {
 /*
  * Perform first pass for STAR.
  *
- * This helps refine intron splice sites in the alignments.
+ * This finds novel splice sites in the rnaseq.
+ * We filter out SS with poor support later.
  */
 process starFindNovelSpliceSites {
 
@@ -702,7 +716,9 @@ process starFindNovelSpliceSites {
 
 
 /*
- * Perform second pass STAR alignment
+ * Perform second pass STAR alignment.
+ * This uses the predicted splice sites from the previous step
+ * but only includes higher confidence splice sites.
  */
 process starAlignReads {
 
@@ -800,7 +816,10 @@ alignedReads
 
 
 /*
- * Assemble transcripts with Stringtie
+ * Assemble transcripts from RNAseq with Stringtie
+ * Note that using the known sites option just completely ignores
+ * rnaseq info at the loci so it may appear that No UTRs are included
+ * if they aren't in the known sites file.
  */
 process assembleStringtie {
 
@@ -1104,12 +1123,12 @@ process extractSpalnTranscriptHints {
     script:
     """
     gff2hints.py \
-      --source E \
-      --group-level mRNA \
-      --priority 3 \
-      --exon-trim 6 \
-      --intron-trim 0 \
-      spaln.gff3 \
+        --source E \
+        --group-level mRNA \
+        --priority 3 \
+        --exon-trim 6 \
+        --intron-trim 0 \
+        spaln.gff3 \
     | awk '\$3 != "genicpart"' \
     | awk '
         BEGIN {OFS="\\t"}
@@ -1125,6 +1144,9 @@ process extractSpalnTranscriptHints {
 
 /*
  * Align transcripts using gmap
+ * We run this separately to PASA to control the number of threads PASA uses.
+ * If you use BLAT + gmap in pasa it can run 2*cpus threads, which would screw
+ * with our provisioning. Most of the PASA time is spent running transdecoder.
  */
 process alignGmapTranscripts {
 
@@ -1183,7 +1205,7 @@ gmapAlignedTranscripts.set { gmapAlignedTranscripts4RunPASA }
 //
 
 /*
- * Deduplicate identical proteins and concat into single file.
+ * Deduplicate identical user provided proteins and concat into single file.
  */
 process combineProteins {
 
@@ -1208,7 +1230,8 @@ process combineProteins {
 
 
 /*
- * Align all proteins to genome with Spaln
+ * Align all proteins to genome with Spaln.
+ * Spaln is good for closely related proteins, but not great for distant ones.
  */
 process alignSpalnProteins {
     label "spaln"
@@ -1257,7 +1280,7 @@ process alignSpalnProteins {
 
 
 /*
- * Get hints for augustus.
+ * Get hints for augustus from spaln protein alignments.
  */
 process extractSpalnProteinHints {
 
@@ -1295,7 +1318,7 @@ process extractSpalnProteinHints {
 
 /*
  * Quickly find genomic regions with matches to remote proteins.
- * This is an approximate method.
+ * This is an approximate method which we refine later.
  */
 process matchRemoteProteinsToGenome {
 
@@ -1369,7 +1392,7 @@ process matchRemoteProteinsToGenome {
 
 
 /*
- * Finds regions of genes with high density to use.
+ * Finds regions genome with high density of remote protein matches.
  * We align remote proteins to each of these regions individually.
  */
 process clusterRemoteProteinsToGenome {
@@ -1390,20 +1413,22 @@ process clusterRemoteProteinsToGenome {
     set val(name), file("clustered.bed") into clusteredRemoteProteinsToGenome
 
     script:
+    // We extend the region to align against by this many basepairs.
+    // This should be a bit longer than your absolute maximum expected gene length.
     def exonerate_buffer_region = 20000
 
     """
     mkdir -p tmp
 
-    tail -n+2 results.tsv \
+      tail -n+2 results.tsv \
     | awk '
-      BEGIN { OFS="\t" }
-      \$3 > \$4 { print \$1, \$4, \$3, \$2 }
-      \$3 < \$4 { print \$1, \$3, \$4, \$2 }
+        BEGIN { OFS="\t" }
+        \$3 > \$4 { print \$1, \$4, \$3, \$2 }
+        \$3 < \$4 { print \$1, \$3, \$4, \$2 }
       ' \
     | sort \
-      -k1,1 -k2,2n -k3,3n \
-      --temporary-directory=tmp \
+        -k1,1 -k2,2n -k3,3n \
+        --temporary-directory=tmp \
     | sed 's/,/%2C/g' \
     | bedtools merge -d 1000 -c 4 -o distinct -i - \
     | bedtools slop -g "${faidx}" -b "${exonerate_buffer_region}" -i - \
@@ -1418,6 +1443,8 @@ process clusterRemoteProteinsToGenome {
  * This aligns the proteins identified in the "match" step to
  * the genomic regions that they matched. MMseqs is much faster at identifying
  * regions but is less accurate and can't model introns. 
+ * Exonerate seems to be better for more remote proteins than spaln.
+ * Spaln introduces lots of very short CDSs, i think they're frameshifts.
  */
 process alignRemoteProteinsToGenome {
 
@@ -1498,52 +1525,11 @@ process extractExonerateRemoteProteinHints {
 
 
 //
-// 3 run busco on all genomes
-//
-
-/*
- */
-process runBusco {
-    label "busco"
-    label "medium_task"
-
-    tag "${name}"
-
-    publishDir "${params.outdir}/qc/${name}"
-
-    when:
-    params.busco_lineage
-
-    input:
-    set val(name), file(fasta), file(faidx) from genomes4Busco
-    file "lineage" from buscoLineage
-    file "augustus_config" from augustusConfig
-
-    output:
-    file "${name}" into buscoResults
-
-    script:
-    """
-    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
-
-    run_BUSCO.py \
-      --in "${fasta}" \
-      --out "${name}" \
-      --cpu ${task.cpus} \
-      --mode "genome" \
-      --lineage_path "lineage"
-
-    mv "run_${name}" "${name}"
-    """
-}
-
-
-//
 // 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
 //
 
 /*
- * Add the stringtie assembled and gmap aligned transcripts to the input channel.
+ * Add the stringtie assembled and gmap aligned transcripts to the pasa input channel.
  */
 if ( params.fastq || params.crams ) {
     genomes4RunPASA
@@ -1563,7 +1549,7 @@ if ( params.fastq || params.crams ) {
 
 
 /*
- * Run pasa
+ * Predict genes using pasa and transdecoder.
  */
 process runPASA {
 
@@ -1593,7 +1579,10 @@ process runPASA {
 
     script:
     def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
+
     // Don't use stringtie if it is fungus
+    // Stringtie and cufflinks tend to merge overlapping features,
+    // which doesn't work well for organisms with high gene density.
     def use_stringtie = (stringtie_gtf.name == "WAS_NULL" || !params.notfungus) ? '' : "--trans_gtf ${stringtie_gtf} "
     def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
@@ -1637,6 +1626,7 @@ pasaPredictions.into {
 
 
 /*
+ * Add additional features to pasa prediction (e.g. start, stop, intron) etc.
  */
 process tidyPasa {
 
@@ -1646,7 +1636,7 @@ process tidyPasa {
     tag "${name}"
 
     input:
-    set val(name), file("pasa.gff3") from pasaPredictions
+    set val(name), file("pasa.gff3") from pasaPredictions4Tidy
         .map { n, g, c, p -> [n, g] }
 
     output:
@@ -1667,6 +1657,8 @@ tidiedPasa.into {
 
 
 /*
+ * Get hints for augustus from pasa predictions.
+ * We fetch separate hints for PASA and transdecoder predictions.
  */
 process extractPasaHints {
 
@@ -1687,29 +1679,38 @@ process extractPasaHints {
 
     script:
     """
-    awk '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' \
-      pasa.gff3 \
+    awk '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' pasa.gff3 \
     | gff2hints.py \
-      --source PR \
-      --group-level mRNA \
-      --priority 4 \
-      --exon-trim 9 \
-      --intron-trim 0 \
-      - \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_pasa_", \$9); print}' \
+        --source PR \
+        --group-level mRNA \
+        --priority 4 \
+        --exon-trim 9 \
+        --intron-trim 0 \
+        - \
+    | awk '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_pasa_", \$9);
+          print
+        }
+      ' \
     > "${name}_pasa_hints.gff3"
 
-
-    awk '\$3 != "exon" && \$3 != "intron"' \
-      pasa.gff3 \
+    awk '\$3 != "exon" && \$3 != "intron"' pasa.gff3 \
     | gff2hints.py \
-      --source PR \
-      --group-level mRNA \
-      --priority 4 \
-      --cds-trim 9 \
-      --utr-trim 6 \
-      - \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_transdecoder_", \$9); print}' \
+        --source PR \
+        --group-level mRNA \
+        --priority 4 \
+        --cds-trim 9 \
+        --utr-trim 6 \
+        - \
+    | awk '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_transdecoder_", \$9);
+          print
+        }
+      ' \
     > "${name}_transdecoder_hints.gff3"
     """
 }
@@ -1717,6 +1718,10 @@ process extractPasaHints {
 
 /*
  * Extract hints to be used for augustus and genemark.
+ *
+ * We only use the intron hints because we have spaln/pasa alignments,
+ * and the coverage info causes lots of close genes to be merged or extended
+ * even if you use the UTR model.
  */
 process extractAugustusRnaseqHints {
 
@@ -1740,14 +1745,7 @@ process extractAugustusRnaseqHints {
         file("${name}_${read_group}_intron_hints.gff3") into augustusRnaseqHints
 
     script:
-    if (strand == "fr") {
-        fst = "forward"
-        snd = "reverse"
-    } else {
-        fst = "reverse"
-        snd = "forward"
-    }
-
+    def min_coverage = 4
     """
     # Convert cram to bam.
     # `-F 3328`  excludes these flags
@@ -1766,16 +1764,19 @@ process extractAugustusRnaseqHints {
     # Extract introns
     bam2hints \
       --intronsonly \
-      --minintronlen 20 \
+      --minintronlen=20 \
+      --maxcoverage=100 \
       --priority 4 \
       --in="tmp.bam" \
       --out="tmp.gff3"
 
     filterIntronsFindStrand.pl \
-      "${fasta}" \
-      tmp.gff3 \
-      --score \
-      > "${name}_${read_group}_intron_hints.gff3"
+        "${fasta}" \
+        tmp.gff3 \
+        --allowed=gtag,gcag,atac,ctac,gaag \
+        --score \
+    | awk '{\$6 >= ${min_coverage}}' \
+    > "${name}_${read_group}_intron_hints.gff3"
 
     rm -f tmp.gff3
     """
@@ -1788,7 +1789,7 @@ augustusRnaseqHints.into {
 
 
 /*
- * Do denovo gene prediction with intron hints.
+ * Do denovo gene prediction with intron hint training.
  */
 process runGenemark {
 
@@ -1835,6 +1836,7 @@ process runGenemark {
 
 
 /*
+ * Convert genemark gtf to gff. Add introns etc. Extract protiens.
  */
 process tidyGenemark {
 
@@ -1847,22 +1849,48 @@ process tidyGenemark {
     params.genemark
 
     input:
-    set val(name), file("genemark.gtf") from genemarkPredictions
+    set val(name),
+        file("genemark.gtf"),
+        file(fasta),
+        file(faidx) from genemarkPredictions
+            .join(genomes4TidyGenemark, by: 0)
 
     output:
     set val(name), file("genemark.gff3") into tidiedGenemark
+    set val(name),
+        val("genemark"),
+        file("genemark.faa") into genemarkPredictions4Busco
 
     script:
+    def genetic_code = 1
+
     """
     gt gtf_to_gff3 -tidy genemark.gtf \
     | gt gff3 -tidy -sort -retainids \
     | canon-gff3 -i - \
     > genemark.gff3
+
+    gt extractfeat \
+      -type CDS \
+      -join \
+      -translate \
+      -retainids \
+      -gcode "${genetic_code}" \
+      -matchdescstart \
+      -seqfile "${fasta}" \
+      genemark.gff3 \
+    > genemark.faa
     """
+}
+
+tidiedGenemark.into {
+    genemarkPredictions4Hints;
+    genemarkPredictions4Stats;
 }
 
 
 /*
+ * Get hints for augustus.
  */
 process extractGenemarkHints {
 
@@ -1876,7 +1904,7 @@ process extractGenemarkHints {
     params.genemark
 
     input:
-    set val(name), file("genemark.gff3") from tidiedGenemark
+    set val(name), file("genemark.gff3") from genemarkPredictions4Hints
 
     output:
     set val(name), file("${name}_genemark_hints.gff3") into genemarkHints
@@ -1884,21 +1912,27 @@ process extractGenemarkHints {
     script:
     """
     gff2hints.py \
-      --source PR \
-      --group-level mRNA \
-      --priority 3 \
-      --cds-trim 9 \
-      --exon-trim 9 \
-      --intron-trim 0 \
-      genemark.gff3 \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_genemark_", \$9); print}' \
+        --source PR \
+        --group-level mRNA \
+        --priority 3 \
+        --cds-trim 9 \
+        --exon-trim 9 \
+        --intron-trim 0 \
+        genemark.gff3 \
+    | awk '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_genemark_", \$9);
+          print
+        }
+      ' \
     > "${name}_genemark_hints.gff3"
     """
 }
 
 
 /*
- * First pass of coding quarry
+ * Predict genes using codingquarry
  */
 process runCodingQuarry {
 
@@ -1935,7 +1969,8 @@ process runCodingQuarry {
     CodingQuarry -f genome.fasta -t transcripts.gff3 -p "${task.cpus}"
 
     \${QUARRY_PATH}/scripts/fastaTranslate.py out/Predicted_CDS.fa \
-    | sed 's/*\$//g' > Predicted_Proteins.faa
+    | sed 's/*\$//g' \
+    > Predicted_Proteins.faa
 
     \${QUARRY_PATH}/scripts/gene_errors_Xs.py Predicted_Proteins.faa out/Predicted_Proteins.faa
     rm Predicted_Proteins.faa
@@ -1955,10 +1990,12 @@ codingQuarryPredictions.into {
     codingQuarryPredictions4SecretionPred;
     codingQuarryPredictions4PM;
     codingQuarryPredictions4Tidy;
+    codingQuarryPredictions4Busco;
 }
 
 
 /*
+ * Fix weird cq gffs and get introns.
  */
 process tidyCodingQuarry {
 
@@ -1988,8 +2025,14 @@ process tidyCodingQuarry {
     """
 }
 
+tidiedCodingQuarry.into {
+    codingQuarryPredictions4Hints;
+    codingQuarryPredictions4Stats;
+}
+
 
 /*
+ * Get hints for augustus
  */
 process extractCodingQuarryHints {
 
@@ -2003,7 +2046,7 @@ process extractCodingQuarryHints {
     !params.notfungus
 
     input:
-    set val(name), file("codingquarry.gff3") from tidiedCodingQuarry
+    set val(name), file("codingquarry.gff3") from codingQuarryPredictions4Hints
 
     output:
     set val(name), file("${name}_codingquarry_hints.gff3") into codingQuarryHints
@@ -2011,14 +2054,14 @@ process extractCodingQuarryHints {
     script:
     """
     gff2hints.py \
-      --source PR \
-      -g mRNA \
-      --priority 4 \
-      --cds-trim 6 \
-      --exon-trim 6 \
-      --intron-trim 0 \
-      -- \
-      codingquarry.gff3 \
+        --source PR \
+        -g mRNA \
+        --priority 4 \
+        --cds-trim 6 \
+        --exon-trim 6 \
+        --intron-trim 0 \
+        -- \
+        codingquarry.gff3 \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarry_", \$9); print}' \
     > "${name}_codingquarry_hints.gff3"
     """
@@ -2069,7 +2112,7 @@ if (params.signalp) {
         tag "${name}"
 
         when:
-        !params.notfungus
+        !params.notfungus || !params.nocqpm
 
         input:
         set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
@@ -2129,7 +2172,7 @@ if (params.signalp) {
         tag "${name}"
 
         when:
-        !params.notfungus
+        !params.notfungus || !params.nocqpm
 
         input:
         set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
@@ -2157,6 +2200,12 @@ if (params.signalp) {
  * CQPM looks for genes that might not be predicted main set because of
  * genome compartmentalisation or differences with signal peptides.
  * NOTE: This fails if there are fewer than 500 secreted genes to train from.
+ *
+ * CQPM also uses a lot of memory at a specific point, which can cause
+ * random segfaults. We retry a few times, but if it keeps failing you
+ * probably need to increase the available RAM.
+ * Try setting `vm.overcommit_memory = 1` if you get segfaults before
+ * reaching max memory.
  */
 process runCodingQuarryPM {
 
@@ -2171,7 +2220,7 @@ process runCodingQuarryPM {
     tag "${name}"
 
     when:
-    !params.notfungus
+    !params.notfungus || !params.nocqpm
 
     input:
     set val(name),
@@ -2217,7 +2266,8 @@ process runCodingQuarryPM {
       -h
 
     \${QUARRY_PATH}/scripts/fastaTranslate.py out/PGN_predicted_CDS.fa \
-    | sed 's/*\$//g' > PGN_predicted_Proteins.faa
+    | sed 's/*\$//g' \
+    > PGN_predicted_Proteins.faa
 
     \${QUARRY_PATH}/scripts/gene_errors_Xs.py PGN_predicted_Proteins.faa out/PGN_predicted_Proteins.faa
     rm PGN_predicted_Proteins.faa
@@ -2231,8 +2281,14 @@ process runCodingQuarryPM {
     """
 }
 
+codingQuarryPMPredictions.into {
+    codingQuarryPMPredictions4Tidy;
+    codingQuarryPMPredictions4Busco;
+}
+
 
 /*
+ * Fix weird CodingQuarry gffs and add introns etc.
  */
 process tidyCodingQuarryPM {
 
@@ -2246,7 +2302,7 @@ process tidyCodingQuarryPM {
 
     input:
     set val(name),
-        file("codingquarry.gff3") from codingQuarryPMPredictions
+        file("codingquarry.gff3") from codingQuarryPMPredictions4Tidy
             .map { n, g, c, p -> [n, g] }
 
     output:
@@ -2254,7 +2310,7 @@ process tidyCodingQuarryPM {
 
     script:
     """
-    awk 'BEGIN {OFS="\\t"} \$8 == "-1" {\$8="0"} {print}' codingquarry.gff3 \
+      awk 'BEGIN {OFS="\\t"} \$8 == "-1" {\$8="0"} {print}' codingquarry.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
     | gt gff3 -tidy -sort -retainids \
     | canon-gff3 -i - \
@@ -2262,8 +2318,14 @@ process tidyCodingQuarryPM {
     """
 }
 
+tidiedCodingQuarryPM.into {
+    codingQuarryPMPredictions4Hints;
+    codingQuarryPMPredictions4Stats;
+}
+
 
 /*
+ * Get hints for augustus
  */
 process extractCodingQuarryPMHints {
 
@@ -2277,22 +2339,28 @@ process extractCodingQuarryPMHints {
     !params.notfungus
 
     input:
-    set val(name), file("codingquarry.gff3") from tidiedCodingQuarryPM
+    set val(name), file("codingquarry.gff3") from codingQuarryPMPredictions4Hints
 
     output:
     set val(name), file("${name}_codingquarrypm_hints.gff3") into codingQuarryPMHints
 
     script:
     """
-    gff2hints.py \
-      --source PR \
-      -g mRNA \
-      --priority 4 \
-      --cds-trim 6 \
-      --exon-trim 6 \
-      --intron-trim 0 \
-      codingquarry.gff3 \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarrypm_", \$9); print}' \
+      gff2hints.py \
+        --source PR \
+        -g mRNA \
+        --priority 4 \
+        --cds-trim 6 \
+        --exon-trim 6 \
+        --intron-trim 0 \
+        codingquarry.gff3 \
+    | awk '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_codingquarrypm_", \$9);
+          print
+        }
+      ' \
     > "${name}_codingquarrypm_hints.gff3"
     """
 }
@@ -2406,6 +2474,8 @@ combinedGemomaRnaseqHints.into {
 
 
 /*
+ * Gemoma needs to extract the splice site info as well as the proteins.
+ */
 process extractGemomaCDSParts {
 
     label "gemoma"
@@ -2440,10 +2510,13 @@ process extractGemomaCDSParts {
 }
 
 gemomaCDSParts.set { gemomaCDSParts4AlignGemomaCDSParts }
-*/
 
 
 /*
+ * Align proteins to genomes for Gemoma.
+ * Do this separately as the gemoma pipeline
+ * currently crashes and we can control parallelism better.
+ */
 process alignGemomaCDSParts {
 
     label "mmseqs"
@@ -2510,10 +2583,12 @@ process alignGemomaCDSParts {
     rm -rf -- genome proteins alignment tmp
     """
 }
-*/
 
 
 /*
+ * Predict genes with gemoma for each known-sites set.
+ * Merges adjacent MMseqs matches and checks intron-exon boundaries.
+ */
 process runGemoma {
 
     label "gemoma"
@@ -2533,7 +2608,7 @@ process runGemoma {
         file("introns.gff"),
         file("coverage_forward.bedgraph"),
         file("coverage_reverse.bedgraph") from genomes4RunGemoma
-            .join(alignedGemomaCDSParts, by: 0)
+            .combine(alignedGemomaCDSParts, by: 0)
             .combine(combinedGemomaRnaseqHints4Run, by: 0)
             .filter { tn, fa, fi, rn, cp, bl, a, p, i, fc, rc -> tn != rn }
 
@@ -2565,10 +2640,12 @@ process runGemoma {
     rm -rf -- GeMoMa_temp out
     """
 }
-*/
 
 
 /*
+ * Combines gemoma predictions from multiple known-sites sets.
+ * Also adds UTRs etc to gff based on RNAseq.
+ */
 process combineGemomaPredictions {
 
     label "gemoma"
@@ -2598,6 +2675,8 @@ process combineGemomaPredictions {
     def pred_gffs_list = (pred_gffs instanceof List) ? pred_gffs : [pred_gffs]
     assert pred_gffs_list.size() == ref_names_list.size()
 
+   // The format for GAF is a bit weird so do it here.
+   // transpose is like zip() and collect is like map.
     def preds = [ref_names_list, pred_gffs_list]
         .transpose()
         .collect { rn, pred -> "p=${rn} g=${pred.name}" }
@@ -2625,10 +2704,12 @@ process combineGemomaPredictions {
     rm -rf -- gaf finalised GeMoMa_temp
     """
 }
-*/
 
 
 /*
+ * Fix missing mRNA feature in output and add intron features etc.
+ * extract proteins for busco.
+ */
 process tidyGemoma {
 
     label "aegean"
@@ -2637,23 +2718,42 @@ process tidyGemoma {
     tag "${name}"
 
     input:
-    set val(name), file("gemoma.gff3") from gemomaPredictions
+    set val(name),
+        file("gemoma.gff3"),
+        file(fasta),
+        file(faidx) from gemomaPredictions
+            .join(genomes4TidyGemoma, by: 0)
 
     output:
     set val(name), file("gemoma_tidy.gff3") into tidiedGemoma
+    set val(name),
+        val("gemoma"),
+        file("gemoma.faa") into gemomaPredictions4Busco
 
     script:
     """
-    gt gff3 -tidy -sort -retainids gemoma.gff3 \
+      gt gff3 -tidy -sort -retainids gemoma.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
     | canon-gff3 -i - \
     > gemoma_tidy.gff3
+
+    gt extractfeat \
+      -type CDS \
+      -join \
+      -translate \
+      -retainids \
+      -gcode "${genetic_code}" \
+      -matchdescstart \
+      -seqfile "${fasta}" \
+      gemoma_tidy.gff3 \
+    > gemoma.faa
     """
 }
-*/
 
 
 /*
+ * Get hints for augustus
+ */
 process extractGemomaHints {
 
     label "python3"
@@ -2670,20 +2770,25 @@ process extractGemomaHints {
 
     script:
     """
-    gff2hints.py \
-      --source PR \
-      --group-level mRNA \
-      --priority 4 \
-      --cds-trim 6 \
-      --exon-trim 6 \
-      --utr-trim 9 \
-      --intron-trim 0 \
-      gemoma.gff3 \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_gemoma_", \$9); print}' \
+      gff2hints.py \
+        --source PR \
+        --group-level mRNA \
+        --priority 4 \
+        --cds-trim 6 \
+        --exon-trim 6 \
+        --utr-trim 9 \
+        --intron-trim 0 \
+        gemoma.gff3 \
+    | awk '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_gemoma_", \$9);
+          print
+        }
+      ' \
     > "${name}_gemoma_hints.gff3"
     """
 }
-*/
 
 
 /*
@@ -2853,7 +2958,7 @@ if ( params.augustus_utr ) {
         """
         mkdir tmp
 
-        cat *hints \
+          cat *hints \
         | gawk '
             \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
               b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
@@ -2863,7 +2968,7 @@ if ( params.augustus_utr ) {
         | sort -u -T tmp \
         > neg_ids.txt
 
-        cat *hints \
+          cat *hints \
         | gawk '
             \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
               b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
@@ -2877,11 +2982,11 @@ if ( params.augustus_utr ) {
         cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
         cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
 
-        cat *hints \
+          cat *hints \
         | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
         > neg_single.gff
 
-        cat *hints \
+          cat *hints \
         | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
         > pos_single.gff
 
@@ -2916,7 +3021,7 @@ if ( params.augustus_utr ) {
 
         script:
         """
-        cat *hints \
+          cat *hints \
         | awk '\$3 != "exonpart" && \$3 != "exon"' \
         > "${name}_hints_for_augustus_hints.gff"
         """
@@ -3019,7 +3124,7 @@ process joinAugustusChunks {
     """
     for f in *chunks.gff
     do
-      awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+        awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
       | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
     done
 
@@ -3049,15 +3154,15 @@ process extractAugustusHintsHints {
 
     script:
     """
-    gff2hints.py \
-      --source PR \
-      --group-level transcript \
-      --priority 4 \
-      --cds-trim 6 \
-      --exon-trim 6 \
-      --utr-trim 9 \
-      --intron-trim 0 \
-      augustus.gff3 \
+      gff2hints.py \
+        --source PR \
+        --group-level transcript \
+        --priority 4 \
+        --cds-trim 6 \
+        --exon-trim 6 \
+        --utr-trim 9 \
+        --intron-trim 0 \
+        augustus.gff3 \
     | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_augustus_", \$9); print}' \
     > "${name}_augustus_hints_hints.gff3"
     """
@@ -3094,7 +3199,7 @@ process filterPredStrand {
     """
     mkdir tmp
 
-    cat *hints \
+      cat *hints \
     | gawk '
         \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
           b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
@@ -3104,7 +3209,7 @@ process filterPredStrand {
     | sort -u -T tmp \
     > neg_ids.txt
 
-    cat *hints \
+      cat *hints \
     | gawk '
         \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
           b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
@@ -3119,11 +3224,11 @@ process filterPredStrand {
     cat *hints | grep -f neg_ids.txt -F > neg_groups.gff
     cat *hints | grep -f pos_ids.txt -F > pos_groups.gff
 
-    cat *hints \
+      cat *hints \
     | gawk '(\$7 == "-" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
     > neg_single.gff
 
-    cat *hints \
+      cat *hints \
     | gawk '(\$7 == "+" || \$7 == ".") && !(\$9 ~ /group/ || \$9 ~ /grp/)' \
     > pos_single.gff
 
@@ -3223,7 +3328,7 @@ process joinAugustusPredsChunks {
     """
     for f in *chunks.gff
     do
-      awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+        awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
       | grep -v "^#" \
       | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
     done
@@ -3240,6 +3345,58 @@ process joinAugustusPredsChunks {
 // 8 Screen proteins using database of TEs
 
 // 9 stats
+
+
+/*
+ * Evaluate genome completeness with BUSCO on the genomes.
+ * Later we evaluate each gene prediction set too.
+ * Could compare this number with that one.
+ */
+process runBusco {
+    label "busco"
+    label "medium_task"
+
+    tag "${name}"
+
+    publishDir "${params.outdir}/qc/${name}"
+
+    when:
+    params.busco_lineage
+
+    input:
+    set val(name), file(fasta), file(faidx) from genomes4Busco
+    file "lineage" from buscoLineage
+    file "augustus_config" from augustusConfig
+
+    output:
+    file "${name}" into buscoResults
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    run_BUSCO.py \
+      --in "${fasta}" \
+      --out "${name}" \
+      --cpu ${task.cpus} \
+      --mode "genome" \
+      --lineage_path "lineage"
+
+    mv "run_${name}" "${name}"
+    """
+}
+
+
+pasaPredictions4Busco.map { n, g, c, p -> [n, "transdecoder", p] }
+    .mix(
+        genemarkPredictions4Busco,
+        codingQuarryPredictions4Busco
+            .map { n, g, c, p, d, f, o -> [n, "codingquarry", p] },
+        codingQuarryPMPredictions4Busco
+            .map { n, g, c, p -> [n, "codingquarrypm", p] },
+    )
+    .set { proteins4Busco }
+
 
 /*
  */
@@ -3260,7 +3417,7 @@ process runBuscoProteins {
     file "augustus_config" from augustusConfig
 
     output:
-    file "${name}" into buscoResults
+    file "${analysis}_busco" into buscoProteinsResults
 
     script:
     """
@@ -3273,6 +3430,6 @@ process runBuscoProteins {
       --mode "proteins" \
       --lineage_path "lineage"
 
-    mv "run_${name}" "${name}"
+    mv "run_${name}" "${analysis}_busco"
     """
 }
