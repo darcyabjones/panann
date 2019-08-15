@@ -176,6 +176,11 @@ params.nostar = false
 // Note, cqpm is also not run if the `--notfungus` option is used.
 params.nocqpm = false
 
+// Specify that we are running a training set to optimise the hints parameters.
+// Should be the name of the "genome" that contains the training set.
+params.training = false
+
+
 /*
  * Sanitise the input
  */
@@ -392,27 +397,29 @@ process getFaidx {
     """
 }
 
-genomesWithFaidx.into {
-    genomes4KnownSites;
-    genomes4SpalnIndex;
-    genomes4GmapIndex;
-    genomes4MatchRemoteProteinsToGenome;
-    genomes4ClusterRemoteProteinsToGenome;
-    genomes4AlignRemoteProteinsToGenome;
-    genomes4UserCrams;
-    genomes4TidyBams;
-    genomes4TidyFilteredBams;
-    genomes4ExtractSpliceSites;
-    genomes4Busco;
-    genomes4RunGenemark;
-    genomes4TidyGenemark;
-    genomes4RunCodingQuarry;
-    genomes4RunCodingQuarryPM;
-    genomes4AlignGemomaCDSParts;
-    genomes4RunGemoma;
-    genomes4CombineGemoma;
-    genomes4TidyGemoma;
-    genomes4ChunkifyGenomes;
+genomesWithFaidx
+    .tap { genomes4KnownSites }
+    .filter  { n, f, i -> (!params.training || params.training == n) }
+    .into {
+        genomes4SpalnIndex;
+        genomes4GmapIndex;
+        genomes4MatchRemoteProteinsToGenome;
+        genomes4ClusterRemoteProteinsToGenome;
+        genomes4AlignRemoteProteinsToGenome;
+        genomes4UserCrams;
+        genomes4TidyBams;
+        genomes4TidyFilteredBams;
+        genomes4ExtractSpliceSites;
+        genomes4Busco;
+        genomes4RunGenemark;
+        genomes4TidyGenemark;
+        genomes4RunCodingQuarry;
+        genomes4RunCodingQuarryPM;
+        genomes4AlignGemomaCDSParts;
+        genomes4RunGemoma;
+        genomes4CombineGemoma;
+        genomes4TidyGemoma;
+        genomes4ChunkifyGenomes;
 }
 
 
@@ -437,13 +444,15 @@ if ( params.known_sites ) {
         .set { genomesWithKnownSites }
 }
 
-genomesWithKnownSites.into {
-    genomes4StarIndex;
-    genomes4AssembleStringtie;
-    genomes4MergeStringtie;
-    genomes4RunPASA;
-    genomes4ExtractGemomaCDSParts;
-}
+genomesWithKnownSites
+    .tap { genomes4ExtractGemomaCDSParts }
+    .filter  { n, f, i, g -> (!params.training || params.training == n) }
+    .into {
+        genomes4StarIndex;
+        genomes4AssembleStringtie;
+        genomes4MergeStringtie;
+        genomes4RunPASA;
+    }
 
 
 crams
@@ -475,8 +484,6 @@ fastqNoGenome
         fastq4StarFindNovelSpliceSites;
         fastq4StarAlignReads;
     }
-
-
 
 
 //
@@ -1775,7 +1782,7 @@ process extractAugustusRnaseqHints {
         tmp.gff3 \
         --allowed=gtag,gcag,atac,ctac,gaag \
         --score \
-    | awk '{\$6 >= ${min_coverage}}' \
+    | awk '\$6 >= ${min_coverage}' \
     > "${name}_${read_group}_intron_hints.gff3"
 
     rm -f tmp.gff3
@@ -1819,6 +1826,7 @@ process runGenemark {
 
     script:
     def use_fungus = params.notfungus ? '' : '--fungus '
+    def is_training = params.training ? '--min_contig 300 ': ''
 
     """
     sort -k1,1V -k4,4n -k5,5rn -k3,3r *introns.gff3 > hints.gff3
@@ -1828,7 +1836,9 @@ process runGenemark {
       --soft_mask 100 \
       --ET "hints.gff3" \
       ${use_fungus} \
-      --sequence "${genome}"
+      ${is_training} \
+      --sequence "${genome}" \
+      --evidence "hints.gff3" \
 
     mv genemark.gtf "${name}_genemark.gtf"
     """
@@ -2731,6 +2741,7 @@ process tidyGemoma {
         file("gemoma.faa") into gemomaPredictions4Busco
 
     script:
+    def genetic_code = 1
     """
       gt gff3 -tidy -sort -retainids gemoma.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
@@ -2792,6 +2803,8 @@ process extractGemomaHints {
 
 
 /*
+ *
+ */
 process chunkifyGenomes {
 
     label "python3"
@@ -2821,10 +2834,10 @@ chunkifiedGenomes
         genomes4RunAugustusHints;
         genomes4RunAugustusPreds;
     }
-*/
 
 
 /*
+ */
 process runAugustusDenovo {
 
     label "augustus"
@@ -2867,10 +2880,10 @@ process runAugustusDenovo {
       "${fasta}"
     """
 }
-*/
 
 
 /*
+ */
 process runAugustusDenovoUTR {
 
     label "augustus"
@@ -2931,10 +2944,8 @@ augustusRnaseqHints4JoinHints
         augustusExtrinsicHints4Hints;
         augustusExtrinsicHints4Preds;
     }
-*/
 
 
-/*
 if ( params.augustus_utr ) {
 
     process filterHintStrandUTR {
@@ -2961,7 +2972,7 @@ if ( params.augustus_utr ) {
           cat *hints \
         | gawk '
             \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-              b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
+              b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
               print b;
             }
           ' \
@@ -2971,7 +2982,7 @@ if ( params.augustus_utr ) {
           cat *hints \
         | gawk '
             \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-              b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
+              b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
               print b;
             }
           ' \
@@ -3027,10 +3038,10 @@ if ( params.augustus_utr ) {
         """
     }
 }
-*/
 
 
 /*
+ */
 process runAugustusHints {
 
     label "augustus"
@@ -3098,10 +3109,10 @@ augustusDenovoResults
     .map { n, p, s, g -> [n, p, g] }
     .groupTuple(by: [0, 1])
     .set {augustusChunks}
-*/
 
 
 /*
+ */
 process joinAugustusChunks {
 
     label "genometools"
@@ -3131,10 +3142,10 @@ process joinAugustusChunks {
     gt merge -tidy -o "${name}_${paramset}.gff3" *_tidied.gff3
     """
 }
-*/
 
 
 /*
+ */
 process extractAugustusHintsHints {
 
     label "python3"
@@ -3167,10 +3178,10 @@ process extractAugustusHintsHints {
     > "${name}_augustus_hints_hints.gff3"
     """
 }
-*/
 
 
 /*
+ */
 process filterPredStrand {
 
     label "posix"
@@ -3202,7 +3213,7 @@ process filterPredStrand {
       cat *hints \
     | gawk '
         \$7 == "-" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-          b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
+          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
           print b;
         }
       ' \
@@ -3212,7 +3223,7 @@ process filterPredStrand {
       cat *hints \
     | gawk '
         \$7 == "+" && (\$9 ~ /group/ || \$9 ~ /grp/) {
-          b=gensub(/.*gr(ou)?p=([^;]+).*<DELETE ME>/, "\\\\2", "g", \$9);
+          b=gensub(/.*gr(ou)?p=([^;]+).*/, "\\\\2", "g", \$9);
           print b;
         }
       ' \
@@ -3240,14 +3251,13 @@ process filterPredStrand {
 augustusPredHints4PredTmp
     .flatMap { n, f, r -> [[n, "forward", f], [n, "reverse", r]]}
     .set { augustusPredHints4Pred }
-*/
 
 /*
+ */
 process runAugustusPreds {
 
     label "augustus"
     label "small_task"
-    publishDir "${params.outdir}/hints/${name}"
 
     tag "${name} - ${strand}"
 
@@ -3303,10 +3313,10 @@ process runAugustusPreds {
       "${fasta}"
     """
 }
-*/
 
 
 /*
+ */
 process joinAugustusPredsChunks {
 
     label "genometools"
@@ -3336,7 +3346,6 @@ process joinAugustusPredsChunks {
     gt merge -tidy -o "${name}_preds.gff3" *_tidied.gff3
     """
 }
-*/
 
 // 6 If no genome alignment, run sibelliaz
 
