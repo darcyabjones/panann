@@ -59,7 +59,7 @@ K8_URL=https://github.com/attractivechaos/k8/releases/download/v$(K8_VERSION)/k8
 MINIMAP2_PREFIX_ARG=$(INSTALL_BASE)/minimap2/$(MINIMAP_TAG)
 K8_PREFIX_ARG=$(INSTALL_BASE)/k8/$(K8_VERSION)
 
-SPALN_TAG=Ver.2.3.3
+SPALN_TAG=Ver.2.3.3f
 SPALN_REPO=https://github.com/ogotoh/spaln.git
 SPALN_PREFIX_ARG=$(INSTALL_BASE)/spaln/$(SPALN_TAG)
 
@@ -91,6 +91,14 @@ AEGEAN_PREFIX_ARG=$(INSTALL_BASE)/aegean/$(AEGEAN_VERSION)
 BEDTOOLS_VERSION=2.28.0
 BEDTOOLS_URL=https://github.com/arq5x/bedtools2/releases/download/v2.28.0/bedtools-2.28.0.tar.gz
 BEDTOOLS_PREFIX_ARG=$(INSTALL_BASE)/bedtools/$(BEDTOOLS_VERSION)
+
+SEQRENAMER_TAG=v0.0.1
+SEQRENAMER_REPO=https://github.com/darcyabjones/seqrenamer.git
+SEQRENAMER_PREFIX_ARG=$(INSTALL_BASE)/seqrenamer/$(SEQRENAMER_TAG)
+
+GFFPAL_TAG=v0.0.1
+GFFPAL_REPO=https://github.com/darcyabjones/gffpal.git
+GFFPAL_PREFIX_ARG=$(INSTALL_BASE)/gffpal/$(GFFPAL_TAG)
 
 
 AUGUSTUS_COMMIT=8b1b14a7489e4545e89c8725dc33268f6c2a9117
@@ -139,7 +147,7 @@ KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
 
-GENERAL=htslib python3 posix genometools aegean
+GENERAL=htslib python3 posix genometools aegean seqrenamer
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
@@ -202,7 +210,12 @@ tidy:
 # Generic rules
 singularity/%.sif: docker/%
 	@mkdir -p "$(dir $@)"
-	singularity build "$@" "docker-daemon://$(call make_image_name,$(notdir $(basename $@)))"
+	@mkdir -p tmp tmp/cache
+	SINGULARITY_TMPDIR="${PWD}/tmp" SINGULARITY_CACHEDIR="${PWD}/tmp/cache" singularity build \
+	  --force \
+	  --tmpdir "${PWD}/tmp" \
+	  "$@" \
+	  "docker-daemon://$(call make_image_name,$(notdir $(basename $@)))"
 
 docker/%.tar.gz: docker/%
 	@mkdir -p "$(dir $@)"
@@ -414,6 +427,35 @@ docker/bamtools: bamtools.Dockerfile docker/base
 	  --build-arg BAMTOOLS_TAG="$(BAMTOOLS_TAG)" \
 	  --build-arg BAMTOOLS_REPO="$(BAMTOOLS_REPO)" \
 	  --build-arg BAMTOOLS_PREFIX_ARG="$(BAMTOOLS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/seqrenamer: seqrenamer.Dockerfile docker/base docker/gffpal
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg GFFPAL_IMAGE="$(call make_image_name,gffpal)" \
+	  --build-arg SEQRENAMER_TAG="$(SEQRENAMER_TAG)" \
+	  --build-arg SEQRENAMER_REPO="$(SEQRENAMER_REPO)" \
+	  --build-arg SEQRENAMER_PREFIX_ARG="$(SEQRENAMER_PREFIX_ARG)" \
+	  --build-arg GFFPAL_TAG="$(GFFPAL_TAG)" \
+	  --build-arg GFFPAL_PREFIX_ARG="$(GFFPAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/gffpal: gffpal.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg GFFPAL_TAG="$(GFFPAL_TAG)" \
+	  --build-arg GFFPAL_REPO="$(GFFPAL_REPO)" \
+	  --build-arg GFFPAL_PREFIX_ARG="$(GFFPAL_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .

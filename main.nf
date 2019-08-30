@@ -40,14 +40,14 @@ def helpMessage() {
     I'll add documentation here when the interface becomes a bit more stable.
 
     ## Output
-    
+
     You can specify the main output directory using the `--outdir` parameter.
     Here we use <outdir> inplace of that parameter and <name> inplace of the
     genome basenames.
 
     <outdir>/aligned/<name>/<name>_* -- Aligned reads, transcripts, and proteins to each genome.
     <outdir>/annotations/<name>/<name>_* -- Gene predictions for each genome, including output of individual methods.
-    <outdir>/hints/<name>/<name>_*.gff3 -- GFF files from alignments and annotations configured to be provided as hints to augustus. 
+    <outdir>/hints/<name>/<name>_*.gff3 -- GFF files from alignments and annotations configured to be provided as hints to augustus.
     <outdir>/assembled/<read_group>_* -- Trinity assembled reads.
     <outdir>/qc/<name>_* -- Statistics and QC for each genome and step.
 
@@ -70,7 +70,7 @@ if (params.help) {
 // last extension) is used to match genomes with other hints.
 params.genomes = false
 
-// A table specifying known containing the columns name and 
+// A table specifying known containing the columns name and
 // known_sites specifying a set of high confidence genes to transfer
 // across genomes.
 params.known_sites = false
@@ -148,6 +148,24 @@ params.crams = false
 // by adding a "strand" column specifying "fr" or "rf".
 // This parameter sets a default for when that column is unspecified.
 params.fr = false
+
+params.valid_splicesites = "gtag,ctac,gcag,atac,gtat,gaag"
+params.min_intron_soft = 20
+params.min_intron_hard = 5
+params.max_intron_hard = 15000
+params.star_novel_params = "--outSJfilterReads Unique " +
+     "--outSJfilterOverhangMin 15 6 6 6 " +
+     "--outSJfilterCountUniqueMin 10 5 5 5 " +
+     "--outSJfilterDistToOtherSJmin 10 0 3 3 " +
+     "--outSJfilterIntronMaxVsReadN 10 100 500 1000 5000 10000"
+params.star_align_params = "--outSJfilterReads All " +
+     "--outSJfilterCountUniqueMin 10 5 5 5 " +
+     "--outSJfilterIntronMaxVsReadN 5 500 5000"
+params.max_gene_hard = 20000
+
+params.spaln_species = "phaenodo"
+
+params.trans_table = 1
 
 // Misc parameters.
 
@@ -699,14 +717,9 @@ process starFindNovelSpliceSites {
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
-    def min_intron_len = 5
-    def max_intron_len = 20000
-
-    def sj_filters = "--outSJfilterReads Unique " +
-                     "--outSJfilterOverhangMin 15 6 6 6 " + 
-                     "--outSJfilterCountUniqueMin 10 5 5 5 " + 
-                     "--outSJfilterDistToOtherSJmin 10 0 3 3 " +
-                     "--outSJfilterIntronMaxVsReadN 10 100 500 1000 5000 10000"
+    def min_intron_len = params.min_intron_hard
+    def max_intron_len = params.max_intron_hard
+    def extra_params = params.star_novel_params
 
     """
     STAR \
@@ -715,7 +728,7 @@ process starFindNovelSpliceSites {
       --genomeDir "index" \
       --outSAMtype None \
       --outSAMmode None \
-      ${sj_filters} \
+      ${extra_params} \
       --alignIntronMin ${min_intron_len} \
       --alignIntronMax ${max_intron_len} \
       --alignSJoverhangMin 5 \
@@ -771,12 +784,10 @@ process starAlignReads {
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
-    def min_intron_len = 5
-    def max_intron_len = 20000
+    def min_intron_len = params.min_intron_hard
+    def max_intron_len = params.max_intron_hard
 
-    def sj_filters = "--outSJfilterReads All " +
-                     "--outSJfilterCountUniqueMin 10 5 5 5 " +
-                     "--outSJfilterIntronMaxVsReadN 5 500 5000"
+    def extra_params = params.star_novel_params
 
     """
     STAR \
@@ -786,7 +797,7 @@ process starAlignReads {
       --sjdbFileChrStartEnd *SJ.out.tab \
       --outSAMtype BAM Unsorted \
       --outBAMcompression 1 \
-      ${sj_filters} \
+      ${extra_params} \
       --alignIntronMin ${min_intron_len} \
       --alignIntronMax ${max_intron_len} \
       --alignSJoverhangMin 10 \
@@ -989,7 +1000,7 @@ process trinityAssemble {
  */
 process combineTranscripts {
 
-    label "python3"
+    label "seqrenamer"
     label "small_task"
 
     input:
@@ -1003,10 +1014,15 @@ process combineTranscripts {
 
     script:
     """
-    unique_rename_fasta.py \
-      --infiles *fasta \
+    sr encode \
+      --format fasta \
+      --column id \
+      --deduplicate \
+      --upper \
+      --drop-desc \
+      --map "transcripts.tsv" \
       --outfile "transcripts.fasta" \
-      --map "transcripts.tsv"
+      *fasta
     """
 }
 
@@ -1070,9 +1086,7 @@ process alignSpalnTranscripts {
     set val(name), file("${name}_spaln_transcripts.gff3") into spalnAlignedTranscripts
 
     script:
-    def species = "phaenodo"
-    def min_intron_len = 20
-    def max_gene_size = 20000
+    def species_params = params.spaln_species ? "-T${params.spaln_species} -yS " : ""
 
     """
     spaln \
@@ -1080,12 +1094,11 @@ process alignSpalnTranscripts {
       -O0 \
       -Q7 \
       -S3 \
-      -T${species} \
       -yX \
-      -yS \
       -ya1 \
-      -XG ${max_gene_size} \
-      -yL${min_intron_len} \
+      ${species_params} \
+      -XG ${params.max_gene_hard} \
+      -yL${params.min_intron_soft} \
       -t ${task.cpus} \
       -d "${name}" \
       "${fasta_clean}" \
@@ -1127,7 +1140,7 @@ process tidySpalnTranscripts {
  */
 process extractSpalnTranscriptHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
 
     publishDir "${params.outdir}/hints/${name}"
@@ -1143,7 +1156,7 @@ process extractSpalnTranscriptHints {
 
     script:
     """
-    gff2hints.py \
+    gffpal hints \
         --source E \
         --group-level mRNA \
         --priority 3 \
@@ -1190,9 +1203,6 @@ process alignGmapTranscripts {
     set val(name), file("${name}_gmap_transcripts.gff3") into gmapAlignedTranscripts
 
     script:
-    def min_intronlength = 20
-    def max_intronlength_middle = 20000
-    def max_intronlength_ends = 10000
     def trim_end_exons = 12
     def microexon_spliceprob = 0.95
     def canonical_mode = 1
@@ -1202,12 +1212,12 @@ process alignGmapTranscripts {
     gmap \
       --npaths=0 \
       --chimera-margin=50 \
-      --min-intronlength="${min_intronlength}" \
-      --max-intronlength-middle="${max_intronlength_middle}" \
-      --max-intronlength-ends="${max_intronlength_ends}" \
+      --min-intronlength="${params.min_intron_hard}" \
+      --max-intronlength-middle="${params.max_intron_hard}" \
+      --max-intronlength-ends="${params.max_intron_hard}" \
       --trim-end-exons="${trim_end_exons}" \
       --microexon-spliceprob="${microexon_spliceprob}" \
-      --canonical-mode="${canonical_mode}" \
+      --canonical-mode=1 \
       ${cross_species} \
       --format=gff3_match_cdna \
       --nthreads "${task.cpus}" \
@@ -1230,7 +1240,7 @@ gmapAlignedTranscripts.set { gmapAlignedTranscripts4RunPASA }
  */
 process combineProteins {
 
-    label "python3"
+    label "seqrenamer"
     label "small_task"
 
     input:
@@ -1242,10 +1252,16 @@ process combineProteins {
 
     script:
     """
-    unique_rename_fasta.py \
-      --infiles *fasta \
+    sr encode \
+      --format fasta \
+      --column id \
+      --deduplicate \
+      --upper \
+      --drop-desc \
+      --strip "*-" \
+      --map "proteins.tsv" \
       --outfile "proteins.fasta" \
-      --map "proteins.tsv"
+      *fasta
     """
 }
 
@@ -1277,13 +1293,9 @@ process alignSpalnProteins {
     set val(name), file("${name}_spaln_proteins.gff3") into spalnAlignedProteins
 
     script:
-    def trans_table = 1
-    def min_intron_len = 20
-    def max_gene_size = 20000
-
     """
     spaln \
-      -C${trans_table} \
+      -C${params.trans_table} \
       -KP \
       -LS \
       -M3 \
@@ -1291,8 +1303,8 @@ process alignSpalnProteins {
       -Q7 \
       -ya1 \
       -yX \
-      -yL${min_intron_len} \
-      -XG${max_gene_size} \
+      -yL${params.min_intron_soft} \
+      -XG${params.max_gene_hard} \
       -t ${task.cpus} \
       -d "${name}" \
       "proteins.fasta" \
@@ -1302,11 +1314,61 @@ process alignSpalnProteins {
 
 
 /*
+ * Spaln CDS output doesn't include the stop codon.
+ * Fix this.
+ * the type is also "cds" instead of "CDS"
+ */
+process fixSpalnProteinsStopCDS {
+
+    label "gffpal"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name), file("spaln.gff3") from spalnAlignedProteins
+
+    output:
+    set val(name), file("spaln_fixed.gff3") into spalnFixedProteins
+
+    script:
+    """
+      awk 'BEGIN {OFS="\\t"} \$3 == "cds" {\$3="CDS"} {print}' "spaln.gff3"
+    | gffpal expandcds -o "spaln_fixed.gff3" --cds-type "CDS" -
+    """
+}
+
+
+process tidySpalnProteins {
+
+    label "aegean"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name), file("spaln.gff3") from spalnFixedProteins
+
+    output:
+    set val(name), file("spaln_tidied.gff3") into spalnTidiedProteins
+
+    script:
+    """
+    gt gff3 -tidy -sort -retainids "spaln.gff3" \
+    | canon-gff3 -i - \
+    > spaln_tidied.gff3
+    """
+
+}
+
+
+
+/*
  * Get hints for augustus from spaln protein alignments.
  */
 process extractSpalnProteinHints {
 
-    label "braker"
+    label "gffpal"
     label "small_task"
 
     tag "${name}"
@@ -1314,25 +1376,26 @@ process extractSpalnProteinHints {
     publishDir "${params.outdir}/hints/${name}"
 
     input:
-    set val(name), file("spaln.gff3") from spalnAlignedProteins
+    set val(name), file("spaln.gff3") from spalnTidiedProteins
 
     output:
     set val(name), file("${name}_spaln_protein_hints.gff3") into spalnProteinHints
 
     script:
-    def min_intron_len = 20
-
     """
-    align2hints.pl \
-      --in=spaln.gff3 \
-      --out=hints.gff3 \
-      --prg=spaln \
-      --CDSpart_cutoff=12 \
-      --minintronlen="${min_intron_len}" \
-      --priority=3
-
-    awk 'BEGIN {OFS="\\t"} {sub(/grp=/, "grp=${name}_spaln_proteins_", \$9); print}' \
-      hints.gff3 \
+    gffpal hints \
+      --source "P" \
+      --group-level "mRNA" \
+      --priority 3 \
+      --cds-trim 12 \
+      spaln.gff3 \
+    | awk '
+        BEGIN {OFS="\\t"}
+        \$3 == "CDSpart" || \$3 == "intron"|| \$3 == "start" || \$3 == "stop" {
+          sub(/group=/, "group=${name}_spaln_proteins_", \$9);
+          print
+        }
+    ' \
     > "${name}_spaln_protein_hints.gff3"
     """
 }
@@ -1383,7 +1446,7 @@ process matchRemoteProteinsToGenome {
       --max-seqs 50 \
       --mask 0 \
       --orf-start-mode 1 \
-      --translation-table 1 \
+      --translation-table "${params.trans_table}" \
       --use-all-table-starts
 
     # Extract match results.
@@ -1464,9 +1527,11 @@ process clusterRemoteProteinsToGenome {
 /*
  * This aligns the proteins identified in the "match" step to
  * the genomic regions that they matched. MMseqs is much faster at identifying
- * regions but is less accurate and can't model introns. 
+ * regions but is less accurate and can't model introns.
  * Exonerate seems to be better for more remote proteins than spaln.
  * Spaln introduces lots of very short CDSs, i think they're frameshifts.
+ *
+ * TODO: Add options for script to specify min/max intron length and the genetic code.
  */
 process alignRemoteProteinsToGenome {
 
@@ -1529,7 +1594,8 @@ process extractExonerateRemoteProteinHints {
       --out=hints.gff3 \
       --prg=exonerate \
       --CDSpart_cutoff=15 \
-      --minintronlen=20 \
+      --minintronlen="${min_intron_soft}" \
+      --maxintronlen="${max_intron_hard}" \
       --priority=2 \
       --source=T
 
@@ -1608,6 +1674,9 @@ process runPASA {
     def use_stringtie = (stringtie_gtf.name == "WAS_NULL" || !params.notfungus) ? '' : "--trans_gtf ${stringtie_gtf} "
     def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
+    // Transdecoder doesn't support standard integer based table access.
+    def gen_code = "universal"
+
     """
     echo "DATABASE=\${PWD}/pasa.sqlite" > align_assembly.config
     echo "validate_alignments_in_db.dbi:--MIN_PERCENT_ALIGNED=80" >> align_assembly.config
@@ -1622,7 +1691,7 @@ process runPASA {
       --transcripts "${transcripts_fasta_clean}" \
       --IMPORT_CUSTOM_ALIGNMENTS_GFF3 "${gmap_aligned}" \
       -T -u "${transcripts_fasta}" \
-      --MAX_INTRON_LENGTH 50000 \
+      --MAX_INTRON_LENGTH "${params.max_intron_hard}" \
       --ALIGNERS blat \
       --CPU "${task.cpus}" \
       --transcribed_is_aligned_orient \
@@ -1632,6 +1701,7 @@ process runPASA {
       ${use_known}
 
     pasa_asmbls_to_training_set.dbi \
+      -G "${gen_code}" \
       --pasa_transcripts_fasta pasa.sqlite.assemblies.fasta \
       --pasa_transcripts_gff3 pasa.sqlite.pasa_assemblies.gff3
 
@@ -1684,7 +1754,7 @@ tidiedPasa.into {
  */
 process extractPasaHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
 
     publishDir "${params.outdir}/hints/${name}"
@@ -1702,7 +1772,7 @@ process extractPasaHints {
     script:
     """
     awk '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' pasa.gff3 \
-    | gff2hints.py \
+    | gffpal hints \
         --source PR \
         --group-level mRNA \
         --priority 4 \
@@ -1719,7 +1789,7 @@ process extractPasaHints {
     > "${name}_pasa_hints.gff3"
 
     awk '\$3 != "exon" && \$3 != "intron"' pasa.gff3 \
-    | gff2hints.py \
+    | gffpal hints \
         --source PR \
         --group-level mRNA \
         --priority 4 \
@@ -1767,7 +1837,6 @@ process extractAugustusRnaseqHints {
         file("${name}_${read_group}_intron_hints.gff3") into augustusRnaseqHints
 
     script:
-    def min_coverage = 4
     """
     # Convert cram to bam.
     # `-F 3328`  excludes these flags
@@ -1786,18 +1855,20 @@ process extractAugustusRnaseqHints {
     # Extract introns
     bam2hints \
       --intronsonly \
-      --minintronlen=20 \
-      --maxcoverage=100 \
-      --priority 4 \
+      --minintronlen="${params.min_intron_hard}" \
+      --maxintronlen="${params.max_intron_hard}" \
+      --maxcoverage=1000 \
+      --priority=4 \
+      --ssOn \
+      --source="I" \
       --in="tmp.bam" \
       --out="tmp.gff3"
 
     filterIntronsFindStrand.pl \
         "${fasta}" \
         tmp.gff3 \
-        --allowed=gtag,gcag,atac,ctac,gaag \
+        --allowed="${params.valid_splicesites}" \
         --score \
-    | awk '\$6 >= ${min_coverage}' \
     > "${name}_${read_group}_intron_hints.gff3"
 
     rm -f tmp.gff3
@@ -1887,8 +1958,6 @@ process tidyGenemark {
         file("genemark.faa") into genemarkPredictions4Busco
 
     script:
-    def genetic_code = 1
-
     """
     gt gtf_to_gff3 -tidy genemark.gtf \
     | gt gff3 -tidy -sort -retainids \
@@ -1900,7 +1969,7 @@ process tidyGenemark {
       -join \
       -translate \
       -retainids \
-      -gcode "${genetic_code}" \
+      -gcode "${params.trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
       genemark.gff3 \
@@ -1919,7 +1988,7 @@ tidiedGenemark.into {
  */
 process extractGenemarkHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
@@ -1936,7 +2005,7 @@ process extractGenemarkHints {
 
     script:
     """
-    gff2hints.py \
+    gffpal hints \
         --source PR \
         --group-level mRNA \
         --priority 3 \
@@ -2061,7 +2130,7 @@ tidiedCodingQuarry.into {
  */
 process extractCodingQuarryHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
@@ -2078,7 +2147,7 @@ process extractCodingQuarryHints {
 
     script:
     """
-    gff2hints.py \
+    gffpal hints \
         --source PR \
         -g mRNA \
         --priority 4 \
@@ -2354,7 +2423,7 @@ tidiedCodingQuarryPM.into {
  */
 process extractCodingQuarryPMHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
@@ -2371,7 +2440,7 @@ process extractCodingQuarryPMHints {
 
     script:
     """
-      gff2hints.py \
+      gffpal hints \
         --source PR \
         -g mRNA \
         --priority 4 \
@@ -2569,7 +2638,6 @@ process alignGemomaCDSParts {
         file("proteins.fasta") into alignedGemomaCDSParts
 
     script:
-    // Todo add translation table option using gc option
     """
     mkdir -p genome
     # Stopping splitting by len is important. Otherwise scaffold names don't match.
@@ -2593,7 +2661,7 @@ process alignGemomaCDSParts {
       --max-seqs 100 \
       --mask 0 \
       --orf-start-mode 1 \
-      --translation-table 1 \
+      --translation-table "${params.trans_table}" \
       --use-all-table-starts
 
     mmseqs convertalis \
@@ -2756,7 +2824,6 @@ process tidyGemoma {
         file("gemoma.faa") into gemomaPredictions4Busco
 
     script:
-    def genetic_code = 1
     """
       gt gff3 -tidy -sort -retainids gemoma.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
@@ -2768,7 +2835,7 @@ process tidyGemoma {
       -join \
       -translate \
       -retainids \
-      -gcode "${genetic_code}" \
+      -gcode "${args.trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
       gemoma_tidy.gff3 \
@@ -2782,7 +2849,7 @@ process tidyGemoma {
  */
 process extractGemomaHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
@@ -2796,7 +2863,7 @@ process extractGemomaHints {
 
     script:
     """
-      gff2hints.py \
+      gffpal hints \
         --source PR \
         --group-level mRNA \
         --priority 4 \
@@ -2845,7 +2912,6 @@ chunkifiedGenomes
     .flatMap { n, fs -> fs.collect {f -> [n, f]} }
     .into {
         genomes4RunAugustusDenovo;
-        genomes4RunAugustusDenovoUTR;
         genomes4RunAugustusHints;
         genomes4RunAugustusPreds;
     }
@@ -2874,20 +2940,23 @@ process runAugustusDenovo {
         file("out.gff") into augustusDenovoResults
 
     script:
+    def singlestrand = params.notfungus ? "" : "--singlestrand=true "
+    def utr = params.augustus_utr ? "--UTR=on ": "--UTR=off "
+
     """
     export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
 
     augustus \
       --species="${params.augustus_species}" \
       --softmasking=on \
-      --singlestrand=true \
-      --min_intron_len=20 \
+      ${singlestrand} \
+      --min_intron_len=${params.min_intron_hard} \
       --start=on \
       --stop=on \
       --introns=on \
       --cds=on \
       --gff3=on \
-      --UTR=off \
+      ${utr} \
       --codingseq=on \
       --protein=on \
       --outfile="out.gff" \
@@ -2896,61 +2965,6 @@ process runAugustusDenovo {
     """
 }
 
-
-/*
- */
-process runAugustusDenovoUTR {
-
-    label "augustus"
-    label "small_task"
-
-    tag "${name} - ${strand}"
-
-    when:
-    params.augustus_denovo && params.augustus_utr
-
-    input:
-    set val(name),
-        val(strand),
-        file(fasta) from genomes4RunAugustusDenovoUTR
-            .flatMap { n, f -> [[n, "forward", f], [n, "reverse", f]] }
-
-    file "augustus_config" from augustusConfig
-
-    output:
-    set val(name),
-        val("augustus_denovo_utr"),
-        val(strand),
-        file("out.gff") into augustusDenovoUTRResults
-
-    script:
-    if ( strand == "forward" ) {
-        strand_param = "--strand=forward"
-    } else if ( strand == "reverse" ) {
-        strand_param = "--strand=backward"
-    } else {
-        log.error "This shouldn't happen"
-        exit 1
-    }
-    """
-    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
-
-    augustus \
-      --species="${params.augustus_species}" \
-      --softmasking=on \
-      ${strand_param} \
-      --UTR=on \
-      --min_intron_len=20 \
-      --start=on \
-      --stop=on \
-      --introns=on \
-      --cds=on \
-      --gff3=on \
-      --outfile="out.gff" \
-      --errfile=augustus.err \
-      "${fasta}"
-    """
-}
 
 augustusRnaseqHints4JoinHints
     .map { n, rg, i -> [n, i] }
@@ -2961,7 +2975,7 @@ augustusRnaseqHints4JoinHints
     }
 
 
-if ( params.augustus_utr ) {
+if ( params.augustus_utr && !params.notfungus ) {
 
     process filterHintStrandUTR {
 
@@ -3081,7 +3095,11 @@ process runAugustusHints {
         file("out.gff") into augustusHintsResults
 
     script:
-    if ( !params.augustus_utr ) {
+    if ( params.augustus_utr && params.notfungus ) {
+        strand_param = "--singlestrand=false --UTR=on"
+    } else if ( !params.augustus_utr && params.notfungus ) {
+        strand_param = "--singlestrand=true --UTR=off"
+    } else if ( !params.augustus_utr && !params.notfungus ) {
         strand_param = "--singlestrand=true --UTR=off"
     } else if ( strand == "forward" ) {
         strand_param = "--strand=forward --UTR=on"
@@ -3101,10 +3119,10 @@ process runAugustusHints {
       --extrinsicCfgFile=extrinsic.cfg \
       --hintsfile=hints_filtered.gff \
       ${strand_param} \
-      --allow_hinted_splicesites=atac \
+      --allow_hinted_splicesites="${params.valid_splicesites}" \
       --softmasking=on \
       --alternatives-from-evidence=true \
-      --min_intron_len=20 \
+      --min_intron_len="${params.min_intron_hard}" \
       --start=on \
       --stop=on \
       --introns=on \
@@ -3117,10 +3135,7 @@ process runAugustusHints {
 }
 
 augustusDenovoResults
-    .mix(
-        augustusDenovoUTRResults,
-        augustusHintsResults,
-    )
+    .mix( augustusHintsResults )
     .map { n, p, s, g -> [n, p, g] }
     .groupTuple(by: [0, 1])
     .set {augustusChunks}
@@ -3163,7 +3178,7 @@ process joinAugustusChunks {
  */
 process extractAugustusHintsHints {
 
-    label "python3"
+    label "gffpal"
     label "small_task"
     publishDir "${params.outdir}/hints/${name}"
 
@@ -3180,7 +3195,7 @@ process extractAugustusHintsHints {
 
     script:
     """
-      gff2hints.py \
+      gffpal hints \
         --source PR \
         --group-level transcript \
         --priority 4 \
@@ -3314,10 +3329,10 @@ process runAugustusPreds {
       --hintsfile=hints_filtered.gff \
       ${strand_param} \
       --UTR=on \
-      --allow_hinted_splicesites=atac \
+      --allow_hinted_splicesites="${params.valid_splicesites}" \
       --softmasking=on \
       --alternatives-from-evidence=true \
-      --min_intron_len=20 \
+      --min_intron_len="${params.min_intron_hard}" \
       --start=on \
       --stop=on \
       --introns=on \
@@ -3418,6 +3433,8 @@ pasaPredictions4Busco.map { n, g, c, p -> [n, "transdecoder", p] }
             .map { n, g, c, p, d, f, o -> [n, "codingquarry", p] },
         codingQuarryPMPredictions4Busco
             .map { n, g, c, p -> [n, "codingquarrypm", p] },
+        gemomaPredictions4Busco,
+
     )
     .set { proteins4Busco }
 

@@ -4,26 +4,24 @@ set -euo pipefail
 
 # Default temp directory
 TMPDIR="tmp$$"
-NCPU="$(grep -c '^processor' /proc/cpuinfo)"
 OUTFILE="/dev/stdout"
 
 # Set some defaults
-TIDY=0
-GFF3_OUT=0
+TIDY=false
+GFF3_OUT=false
 
 usage() {
   echo 'Runs
 
-USAGE: exonerate_parallel.sh -g GENOME -p PROTEINS -b BED -n NCPUS -t TMPDIR > results.gff
+USAGE: add_utr.sh -g GENOME -p PROTEINS -b BED -n NCPUS -t TMPDIR > results.gff
 
 Arguments:
 -g -- The gene annotations in GFF3 format [REQUIRED].
 -e -- The est matches in GFF3 gene format [REQUIRED].
 -i -- Tidy the input and add introns. Required genometools installed on your PATH.
 -f -- Write output as GFF3 instead of GTF. Requires genometools installed on your PATH.
--n -- How many concurrent tasks to run [DEFAULT: All detected cpus].
 -t -- Where to store temporary files [DEFAULT: "tmp$$"].
--o -- Where to write the output gff to [DEFAULT: stdout].
+-o -- Where to write the output gtf/gff to [DEFAULT: stdout].
 
 
 Requires the following on PATH:
@@ -71,7 +69,7 @@ get_gff3_ids() {
   GFF="$1"
 
   awk '{b=gensub(/.*ID=([^;]+).*/, "\\1", "g", $9); print b;}' \
-  < "${OUTDIR}/transcript_overlap.gff3" \
+  < "${GFF}" \
   | sort -u
 }
 
@@ -111,7 +109,7 @@ then
 fi
 
 
-while getopts ":hg:e:n:t:o:if" opt
+while getopts ":hg:e:t:o:if" opt
 do
   case "${opt}" in
     h )
@@ -120,9 +118,8 @@ do
       ;;
     g ) GENE="${OPTARG}" ;;
     e ) EST="${OPTARG}" ;;
-    i ) TIDY=1 ;;
-    f ) GFF3_OUT=1 ;;
-    n ) NCPU="${OPTARG}" ;;
+    i ) TIDY=true ;;
+    f ) GFF3_OUT=true ;;
     t ) TMPDIR="${OPTARG}" ;;
     o ) OUTFILE="${OPTARG}" ;;
     : )
@@ -244,4 +241,198 @@ get_exact_matching_features \
 > "${GENE_SHARED_INTRONS}"
 
 
+# Find transcripts with introns not in the gff.
+EST_NOVEL_INTRONS="${TMPDIR}/est_novel_introns.gff3"
+awk '$10 == "."' \
+< "${EST_SHARED_INTRONS}" \
+| cut -f-9 \
+> "${EST_NOVEL_INTRONS}"
 
+EST_NOVEL_INTRON_IDS="${TMPDIR}/est_novel_intron_ids.txt"
+awk '{b=gensub(/.*Parent=([^;]+).*/, "\\1", "g", $9); print b;}' \
+< "${EST_SHARED_INTRONS}" \
+| sort -u \
+> "${EST_NOVEL_INTRON_IDS}"
+
+
+# Find genes with introns not in the ests.
+GENE_NOVEL_INTRONS="${TMPDIR}/gene_novel_introns.gff3"
+awk '$10 == "."' \
+< "${GENE_SHARED_INTRONS}" \
+| cut -f-9 \
+> "${GENE_NOVEL_INTRONS}"
+
+GENE_NOVEL_INTRON_IDS="${TMPDIR}/gene_novel_intron_ids.txt"
+awk '{b=gensub(/.*Parent=([^;]+).*/, "\\1", "g", $9); print b;}' \
+< "${GENE_NOVEL_INTRONS}" \
+| sort -u \
+> "${GENE_NOVEL_INTRON_IDS}"
+
+
+# Find the number of introns per gene in ref gff.
+GENE_NUM_INTRONS="${TMPDIR}/gene_num_introns.tsv"
+cut -f9 "${GENE_INTRON}" \
+| sort \
+| uniq -c \
+| awk '
+  BEGIN {OFS="\t"}
+  {
+    $2=gensub(/.*Parent=([^;]+).*/, "\\1", "g", $2);
+    print $2, $1;
+  }
+' \
+| sort \
+> "${GENE_NUM_INTRONS}"
+
+# Find the number of shared introns per gene in ref gff.
+SHARED_NUM_INTRONS="${TMPDIR}/shared_num_introns.tsv"
+awk '
+  BEGIN {OFS="\t"}
+  {
+    a=gensub(/.*Parent=([^;]+).*/, "\\1", "g", $9);
+    b=gensub(/.*Parent=([^;]+).*/, "\\1", "g", $18);
+    print a, b;
+  }
+' < "${EST_SHARED_INTRONS}" \
+| sort \
+| uniq -c \
+| awk 'BEGIN {OFS="\t"} { print $3, $2, $1 }' \
+| sort \
+> "${SHARED_NUM_INTRONS}"
+
+
+# Find cases where the number of shared introns is the same as
+# the number of introns in the ref gene.
+# Output the id of the est.
+ESTS_WITH_SAME_INTRONS_IDS="${TMPDIR}/transcript_same_num_introns_ids.tsv"
+join \
+  -j 1 \
+  "${GENE_NUM_INTRONS}" \
+  "${SHARED_NUM_INTRONS}" \
+| awk '$2 == $4 {print $3}' \
+> "${ESTS_WITH_SAME_INTRONS_IDS}"
+
+
+# Select the ests features with the same introns.
+# Excluding those with novel introns.
+EST_MRNA_OVERLAP_NO_NOVEL="${TMPDIR}/est_mrna_overlap_nonovel.gff3"
+grep \
+  -f "${EST_NOVEL_INTRON_IDS}" \
+  -F \
+  -v \
+  "${EST_MRNA_OVERLAP}" \
+| grep \
+  -f "${ESTS_WITH_SAME_INTRONS_IDS}" \
+  -F \
+> "${EST_MRNA_OVERLAP_NO_NOVEL}"
+
+
+# Select ref genes with the same introns.
+GENE_MRNA_NO_NOVEL="${TMPDIR}/gene_mrna_no_novel.gff3"
+grep \
+  -f "${GENE_NOVEL_INTRON_IDS}" \
+  -F \
+  -v \
+  "${GENE_MRNA}" \
+> "${GENE_MRNA_NO_NOVEL}"
+
+
+# Get the overlapping ests and genes with same introns side by side
+EST_MRNA_OVERLAP_NO_NOVEL_JOINED="${TMPDIR}/est_mrna_no_novel_joined.gffish"
+bedtools intersect \
+  -a "${EST_MRNA_OVERLAP_NO_NOVEL}" \
+  -b "${GENE_MRNA_NO_NOVEL}" \
+  -F 1.0 \
+  -s \
+  -wa \
+  -wb \
+> "${EST_MRNA_OVERLAP_NO_NOVEL_JOINED}"
+
+
+# Select the ids of the joined ests+genes and the score column.
+MATCH_IDS="${TMPDIR}/match_ids.tsv"
+awk '
+  BEGIN {OFS="\t"}
+  {
+    a=gensub(/.*ID=([^;]+).*/, "\\1", "g", $9);
+    b=gensub(/.*ID=([^;]+).*/, "\\1", "g", $18);
+    print a, b, $6;
+  }
+' \
+< "${EST_MRNA_OVERLAP_NO_NOVEL_JOINED}" \
+| sort -u \
+> "${MATCH_IDS}"
+
+
+# For each gene select the highest scoring matching est.
+BEST_MATCH_IDS="${TMPDIR}/best_match_ids.tsv"
+sort \
+  -u \
+  -k2,2 \
+  -k3,3gr \
+  "${MATCH_IDS}" \
+| sort -k2,2 -u \
+> "${BEST_MATCH_IDS}"
+
+
+# Select the features with the best matching ids.
+EST_SELECTED="${TMPDIR}/est_selected.gff3"
+grep \
+  -f <(cut -f1 "${BEST_MATCH_IDS}") \
+  -F \
+  "${EST}" \
+> "${EST_SELECTED}"
+
+
+# Select just the exons and mRNAs remove everything from attributes but ids.
+# Join with the matching ids table to add a new column
+# Transfer the gene id to the est attribute column and write out as gtf file.
+EST_SELECTED_EXONS="${TMPDIR}/est_shared_exons.gtf"
+awk -F'\t' '
+  BEGIN {OFS="\t"}
+  $3 == "mRNA" {
+    $9=gensub(/.*ID=([^;]+).*/, "\\1", "g", $9);
+    print
+  }
+  $3 == "exon" {
+    $9=gensub(/.*Parent=([^;]+).*/, "\\1", "g", $9);
+    print
+  }
+' < "${EST_SELECTED}" \
+| sort -k9,9 \
+| join -1 9 -2 2 - <(sort -k2,2 "${BEST_MATCH_IDS}") \
+| awk '
+    BEGIN {OFS="\t"}
+    $4 == "exon" {
+      print $2, $3, $4, $5, $6, $7, $8, $9, "transcript_id \""$10"\"; gene_id \""$10"\";";
+    }
+  ' \
+> "${EST_SELECTED_EXONS}"
+
+
+# Select just the CDSs from the ref gff as a gtf file.
+GENE_CDS="${TMPDIR}/gene_cds.gtf"
+awk -F'\t' '
+  BEGIN {OFS="\t"}
+  $3 == "CDS" {
+    $9=gensub(/.*Parent=([^;]+).*/, "transcript_id \"\\1\"; gene_id \"\\1\";", "g", $9);
+    print
+  }
+' "${GENE}" \
+> "${GENE_CDS}"
+
+
+# Combine the Exons and CDSs into a gtf
+GENES_WITH_UTRS_GTF="genes_with_utrs.gtf"
+cat "${EST_SELECTED_EXONS}" "${GENE_CDS}" \
+| sork -k1,1 -k4,4n -k9,9 \
+> "${GENES_WITH_UTRS_GTF}"
+
+
+if ${GFF3_OUT}
+then
+    # Convert the gtf to gff, this is the final output.
+    gt gtf_to_gff3 -tidy "${GENES_WITH_UTRS_GTF}" > "${OUTFILE}"
+else
+    cat "${GENES_WITH_UTRS_GTF}" > "${OUTFILE}"
+fi
