@@ -699,6 +699,15 @@ process starFindNovelSpliceSites {
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
+    def min_intron_len = 5
+    def max_intron_len = 20000
+
+    def sj_filters = "--outSJfilterReads Unique " +
+                     "--outSJfilterOverhangMin 15 6 6 6 " + 
+                     "--outSJfilterCountUniqueMin 10 5 5 5 " + 
+                     "--outSJfilterDistToOtherSJmin 10 0 3 3 " +
+                     "--outSJfilterIntronMaxVsReadN 10 100 500 1000 5000 10000"
+
     """
     STAR \
       --runThreadN "${task.cpus}" \
@@ -706,14 +715,10 @@ process starFindNovelSpliceSites {
       --genomeDir "index" \
       --outSAMtype None \
       --outSAMmode None \
-      --outSJfilterReads All \
-      --outSJfilterOverhangMin 5 1 1 1 \
-      --outSJfilterCountUniqueMin 10 5 5 5 \
-      --outSJfilterDistToOtherSJmin 5 0 0 3 \
-      --outSJfilterIntronMaxVsReadN 0 1 500 5000 10000 20000 \
-      --alignIntronMin 5 \
-      --alignIntronMax 10000 \
-      --alignSJoverhangMin 1 \
+      ${sj_filters} \
+      --alignIntronMin ${min_intron_len} \
+      --alignIntronMax ${max_intron_len} \
+      --alignSJoverhangMin 5 \
       --alignSJDBoverhangMin 1 \
       --alignSoftClipAtReferenceEnds No \
       --outFileNamePrefix "${name}_${read_group}." \
@@ -766,6 +771,13 @@ process starAlignReads {
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
+    def min_intron_len = 5
+    def max_intron_len = 20000
+
+    def sj_filters = "--outSJfilterReads All " +
+                     "--outSJfilterCountUniqueMin 10 5 5 5 " +
+                     "--outSJfilterIntronMaxVsReadN 5 500 5000"
+
     """
     STAR \
       --runThreadN ${task.cpus} \
@@ -774,11 +786,9 @@ process starAlignReads {
       --sjdbFileChrStartEnd *SJ.out.tab \
       --outSAMtype BAM Unsorted \
       --outBAMcompression 1 \
-      --outSJfilterReads All \
-      --outSJfilterCountUniqueMin 10 5 5 5 \
-      --outSJfilterIntronMaxVsReadN 0 1 500 5000 10000 20000 \
-      --alignIntronMin 5 \
-      --alignIntronMax 10000 \
+      ${sj_filters} \
+      --alignIntronMin ${min_intron_len} \
+      --alignIntronMax ${max_intron_len} \
       --alignSJoverhangMin 10 \
       --alignSJDBoverhangMin 1 \
       --alignSoftClipAtReferenceEnds No \
@@ -786,11 +796,12 @@ process starAlignReads {
       --outFilterMultimapNmax 1 \
       --outFilterMismatchNmax 10 \
       --outFilterMismatchNoverLmax 0.2 \
+      --outFilterIntronMotifs RemoveNoncanonicalUnannotated \
+      --outFilterIntronStrands RemoveInconsistentStrands \
       --outMultimapperOrder Random \
       --outSAMattributes All \
       --outSAMstrandField intronMotif \
       --outSAMattrIHstart 0 \
-      --outSAMmapqUnique 50 \
       --outFileNamePrefix "${name}_${read_group}." \
       --readFilesIn "${r1_joined}" "${r2_joined}"
 
@@ -1059,19 +1070,22 @@ process alignSpalnTranscripts {
     set val(name), file("${name}_spaln_transcripts.gff3") into spalnAlignedTranscripts
 
     script:
-    def species = "Dothideo"
+    def species = "phaenodo"
+    def min_intron_len = 20
+    def max_gene_size = 20000
 
     """
     spaln \
-      -L \
-      -M3 \
+      -LS \
       -O0 \
       -Q7 \
       -S3 \
       -T${species} \
       -yX \
       -yS \
-      -ya2 \
+      -ya1 \
+      -XG ${max_gene_size} \
+      -yL${min_intron_len} \
       -t ${task.cpus} \
       -d "${name}" \
       "${fasta_clean}" \
@@ -1265,6 +1279,7 @@ process alignSpalnProteins {
     script:
     def trans_table = 1
     def min_intron_len = 20
+    def max_gene_size = 20000
 
     """
     spaln \
@@ -1275,9 +1290,9 @@ process alignSpalnProteins {
       -O0 \
       -Q7 \
       -ya1 \
-      -yS \
       -yX \
       -yL${min_intron_len} \
+      -XG${max_gene_size} \
       -t ${task.cpus} \
       -d "${name}" \
       "proteins.fasta" \
