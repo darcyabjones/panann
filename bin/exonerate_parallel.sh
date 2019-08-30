@@ -6,6 +6,9 @@ set -euo pipefail
 TMPDIR="tmp$$"
 NCPU="$(grep -c '^processor' /proc/cpuinfo)"
 OUTFILE="/dev/stdout"
+MIN_INTRON=20
+MAX_INTRON=200000
+GENCODE=1
 
 usage() {
   echo 'Runs exonerate in parallel within regions specified by a BED file.
@@ -21,6 +24,9 @@ Arguments:
       region in the 4th column [REQUIRED].
 -n -- How many concurrent tasks to run [DEFAULT: All detected cpus].
 -t -- Where to store temporary files [DEFAULT: "tmp$$"].
+-m -- The minimum intron length in bp (default 20).
+-x -- The maximum intron length in bp (default 200000).
+-r -- The ncbi genetic code number to use (default 1).
 -o -- Where to write the output gff to [DEFAULT: stdout].
 
 
@@ -65,7 +71,7 @@ then
 fi
 
 
-while getopts ":hg:p:q:b:n:t:o:" opt
+while getopts ":hg:p:q:b:n:t:m:x:r:o:" opt
 do
   case "${opt}" in
     h )
@@ -78,6 +84,9 @@ do
     b ) BED="${OPTARG}" ;;
     n ) NCPU="${OPTARG}" ;;
     t ) TMPDIR="${OPTARG}" ;;
+    m ) MIN_INTRON="${OPTARG}" ;;
+    x ) MAX_INTRON="${OPTARG}" ;;
+    r ) GENCODE="${OPTARG}" ;;
     o ) OUTFILE="${OPTARG}" ;;
     : )
       usage
@@ -145,6 +154,9 @@ grep -v "^#" "${BED}" \
       -s "$1" \
       -e "$2" \
       -i "$3" \
+      -m "${MIN_INTRON}" \
+      -x "${MAX_INTRON}" \
+      -r "${GENCODE}" \
       -o ${TMPDIR}/tmp$$ \
     || (echo "Failed$$"; exit 255)
   '

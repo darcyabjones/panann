@@ -88,7 +88,7 @@ COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
 COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
 
 
-ARG BAMTOOLS_TAG="v2.5.1"
+ARG BAMTOOLS_TAG
 ARG BAMTOOLS_PREFIX_ARG="/opt/bamtools/${BAMTOOLS_TAG}"
 ENV BAMTOOLS_PREFIX="${BAMTOOLS_PREFIX_ARG}"
 LABEL bamtools.version="${BAMTOOLS_TAG}"

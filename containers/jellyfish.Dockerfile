@@ -17,8 +17,10 @@ RUN  set -eu \
   && apt-get update \
   && apt-get install -y \
        build-essential \
+       ca-certificates \
        wget \
   && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
   && wget -O jellyfish.tar.gz "${JELLYFISH_URL}" \
   && tar zxf jellyfish.tar.gz \
   && rm jellyfish.tar.gz \

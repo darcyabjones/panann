@@ -17,9 +17,11 @@ RUN  set -eu \
   && apt-get update \
   && apt-get install -y \
        build-essential \
+       ca-certificates \
        wget \
        zlib1g-dev \
   && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
   && wget -O star.tar.gz "${STAR_URL}" \
   && tar -zxf star.tar.gz \
   && cd STAR*/source \

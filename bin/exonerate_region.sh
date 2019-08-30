@@ -4,6 +4,9 @@ set -Euo pipefail
 
 # Default output directory
 OUT_PREFIX="tmp$$"
+MIN_INTRON=20
+MAX_INTRON=200000
+GENCODE=1
 
 usage() {
   echo 'Runs exonerate on a region of a genome with a subset of proteins.
@@ -19,6 +22,9 @@ Arguments:
 -e -- the end position within the seqid of the genome to subset 1 indexed
 -i -- A comma separated list of protein ids to search from the -p file.
       These ids must the first column of -p EXACTLY.
+-m -- The minimum intron length in bp (default 20).
+-x -- The maximum intron length in bp (default 200000).
+-r -- The ncbi genetic code number to use (default 1).
 -o -- The prefix to save temp files and the output file as [Optional].
       By default will use "tmp$$" where "$$" is the process id (a uniqueish number).
       Temp files will be saved in a directory with this name, and the final gff
@@ -53,6 +59,9 @@ get_proteins() {
 run_exonerate() {
   PROTEINS="$2"
   GENOME="$1"
+  MIN_INTRON="$3"
+  MAX_INTRON="$4"
+  GENCODE="$5"
   exonerate \
     --query "${PROTEINS}" \
     --target "${GENOME}" \
@@ -64,9 +73,9 @@ run_exonerate() {
     --score 100 \
     --geneseed 250 \
     --bestn 2 \
-    --minintron 20 \
-    --maxintron 50000 \
-    --geneticcode 1 \
+    --minintron "${MIN_INTRON}" \
+    --maxintron "${MAX_INTRON}" \
+    --geneticcode "${GENCODE}" \
     --showtargetgff yes \
     --showalignment no \
     --showvulgar no
@@ -75,6 +84,9 @@ run_exonerate() {
 run_exonerate_loop() {
   PROTEINS="$2"
   GENOME="$1"
+  MIN_INTRON="$3"
+  MAX_INTRON="$4"
+  GENCODE="$5"
 
   NSEQS=$(wc -l < "${PROTEINS}")
 
@@ -82,7 +94,12 @@ run_exonerate_loop() {
   for i in $(seq 1 2 ${NSEQS})
   do
     tail -n+${i} "${PROTEINS}" | head -n2 > "${PROTEINS}_${i}.fasta"
-    run_exonerate "${PROTEINS}_${i}.fasta" "${GENOME}" || true
+    run_exonerate \
+      "${PROTEINS}_${i}.fasta" \
+      "${GENOME}" \
+      "${MIN_INTRON}" \
+      "${MAX_INTRON}" \
+      "${GENCODE}" || true
   done
 
   set -e  
@@ -117,7 +134,7 @@ then
   exit 0
 fi
 
-while getopts ":hg:p:c:s:e:i:o:" opt
+while getopts ":hg:p:c:s:e:i:m:x:r:o:" opt
 do
   case "${opt}" in
     h )
@@ -130,6 +147,9 @@ do
     s ) START="${OPTARG}" ;;
     e ) END="${OPTARG}" ;;
     i ) PROTEIN_IDS="${OPTARG}" ;;
+    m ) MIN_INTRON="${OPTARG}" ;;
+    x ) MAX_INTRON="${OPTARG}" ;;
+    r ) GENCODE="${OPTARG}" ;;
     o ) OUT_PREFIX="${OPTARG}" ;;
     : )
       usage
@@ -180,12 +200,26 @@ get_proteins \
 
 
 firsttry() {
-  run_exonerate "${OUT_PREFIX}/genome_target.fasta" "${OUT_PREFIX}/protein_queries.fasta" > "${OUT_PREFIX}/exonerate.gff"
+  run_exonerate \
+    "${OUT_PREFIX}/genome_target.fasta" \
+    "${OUT_PREFIX}/protein_queries.fasta" \
+    "${MIN_INTRON}" \
+    "${MAX_INTRON}" \
+    "${GENCODE}" \
+  > "${OUT_PREFIX}/exonerate.gff"
+
   filter_exonerate "${OUT_PREFIX}/exonerate.gff" "${SEQID}" "${START}" > "${OUT_PREFIX}.gff"
 }
 
 secondtry() {
-  run_exonerate_loop "${OUT_PREFIX}/genome_target.fasta" "${OUT_PREFIX}/protein_queries.fasta" > "${OUT_PREFIX}/exonerate.gff"
+  run_exonerate_loop \
+    "${OUT_PREFIX}/genome_target.fasta" \
+    "${OUT_PREFIX}/protein_queries.fasta" \
+    "${MIN_INTRON}" \
+    "${MAX_INTRON}" \
+    "${GENCODE}" \
+  > "${OUT_PREFIX}/exonerate.gff"
+
   filter_exonerate "${OUT_PREFIX}/exonerate.gff" "${SEQID}" "${START}" > "${OUT_PREFIX}.gff"
 }
 

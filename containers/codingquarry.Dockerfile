@@ -14,9 +14,11 @@ RUN  set -eu \
   && . /build/base.sh \
   && apt-get update \
   && apt-get install -y \
-      build-essential \
-      wget \
+       build-essential \
+       ca-certificates \
+       wget \
   && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
   && wget -O codingquarry.tar.gz "${CODINGQUARRY_URL}" \
   && tar -zxf codingquarry.tar.gz \
   && cd CodingQuarry* \

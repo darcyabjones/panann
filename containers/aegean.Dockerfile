@@ -31,11 +31,13 @@ RUN  set -eu \
   && apt-get update \
   && apt-get install -y \
        build-essential \
+       ca-certificates \
        libcairo2-dev \
        libpango1.0-dev \
        python \
        wget \
   && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
   && wget -O aegean.tar.gz "${AEGEAN_URL}" \
   && tar zxf aegean.tar.gz \
   && rm aegean.tar.gz \

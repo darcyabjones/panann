@@ -153,7 +153,7 @@ RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
 OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION)
 
-PROPRIETARY=genemarkes signalp rnammer
+PROPRIETARY=genemarkes signalp
 
 
 all: docker/all singularity/all
