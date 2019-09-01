@@ -96,7 +96,7 @@ SEQRENAMER_TAG=v0.0.1
 SEQRENAMER_REPO=https://github.com/darcyabjones/seqrenamer.git
 SEQRENAMER_PREFIX_ARG=$(INSTALL_BASE)/seqrenamer/$(SEQRENAMER_TAG)
 
-GFFPAL_TAG=v0.0.1
+GFFPAL_TAG=v0.0.2
 GFFPAL_REPO=https://github.com/darcyabjones/gffpal.git
 GFFPAL_PREFIX_ARG=$(INSTALL_BASE)/gffpal/$(GFFPAL_TAG)
 
@@ -147,7 +147,7 @@ KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
 
-GENERAL=htslib python3 posix genometools aegean seqrenamer
+GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
@@ -162,7 +162,7 @@ all: docker/all singularity/all
 docker: docker/panann
 docker/all: docker/general docker/alignment docker/rnaseq docker/annotation
 	@echo "WARNING: proprietary software will not be built by default."
-	@echo "WARNING: call `make docker/proprietary` explicitly to create them."
+	@echo "WARNING: call make docker/proprietary explicitly to create them."
 
 docker/general: $(addprefix docker/,$(GENERAL))
 docker/alignment: $(addprefix docker/,$(ALIGNMENT))
@@ -176,7 +176,7 @@ docker/proprietary: $(addprefix docker/,$(PROPRIETARY))
 singularity: singularity/panann.sif
 singularity/all: singularity/general singularity/alignment singularity/rnaseq singularity/annotation
 	@echo "WARNING: proprietary software will not be built by default."
-	@echo "WARNING: call `make singularity/proprietary` explicitly to create them."
+	@echo "WARNING: call make singularity/proprietary explicitly to create them."
 singularity/general: $(addprefix singularity/,$(addsuffix .sif,$(GENERAL)))
 singularity/alignment: $(addprefix singularity/,$(addsuffix .sif,$(ALIGNMENT)))
 singularity/rnaseq: $(addprefix singularity/,$(addsuffix .sif,$(RNASEQ)))

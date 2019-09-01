@@ -207,11 +207,6 @@ def stranded = params.fr ? "fr" : "rf"
 
 def is_null = { f -> (f == null || f == '') }
 
-if ( !params.augustus_species ) {
-    log.error "Please nominate one isolate as a reference or provide an Augustus species."
-    exit 1
-}
-
 if ( params.genomes ) {
     Channel
         .fromPath(params.genomes, checkIfExists: true, type: "file")
@@ -1335,7 +1330,7 @@ process fixSpalnProteinsStopCDS {
 
     script:
     """
-      awk 'BEGIN {OFS="\\t"} \$3 == "cds" {\$3="CDS"} {print}' "spaln.gff3"
+      awk -F '\\t' 'BEGIN {OFS="\\t"} \$3 == "cds" {\$3="CDS"} {print}' "spaln.gff3" \
     | gffpal expandcds -o "spaln_fixed.gff3" --cds-type "CDS" -
     """
 }
@@ -1597,8 +1592,8 @@ process extractExonerateRemoteProteinHints {
       --out=hints.gff3 \
       --prg=exonerate \
       --CDSpart_cutoff=15 \
-      --minintronlen="${min_intron_soft}" \
-      --maxintronlen="${max_intron_hard}" \
+      --minintronlen="${params.min_intron_soft}" \
+      --maxintronlen="${params.max_intron_hard}" \
       --priority=2 \
       --source=T
 
@@ -1678,7 +1673,7 @@ process runPASA {
     def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
     // Transdecoder doesn't support standard integer based table access.
-    def gen_code = "universal"
+    def gen_code = "Universal"
 
     """
     echo "DATABASE=\${PWD}/pasa.sqlite" > align_assembly.config
@@ -1840,6 +1835,8 @@ process extractAugustusRnaseqHints {
         file("${name}_${read_group}_intron_hints.gff3") into augustusRnaseqHints
 
     script:
+    max_gap_len = params.min_intron_hard - 1
+
     """
     # Convert cram to bam.
     # `-F 3328`  excludes these flags
@@ -1858,6 +1855,7 @@ process extractAugustusRnaseqHints {
     # Extract introns
     bam2hints \
       --intronsonly \
+      --maxgaplen="${max_gap_len}" \
       --minintronlen="${params.min_intron_hard}" \
       --maxintronlen="${params.max_intron_hard}" \
       --maxcoverage=1000 \
@@ -2838,7 +2836,7 @@ process tidyGemoma {
       -join \
       -translate \
       -retainids \
-      -gcode "${args.trans_table}" \
+      -gcode "${params.trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
       gemoma_tidy.gff3 \
@@ -2919,7 +2917,7 @@ chunkifiedGenomes
     .set { genomes4RunAugustusMultiStrand }
 
 
-if ( params.augustus_utr && !params.notfungus ) {}
+if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusMultiStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
@@ -2957,7 +2955,7 @@ process runAugustusDenovo {
     tag "${name} - ${strand}"
 
     when:
-    params.augustus_denovo
+    params.augustus_denovo && params.augustus_species
 
     input:
     set val(name), val(strand), file(fasta) from genomes4RunAugustusDenovo
@@ -3022,10 +3020,13 @@ process runAugustusHints {
 
     tag "${name} - ${strand}"
 
+    when:
+    params.augustus_species
+
     input:
     set val(name),
-        file(fasta),
         val(strand),
+        file(fasta),
         file("*hints") from genomes4RunAugustusHints
             .combine(
                 augustusExtrinsicHints4Hints
@@ -3139,7 +3140,7 @@ process joinAugustusChunks {
       -join \
       -translate \
       -retainids \
-      -gcode "${args.trans_table}" \
+      -gcode "${params.trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
       "${name}_${paramset}.gff3" \
@@ -3205,10 +3206,13 @@ process runAugustusPreds {
 
     tag "${name} - ${strand}"
 
+    when:
+    params.augustus_species
+
     input:
     set val(name),
-        file(fasta),
         val(strand),
+        file(fasta),
         file("*hints") from genomes4RunAugustusPreds
             .combine(augustusPredHints4Pred, by: 0)
 
@@ -3304,7 +3308,7 @@ process joinAugustusPredsChunks {
       -join \
       -translate \
       -retainids \
-      -gcode "${args.trans_table}" \
+      -gcode "${params.trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
       "${name}_preds.gff3" \
@@ -3391,7 +3395,7 @@ process runBuscoProteins {
     label "busco"
     label "medium_task"
 
-    tag "${name}"
+    tag "${name} - ${analysis}"
 
     publishDir "${params.outdir}/qc/${name}"
 

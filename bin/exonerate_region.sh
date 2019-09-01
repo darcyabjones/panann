@@ -62,6 +62,7 @@ run_exonerate() {
   MIN_INTRON="$3"
   MAX_INTRON="$4"
   GENCODE="$5"
+
   exonerate \
     --query "${PROTEINS}" \
     --target "${GENOME}" \
@@ -200,6 +201,11 @@ get_proteins \
 
 
 firsttry() {
+  OUT_PREFIX="$1"
+  MIN_INTRON="$2"
+  MAX_INTRON="$3"
+  GENCODE="$4"
+
   run_exonerate \
     "${OUT_PREFIX}/genome_target.fasta" \
     "${OUT_PREFIX}/protein_queries.fasta" \
@@ -212,6 +218,11 @@ firsttry() {
 }
 
 secondtry() {
+  OUT_PREFIX="$1"
+  MIN_INTRON="$2"
+  MAX_INTRON="$3"
+  GENCODE="$4"
+
   run_exonerate_loop \
     "${OUT_PREFIX}/genome_target.fasta" \
     "${OUT_PREFIX}/protein_queries.fasta" \
@@ -226,12 +237,12 @@ secondtry() {
 
 
 # Run exonerate
-firsttry
+firsttry "${OUT_PREFIX}" "${MIN_INTRON}" "${MAX_INTRON}" "${GENCODE}"
 
 ECODE=$?
 if [ ${ECODE} -eq 139 ]
 then
-  secondtry
+  secondtry "${OUT_PREFIX}" "${MIN_INTRON}" "${MAX_INTRON}" "${GENCODE}"
 else
   exit "${ECODE}"
 fi

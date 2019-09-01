@@ -131,7 +131,7 @@ then
 fi
 
 # Get .fai to avoid race if it doesn't exist already.
-if [ !-f "${GENOME}.fai" ]
+if [ ! -f "${GENOME}.fai" ]
 then
   samtools faidx "${GENOME}"
 fi
@@ -140,6 +140,9 @@ fi
 export GENOME
 export PROTEINS_TSV
 export TMPDIR
+export MIN_INTRON
+export MAX_INTRON
+export GENCODE
 
 # The exit 255 guard is necessary because xargs ignores all other error-codes.
 grep -v "^#" "${BED}" \

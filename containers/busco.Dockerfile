@@ -54,7 +54,7 @@ ENV BUSCO_PREFIX="${BUSCO_PREFIX_ARG}"
 LABEL busco.version="${BUSCO_COMMIT}"
 
 ENV PATH="${BUSCO_PREFIX}/scripts:${PATH}"
-ENV PYTHONPATH="${PYTHONPATH}:${BUSCO_PREFIX}/lib/python3.5/site-packages"
+ENV PYTHONPATH="${PYTHONPATH}:${BUSCO_PREFIX}/lib/python3.7/site-packages"
 
 COPY --from=builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
 COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
