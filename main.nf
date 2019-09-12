@@ -149,7 +149,9 @@ params.crams = false
 // This parameter sets a default for when that column is unspecified.
 params.fr = false
 
-params.valid_splicesites = "gtag,ctac,gcag,atac,gtat,gaag"
+// GTTG and GAAG might also be valid.
+// https://www.biorxiv.org/content/10.1101/616565v1.full
+params.valid_splicesites = "gtag,gcag,atac,ctac"
 params.min_intron_soft = 20
 params.min_intron_hard = 5
 params.max_intron_hard = 15000
@@ -425,7 +427,6 @@ genomesWithFaidx
         genomes4ExtractSpliceSites;
         genomes4Busco;
         genomes4RunGenemark;
-        genomes4TidyGenemark;
         genomes4RunCodingQuarry;
         genomes4RunCodingQuarryPM;
         genomes4AlignGemomaCDSParts;
@@ -435,6 +436,7 @@ genomesWithFaidx
         genomes4ChunkifyGenomes;
         genomes4JoinAugustusChunks;
         genomes4JoinAugustusPredsChunks;
+        genomes4ExtractSeqs;
 }
 
 
@@ -1128,6 +1130,7 @@ process tidySpalnTranscripts {
       -tidy \
       -retainids \
       -addintrons <(grep -v "^#" transcripts.gff3) \
+      -setsource "spaln" \
     > "tidied.gff3"
     """
 }
@@ -1166,6 +1169,7 @@ process extractSpalnTranscriptHints {
         BEGIN {OFS="\\t"}
         {
           sub(/group=/, "group=${name}_spaln_transcripts_", \$9);
+          \$2 = "spaln";
           print
         }
       ' \
@@ -1352,7 +1356,7 @@ process tidySpalnProteins {
 
     script:
     """
-    gt gff3 -tidy -sort -retainids "spaln.gff3" \
+    gt gff3 -tidy -sort -retainids -setsource "spaln" "spaln.gff3" \
     | canon-gff3 -i - \
     > spaln_tidied.gff3
     """
@@ -1391,6 +1395,7 @@ process extractSpalnProteinHints {
         BEGIN {OFS="\\t"}
         \$3 == "CDSpart" || \$3 == "intron"|| \$3 == "start" || \$3 == "stop" {
           sub(/group=/, "group=${name}_spaln_proteins_", \$9);
+          \$2 = "spaln";
           print
         }
     ' \
@@ -1598,10 +1603,11 @@ process extractExonerateRemoteProteinHints {
       --priority=2 \
       --source=T
 
-    awk '
+    awk -F '\t' '
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
         sub(/grp=/, "grp=${name}_exonerate_remote_proteins_", \$9)
+        \$2 = "Exonerate";
         print
       }
       ' \
@@ -1659,10 +1665,7 @@ process runPASA {
             .combine(transcripts4RunPasa)
 
     output:
-    set val(name),
-        file("${name}_pasa.gff3"),
-        file("${name}_pasa_cds.fna"),
-        file("${name}_pasa_protein.faa") into pasaPredictions
+    set val(name), file("${name}_pasa.gff3") into pasaPredictions
 
     script:
     def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
@@ -1705,14 +1708,7 @@ process runPASA {
       --pasa_transcripts_gff3 pasa.sqlite.pasa_assemblies.gff3
 
     ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.genome.gff3 \${PWD}/${name}_pasa.gff3
-    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.cds \${PWD}/${name}_pasa_cds.fna
-    ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.pep \${PWD}/${name}_pasa_protein.faa
     """
-}
-
-pasaPredictions.into {
-    pasaPredictions4Tidy;
-    pasaPredictions4Busco;
 }
 
 
@@ -1728,15 +1724,14 @@ process tidyPasa {
     tag "${name}"
 
     input:
-    set val(name), file("pasa.gff3") from pasaPredictions4Tidy
-        .map { n, g, c, p -> [n, g] }
+    set val(name), file("pasa.gff3") from pasaPredictions
 
     output:
-    set val(name), file("pasa_tidy.gff3") into tidiedPasa
+    set val(name), val("pasa"), file("${name}_pasa_tidy.gff3") into tidiedPasa
 
     script:
     """
-    gt gff3 -tidy -sort -retainids pasa.gff3 \
+    gt gff3 -tidy -sort -retainids -setsource "TransDecoder" pasa.gff3 \
     | canon-gff3 -i - \
     > pasa_tidy.gff3
     """
@@ -1745,6 +1740,7 @@ process tidyPasa {
 tidiedPasa.into {
     pasaPredictions4Hints;
     pasaPredictions4Stats;
+    pasaPredictions4ExtractSeqs;
 }
 
 
@@ -1762,16 +1758,16 @@ process extractPasaHints {
     tag "${name}"
 
     input:
-    set val(name), file("pasa.gff3") from pasaPredictions4Hints
+    set val(name), val(analysis), file("pasa.gff3") from pasaPredictions4Hints
 
     output:
     set val(name),
-        file("${name}_pasa_hints.gff3"),
-        file("${name}_transdecoder_hints.gff3") into pasaHints
+        val(analysis),
+        file("${name}_pasa_hints.gff3") into pasaHints
 
     script:
     """
-    awk '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' pasa.gff3 \
+    awk -F '\t' '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' pasa.gff3 \
     | gffpal hints \
         --source PASA \
         --group-level mRNA \
@@ -1779,31 +1775,35 @@ process extractPasaHints {
         --exon-trim 9 \
         --intron-trim 0 \
         - \
-    | awk '
+    | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
           sub(/group=/, "group=${name}_pasa_", \$9);
+          \$2 = "PASA";
           print
         }
       ' \
     > "${name}_pasa_hints.gff3"
 
-    awk '\$3 != "exon" && \$3 != "intron"' pasa.gff3 \
+    awk -F '\t' '\$3 != "exon" && \$3 != "intron"' pasa.gff3 \
     | gffpal hints \
         --source TD \
         --group-level mRNA \
-        --priority 4 \
+        --priority 3 \
         --cds-trim 9 \
         --utr-trim 6 \
         - \
-    | awk '
+    | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
           sub(/group=/, "group=${name}_transdecoder_", \$9);
+          \$2 = "TransDecoder";
           print
         }
       ' \
     > "${name}_transdecoder_hints.gff3"
+
+    cat pasa_hints.gff3 transdecoder_hints.gff3 > "${name}_pasa_hints.gff3"
     """
 }
 
@@ -1926,8 +1926,7 @@ process runGenemark {
       --ET "hints.gff3" \
       ${use_fungus} \
       ${is_training} \
-      --sequence "${genome}" \
-      --evidence "hints.gff3" \
+      --sequence "${genome}"
 
     mv genemark.gtf "${name}_genemark.gtf"
     """
@@ -1949,40 +1948,25 @@ process tidyGenemark {
     params.genemark
 
     input:
-    set val(name),
-        file("genemark.gtf"),
-        file(fasta),
-        file(faidx) from genemarkPredictions
-            .join(genomes4TidyGenemark, by: 0)
+    set val(name), file("genemark.gtf") from genemarkPredictions
 
     output:
-    set val(name), file("genemark.gff3") into tidiedGenemark
     set val(name),
         val("genemark"),
-        file("genemark.faa") into genemarkPredictions4Busco
+        file("${name}_genemark_tidy.gff3") into tidiedGenemark
 
     script:
     """
     gt gtf_to_gff3 -tidy genemark.gtf \
-    | gt gff3 -tidy -sort -retainids \
+    | gt gff3 -tidy -sort -retainids -setsource "GeneMarkET" \
     | canon-gff3 -i - \
-    > genemark.gff3
-
-    gt extractfeat \
-      -type CDS \
-      -join \
-      -translate \
-      -retainids \
-      -gcode "${params.trans_table}" \
-      -matchdescstart \
-      -seqfile "${fasta}" \
-      genemark.gff3 \
-    > genemark.faa
+    > "${name}_genemark_tidy.gff3"
     """
 }
 
 tidiedGenemark.into {
     genemarkPredictions4Hints;
+    genemarkPredictions4ExtractSeqs;
     genemarkPredictions4Stats;
 }
 
@@ -2002,10 +1986,14 @@ process extractGenemarkHints {
     params.genemark
 
     input:
-    set val(name), file("genemark.gff3") from genemarkPredictions4Hints
+    set val(name),
+        val(analysis),
+        file("genemark.gff3") from genemarkPredictions4Hints
 
     output:
-    set val(name), file("${name}_genemark_hints.gff3") into genemarkHints
+    set val(name),
+        val(analysis),
+        file("${name}_genemark_hints.gff3") into genemarkHints
 
     script:
     """
@@ -2017,10 +2005,11 @@ process extractGenemarkHints {
         --exon-trim 9 \
         --intron-trim 0 \
         genemark.gff3 \
-    | awk '
+    | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
           sub(/group=/, "group=${name}_genemark_", \$9);
+          \$2 = "GeneMarkET";
           print
         }
       ' \
@@ -2051,13 +2040,12 @@ process runCodingQuarry {
             .combine(genomes4RunCodingQuarry, by: 0)
 
     output:
-    set val(name),
-        file("${name}_codingquarry.gff3"),
-        file("${name}_codingquarry_cds.fna"),
-        file("${name}_codingquarry_proteins.faa"),
-        file("${name}_codingquarry_dubiousset.gff3"),
-        file("${name}_codingquarry_fusions.txt"),
-        file("${name}_codingquarry_overlapreport.txt") into codingQuarryPredictions
+    set val(name), file("${name}_codingquarry.gff3") into codingQuarryPredictions
+    set val(name), file("${name}_codingquarry.faa") into codingQuarryPredictionsProteins
+    file "${name}_codingquarry.fna"
+    file "${name}_codingquarry_dubiousset.gff3"
+    file "${name}_codingquarry_fusions.txt"
+    file "${name}_codingquarry_overlapreport.txt"
 
     script:
     """
@@ -2088,7 +2076,6 @@ codingQuarryPredictions.into {
     codingQuarryPredictions4SecretionPred;
     codingQuarryPredictions4PM;
     codingQuarryPredictions4Tidy;
-    codingQuarryPredictions4Busco;
 }
 
 
@@ -2108,26 +2095,27 @@ process tidyCodingQuarry {
     !params.notfungus
 
     input:
-    set val(name),
-        file("codingquarry.gff3") from codingQuarryPredictions4Tidy
-            .map { n, g, c, p, d, f, o -> [n, g] }
+    set val(name), file("codingquarry.gff3") from codingQuarryPredictions4Tidy
 
     output:
-    set val(name), file("codingquarry_tidy.gff3") into tidiedCodingQuarry
+    set val(name),
+        val("codingquarry"),
+        file("${name}_codingquarry_tidy.gff3") into tidiedCodingQuarry
 
     script:
     """
-    awk 'BEGIN {OFS="\\t"} \$8 = "-1" {\$8="0"} {print}' codingquarry.gff3 \
-    | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
-    | gt gff3 -tidy -sort -retainids \
+    awk -F '\t' 'BEGIN {OFS="\\t"} \$8 = "-1" {\$8="0"} {print}' codingquarry.gff3 \
+    | awk -F '\t' 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
+    | gt gff3 -tidy -sort -retainids -setsource 'CodingQuarry' \
     | canon-gff3 -i - \
-    > codingquarry_tidy.gff3
+    > "${name}_codingquarry_tidy.gff3"
     """
 }
 
 tidiedCodingQuarry.into {
     codingQuarryPredictions4Hints;
     codingQuarryPredictions4Stats;
+    codingQuarryPredictions4ExtractSeqs;
 }
 
 
@@ -2162,7 +2150,13 @@ process extractCodingQuarryHints {
         --intron-trim 0 \
         -- \
         codingquarry.gff3 \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_codingquarry_", \$9); print}' \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_codingquarry_", \$9);
+          \$2 = "CodingQuarry";
+          print
+        }' \
     > "${name}_codingquarry_hints.gff3"
     """
 }
@@ -2181,47 +2175,27 @@ if (params.signalp) {
         tag "${name}"
 
         when:
-        !params.notfungus
+        !params.notfungus && !params.nocqpm
 
         input:
-        set val(name), file("proteins.faa") from codingQuarryPredictions4SecretionPred
-            .map { n, g, c, p, d, f, o -> [n, p] }
+        set val(name),
+            file("proteins.faa") from codingQuarryPredictionsProteins
 
         output:
-        set val(name), file("${name}_summary.signalp5") into codingQuarryPredictionsSecreted
+        set val(name),
+            file("${name}_codingquarry_secreted.txt") into codingQuarryPredictionsSecreted
 
         script:
         """
         mkdir tmp
         signalp \
           -fasta "proteins.faa" \
-          -prefix "${name}" \
+          -prefix "cq" \
           -org euk \
           -tmp tmp
 
         rm -rf -- tmp
-        """
-    }
 
-    process tidyCodingQuarrySignalp {
-
-        label "posix"
-        label "small_task"
-        publishDir "${params.outdir}/annotations/${name}"
-
-        tag "${name}"
-
-        when:
-        !params.notfungus || !params.nocqpm
-
-        input:
-        set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
-
-        output:
-        set val(name), file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecretedTidy
-
-        script:
-        """
         gawk '
           BEGIN {
             OFS=" "
@@ -2230,7 +2204,8 @@ if (params.signalp) {
             match(\$0, /CS pos: ([0-9]*)-/, x)
             print \$1, x[1]
           }
-        ' < "secreted.txt" > "${name}_codingquarry_proteins_secreted.txt"
+        ' < "cq_summary.signalp5" \
+        > "${name}_codingquarry_secreted.txt"
         """
     }
 
@@ -2245,14 +2220,15 @@ if (params.signalp) {
         tag "${name}"
 
         when:
-        !params.notfungus
+        !params.notfungus && !params.nocqpm
 
         input:
-        set val(name), file("proteins.faa") from codingQuarryPredictions4SecretionPred
-            .map { n, g, c, p, d, f, o -> [n, p] }
+        set val(name),
+            file("proteins.faa") from codingQuarryPredictionsProteins
 
         output:
-        set val(name), file("secreted.txt") into codingQuarryPredictionsSecreted
+        set val(name),
+            file("${name}_codingquarry_secreted.txt") into codingQuarryPredictionsSecreted
 
         script:
         """
@@ -2260,29 +2236,7 @@ if (params.signalp) {
           -f "proteins.faa" \
           -o secreted.txt \
           -k euk
-        """
-    }
 
-    process tidyCodingQuarryDeepsig {
-
-        label "posix"
-        label "small_task"
-        publishDir "${params.outdir}/annotations/${name}"
-
-        tag "${name}"
-
-        when:
-        !params.notfungus || !params.nocqpm
-
-        input:
-        set val(name), file("secreted.txt") from codingQuarryPredictionsSecreted
-
-        output:
-        set val(name),
-            file("${name}_codingquarry_proteins_secreted.txt") into codingQuarryPredictionsSecretedTidy
-
-        script:
-        """
         gawk '
           BEGIN {
             OFS=" "
@@ -2290,7 +2244,7 @@ if (params.signalp) {
           \$2 == "SignalPeptide" {
             print \$1, \$4
           }
-        ' < secreted.txt > "${name}_codingquarry_proteins_secreted.txt"
+        ' < secreted.txt > "${name}_codingquarry_secreted.txt"
         """
     }
 }
@@ -2320,29 +2274,24 @@ process runCodingQuarryPM {
     tag "${name}"
 
     when:
-    !params.notfungus || !params.nocqpm
+    !params.notfungus && !params.nocqpm
 
     input:
     set val(name),
         file("transcripts.gtf"),
         file("genome.fasta"),
         file("genome.fasta.fai"),
-        file("${name}_codingquarry.gff3"),
-        file("${name}_codingquarry_cds.fna"),
-        file("${name}_codingquarry_proteins.faa"),
-        file("${name}_codingquarry_dubiousset.gff3"),
-        file("${name}_codingquarry_fusions.txt"),
-        file("${name}_codingquarry_overlapreport.txt"),
+        file("codingquarry.gff3"),
         file("secretome.txt") from stringtieMergedTranscripts4CodingQuarryPM
             .combine(genomes4RunCodingQuarryPM, by: 0)
             .combine(codingQuarryPredictions4PM, by: 0)
-            .combine(codingQuarryPredictionsSecretedTidy, by: 0)
+            .combine(codingQuarryPredictionsSecreted, by: 0)
 
     output:
     set val(name),
-        file("${name}_codingquarrypm.gff3"),
-        file("${name}_codingquarrypm_cds.fna"),
-        file("${name}_codingquarrypm_proteins.faa") optional true into codingQuarryPMPredictions
+        file("${name}_codingquarrypm.gff3") optional true into codingQuarryPMPredictions
+    file "${name}_codingquarrypm_fusions.txt"
+    file "${name}_codingquarrypm_overlapreport.txt"
 
     script:
     """
@@ -2360,30 +2309,16 @@ process runCodingQuarryPM {
     CodingQuarry \
       -f genome.fasta \
       -t transcripts.gff3 \
-      -2 "${name}_codingquarry.gff3" \
+      -2 "codingquarry.gff3" \
       -p "${task.cpus}" \
       -g secretome.txt \
       -h
 
-    \${QUARRY_PATH}/scripts/fastaTranslate.py out/PGN_predicted_CDS.fa \
-    | sed 's/*\$//g' \
-    > PGN_predicted_Proteins.faa
-
-    \${QUARRY_PATH}/scripts/gene_errors_Xs.py PGN_predicted_Proteins.faa out/PGN_predicted_Proteins.faa
-    rm PGN_predicted_Proteins.faa
-
     mv out/PGN_predictedPass.gff3 "${name}_codingquarrypm.gff3"
-    mv out/PGN_predicted_CDS.fa "${name}_codingquarrypm_cds.fna"
-    mv out/PGN_predicted_Proteins.faa "${name}_codingquarrypm_proteins.faa"
     mv out/fusions.txt "${name}_codingquarrypm_fusions.txt"
     mv out/overlapReport.txt "${name}_codingquarrypm_overlapreport.txt"
-    # rm -rf -- out
+    rm -rf -- out
     """
-}
-
-codingQuarryPMPredictions.into {
-    codingQuarryPMPredictions4Tidy;
-    codingQuarryPMPredictions4Busco;
 }
 
 
@@ -2404,25 +2339,27 @@ process tidyCodingQuarryPM {
 
     input:
     set val(name),
-        file("codingquarry.gff3") from codingQuarryPMPredictions4Tidy
-            .map { n, g, c, p -> [n, g] }
+        file("codingquarry.gff3") from codingQuarryPMPredictions
 
     output:
-    set val(name), file("codingquarrypm_tidy.gff3") into tidiedCodingQuarryPM
+    set val(name),
+        val("codingquarrypm"),
+        file("${name}_codingquarrypm_tidy.gff3") into tidiedCodingQuarryPM
 
     script:
     """
-      awk 'BEGIN {OFS="\\t"} \$8 == "-1" {\$8="0"} {print}' codingquarry.gff3 \
-    | awk 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
-    | gt gff3 -tidy -sort -retainids \
+      awk -F '\t' 'BEGIN {OFS="\\t"} \$8 == "-1" {\$8="0"} {print}' codingquarry.gff3 \
+    | awk -F '\t' 'BEGIN {OFS="\\t"} \$3 == "gene" {\$3="mRNA"} {print}' \
+    | gt gff3 -tidy -sort -retainids -setsource "CodingQuarryPM" \
     | canon-gff3 -i - \
-    > codingquarrypm_tidy.gff3
+    > "${name}_codingquarrypm_tidy.gff3"
     """
 }
 
 tidiedCodingQuarryPM.into {
     codingQuarryPMPredictions4Hints;
     codingQuarryPMPredictions4Stats;
+    codingQuarryPMPredictions4ExtractSeqs;
 }
 
 
@@ -2441,10 +2378,14 @@ process extractCodingQuarryPMHints {
     !params.notfungus
 
     input:
-    set val(name), file("codingquarry.gff3") from codingQuarryPMPredictions4Hints
+    set val(name),
+        val(analysis),
+        file("codingquarry.gff3") from codingQuarryPMPredictions4Hints
 
     output:
-    set val(name), file("${name}_codingquarrypm_hints.gff3") into codingQuarryPMHints
+    set val(name),
+        val(analysis),
+        file("${name}_codingquarrypm_hints.gff3") into codingQuarryPMHints
 
     script:
     """
@@ -2456,10 +2397,11 @@ process extractCodingQuarryPMHints {
         --exon-trim 6 \
         --intron-trim 0 \
         codingquarry.gff3 \
-    | awk '
+    | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
           sub(/group=/, "group=${name}_codingquarrypm_", \$9);
+          \$2 = "CodingQuarryPM";
           print
         }
       ' \
@@ -2611,8 +2553,6 @@ process extractGemomaCDSParts {
     """
 }
 
-gemomaCDSParts.set { gemomaCDSParts4AlignGemomaCDSParts }
-
 
 /*
  * Align proteins to genomes for Gemoma.
@@ -2633,7 +2573,7 @@ process alignGemomaCDSParts {
         file("proteins.fasta"),
         val(target_name),
         file(fasta),
-        file(faidx) from gemomaCDSParts4AlignGemomaCDSParts
+        file(faidx) from gemomaCDSParts
             .combine( genomes4AlignGemomaCDSParts )
             .filter { rn, c, a, p, tn, fa, fi -> rn != tn }
 
@@ -2783,25 +2723,33 @@ process combineGemomaPredictions {
         .collect { rn, pred -> "p=${rn} g=${pred.name}" }
         .join(' ')
 
+    get_utr = params.notfungus ? "true": "false"
+
     """
     mkdir -p gaf
     java -jar \${GEMOMA_JAR} CLI GAF \
       ${preds} \
       outdir=gaf
 
-    mkdir -p finalised
-    java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
-      g=${fasta} \
-      a=gaf/filtered_predictions.gff \
-      u=YES \
-      i=introns.gff \
-      c=STRANDED \
-      coverage_forward=coverage_forward.bedgraph \
-      coverage_reverse=coverage_reverse.bedgraph \
-      outdir=finalised \
-      rename=NO
+    if ${get_utr}
+    then
+      mkdir -p finalised
+      java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
+        g=${fasta} \
+        a=gaf/filtered_predictions.gff \
+        i=introns.gff \
+        u=YES \
+        c=STRANDED \
+        coverage_forward=coverage_forward.bedgraph \
+        coverage_reverse=coverage_reverse.bedgraph \
+        outdir=finalised \
+        rename=NO
 
-    mv finalised/final_annotation.gff "${name}_gemoma.gff3"
+      mv finalised/final_annotation.gff "${name}_gemoma.gff3"
+    else
+      mv gaf/filtered_predictions.gff "${name}_gemoma.gff3"
+    fi
+
     rm -rf -- gaf finalised GeMoMa_temp
     """
 }
@@ -2828,30 +2776,23 @@ process tidyGemoma {
             .join(genomes4TidyGemoma, by: 0)
 
     output:
-    set val(name), file("gemoma_tidy.gff3") into tidiedGemoma
-    set val(name), file("gemoma_tidy.gff3") into gemomaPredictions4Stats
     set val(name),
         val("gemoma"),
-        file("gemoma.faa") into gemomaPredictions4Busco
+        file("gemoma_tidy.gff3") into tidiedGemomaPredictions
 
     script:
     """
-      gt gff3 -tidy -sort -retainids gemoma.gff3 \
+      gt gff3 -tidy -sort -retainids -setsource "GeMoMa" gemoma.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
     | canon-gff3 -i - \
-    > gemoma_tidy.gff3
-
-    gt extractfeat \
-      -type CDS \
-      -join \
-      -translate \
-      -retainids \
-      -gcode "${params.trans_table}" \
-      -matchdescstart \
-      -seqfile "${fasta}" \
-      gemoma_tidy.gff3 \
-    > gemoma.faa
+    > "${name}_gemoma_tidy.gff3"
     """
+}
+
+tidiedGemomaPredictions.into {
+    tidiedGemomaPredictions4Hints;
+    tidiedGemomaPredictions4Stats;
+    tidiedGemomaPredictions4ExtractSeqs;
 }
 
 
@@ -2867,30 +2808,61 @@ process extractGemomaHints {
     tag "${name}"
 
     input:
-    set val(name), file("gemoma.gff3") from tidiedGemoma
+    set val(name),
+        val(analysis),
+        file("gemoma.gff3") from tidiedGemomaPredictions4Hints
 
     output:
-    set val(name), file("${name}_gemoma_hints.gff3") into gemomaHints
+    set val(name),
+        val(analysis),
+        file("${name}_gemoma_hints.gff3") into gemomaHints
 
     script:
     """
-      gffpal hints \
+    awk -F '\t' '\$3 == "exon" || \$3 == "intron"' gemoma.gff3 \
+    | gffpal hints \
+        --source GEMOMA \
+        --group-level mRNA \
+        --priority 4 \
+        --exon-trim 9 \
+        --intron-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_gemoma_exon_", \$9);
+          print
+        }
+      ' \
+    > "exon_hints.gff3"
+
+
+    awk -F '\t' '\$3 == "CDS" ||
+         \$3 == "three_prime_UTR" ||
+         \$3 == "five_prime_UTR" ||
+         \$3 == "start_codon" ||
+         \$3 == "stop_codon" ||
+         \$3 == "mRNA"' \
+      gemoma.gff3 \
+    | gffpal hints \
         --source GEMOMA \
         --group-level mRNA \
         --priority 4 \
         --cds-trim 6 \
-        --exon-trim 6 \
         --utr-trim 9 \
-        --intron-trim 0 \
-        gemoma.gff3 \
-    | awk '
+        - \
+    | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
-          sub(/group=/, "group=${name}_gemoma_", \$9);
+          sub(/group=/, "group=${name}_gemoma_cds_", \$9);
           print
         }
       ' \
-    > "${name}_gemoma_hints.gff3"
+    > "cds_hints.gff3"
+
+    cat exon_hints.gff3 cds_hints.gff3 \
+    | awk -F '\t' 'BEGIN {OFS="\\t"} {\$2 = "GeMoMa"; print}' \
+    > ${name}_gemoma_hints.gff3
     """
 }
 
@@ -3013,12 +2985,18 @@ process runAugustusDenovo {
 
 
 augustusRnaseqHints4JoinHints
-    .map { n, rg, i -> [n, i] }
-    .mix(spalnTranscriptHints, spalnProteinHints, exonerateRemoteProteinHints)
-    .into {
-        augustusExtrinsicHints4Hints;
-        augustusExtrinsicHints4Preds;
-    }
+    .map { n, rg, i -> [n, "introns", i] }
+    .mix(
+        spalnTranscriptHints,
+        spalnProteinHints,
+        exonerateRemoteProteinHints,
+        gemomaHints,
+        pasaHints,
+    )
+    .tap { augustusExtrinsicHints4Preds }
+    .map { n, a, h -> [n, h] }
+    .groupTuple(by: 0)
+    .set { augustusExtrinsicHints4Hints }
 
 
 /*
@@ -3038,11 +3016,7 @@ process runAugustusHints {
         val(strand),
         file(fasta),
         file("*hints") from genomes4RunAugustusHints
-            .combine(
-                augustusExtrinsicHints4Hints
-                    .groupTuple(by: 0),
-                by: 0
-            )
+            .combine(augustusExtrinsicHints4Hints, by: 0)
 
     file "augustus_config" from augustusConfig
     file "extrinsic.cfg" from augustusHintWeights
@@ -3067,16 +3041,25 @@ process runAugustusHints {
     }
 
     is_utr = params.augustus_utr ? "true" : "false"
+    is_fungus = params.notfungus ? "false" : "true"
 
     """
     export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
     perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
 
-    if ${is_utr}
+    if ${is_utr} && ${is_fungus}
+    then
+      # Gemoma doesn't do fungal utrs well.
+      cat *hints \
+      | awk -F '\t' '! (\$2 == "GeMoMa" && (\$3 == "exon" || \$3 == "UTRpart"))' \
+      > hints.gff
+    elif ${is_utr} && ! ${is_fungus}
     then
       cat *hints > hints.gff
     else
-      cat *hints | awk '\$3 != "exonpart" && \$3 != "exon"' > hints.gff
+      cat *hints \
+      | awk -F '\t' '\$3 != "exonpart" && \$3 != "exon" && \$3 != "UTRpart"' \
+      > hints.gff
     fi
 
     getLinesMatching.pl seqids.txt 1 < hints.gff > hints_filtered.gff
@@ -3130,38 +3113,26 @@ process joinAugustusChunks {
         val(paramset),
         file("${name}_${paramset}.gff3") into augustusJoinedChunks
 
-    set val(name),
-        val(paramset),
-        file("${name}_${paramset}.gff3") into augustusJoinedChunks4Stats
-
-    set val(name),
-        val(paramset),
-        file("${name}_${paramset}.gff3") into augustusJoinedChunks4Busco
-
     script:
     """
     for f in *chunks.gff
     do
         awk -F '\t' 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
       | grep -v "^#" \
-      | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
+      | gt gff3 -tidy -sort -setsource "augustus" -o \${f}_tidied.gff3 -
     done
 
       gt merge -tidy *_tidied.gff3 \
     | canon-gff3 -i - \
     > "${name}_${paramset}.gff3"
-
-    gt extractfeat \
-      -type CDS \
-      -join \
-      -translate \
-      -retainids \
-      -gcode "${params.trans_table}" \
-      -matchdescstart \
-      -seqfile "${fasta}" \
-      "${name}_${paramset}.gff3" \
-    > "${name}_${paramset}.faa"
     """
+}
+
+
+augustusJoinedChunks.into {
+    augustusJoinedChunks4Stats;
+    augustusJoinedChunks4Hints;
+    augustusJoinedChunks4ExtractSeqs;
 }
 
 
@@ -3176,12 +3147,14 @@ process extractAugustusHintsHints {
     tag "${name}"
 
     input:
-    set val(name), file("augustus.gff3") from augustusJoinedChunks
-        .filter { n, p, g -> p == "augustus_hints" }
-        .map { n, p, g -> [n, g] }
+    set val(name),
+        val(analysis),
+        file("augustus.gff3") from augustusJoinedChunks4Hints
+            .filter { n, p, g -> p == "augustus_hints" }
 
     output:
     set val(name),
+        val(analysis),
         file("${name}_augustus_hints_hints.gff3") into augustusHintsHints
 
     script:
@@ -3195,7 +3168,13 @@ process extractAugustusHintsHints {
         --utr-trim 9 \
         --intron-trim 0 \
         augustus.gff3 \
-    | awk 'BEGIN {OFS="\\t"} {sub(/group=/, "group=${name}_augustus_", \$9); print}' \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_augustus_", \$9);
+          \$2 = "augustus";
+          print
+        }' \
     > "${name}_augustus_hints_hints.gff3"
     """
 }
@@ -3203,12 +3182,11 @@ process extractAugustusHintsHints {
 augustusExtrinsicHints4Preds
     .mix(
         genemarkHints,
-        pasaHints.flatMap { n, p, t -> [[n, p], [n, t]] },
         codingQuarryHints,
         codingQuarryPMHints,
-        gemomaHints,
         augustusHintsHints,
     )
+    .map { n, a, h -> [n, h] }
     .groupTuple(by: 0)
     .set { augustusPredHints4Pred }
 
@@ -3300,13 +3278,8 @@ process joinAugustusPredsChunks {
 
     output:
     set val(name),
+        val("augustus_preds"),
         file("${name}_preds.gff3") into augustusJoinedPreds
-
-    set val(name),
-        val("preds"),
-        file("${name}_preds.faa") into augustusJoinedPreds4Busco
-
-    file "${name}_preds.fna"
 
     script:
     """
@@ -3314,35 +3287,18 @@ process joinAugustusPredsChunks {
     do
         awk -F '\t' 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
       | grep -v "^#" \
-      | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
+      | gt gff3 -tidy -sort -setsource "augustus" -o \${f}_tidied.gff3 -
     done
 
-    gt merge -tidy -o "${name}_preds.gff3" *_tidied.gff3
-
-    gt extractfeat \
-      -type CDS \
-      -join \
-      -translate \
-      -retainids \
-      -gcode "${params.trans_table}" \
-      -matchdescstart \
-      -seqfile "${fasta}" \
-      "${name}_preds.gff3" \
-    > "${name}_preds.faa"
-
-    gt extractfeat \
-      -type CDS \
-      -join \
-      -retainids \
-      -matchdescstart \
-      -seqfile "${fasta}" \
-      "${name}_preds.gff3" \
-    > "${name}_preds.fna"
+      gt merge -tidy *_tidied.gff3 \
+    | canon-gff3 -i - \
+    > "${name}_preds.gff3"
     """
 }
 
-augustusJoinedPreds.set {
-    augustusJoinedPreds4Stats
+augustusJoinedPreds.into {
+    augustusJoinedPreds4Stats;
+    augustusJoinedPreds4ExtractSeqs;
 }
 
 
@@ -3394,6 +3350,53 @@ process runBusco {
     """
 }
 
+
+pasaPredictions4ExtractSeqs
+    .mix(
+        genemarkPredictions4ExtractSeqs,
+        codingQuarryPredictions4ExtractSeqs,
+        codingQuarryPMPredictions4ExtractSeqs,
+        tidiedGemomaPredictions4ExtractSeqs,
+        augustusJoinedChunks4ExtractSeqs,
+        augustusJoinedPreds4ExtractSeqs
+    )
+    .set(gffs4ExtractSeqs)
+
+
+process extractSeqs {
+
+    label "genometools"
+    label "small_task"
+
+    publishDir "${params.outdir}/annotations/${name}"
+
+    input:
+    set val(name),
+        val(analysis),
+        file(gff),
+        file(fasta),
+        file(faidx) from gffs4ExtractSeqs
+            .combine(genomes4ExtractSeqs, by: 0)
+
+    output:
+    set val(name),
+        val(analysis),
+        file("${name}_${analysis}.faa") into extractedProteins
+
+    script:
+    """
+    gt extractfeat \
+      -type CDS \
+      -join \
+      -translate \
+      -retainids \
+      -gcode "${params.trans_table}" \
+      -matchdescstart \
+      -seqfile "${fasta}" \
+      "${gff3}" \
+    > "${name}_${analysis}.faa"
+    """
+}
 
 pasaPredictions4Busco.map { n, g, c, p -> [n, "transdecoder", p] }
     .mix(
