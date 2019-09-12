@@ -467,6 +467,7 @@ genomesWithKnownSites
         genomes4AssembleStringtie;
         genomes4MergeStringtie;
         genomes4RunPASA;
+        genomes4GetKnownStats;
     }
 
 
@@ -1722,6 +1723,7 @@ process tidyPasa {
 
     label "aegean"
     label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
 
@@ -1939,6 +1941,7 @@ process tidyGenemark {
 
     label "aegean"
     label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
 
@@ -2098,6 +2101,8 @@ process tidyCodingQuarry {
     label "small_task"
 
     tag "${name}"
+
+    publishDir "${params.outdir}/annotations/${name}"
 
     when:
     !params.notfungus
@@ -2389,6 +2394,8 @@ process tidyCodingQuarryPM {
 
     label "aegean"
     label "small_task"
+
+    publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
 
@@ -2809,6 +2816,8 @@ process tidyGemoma {
     label "aegean"
     label "small_task"
 
+    publishDir "${params.outdir}/annotations/${name}"
+
     tag "${name}"
 
     input:
@@ -2820,6 +2829,7 @@ process tidyGemoma {
 
     output:
     set val(name), file("gemoma_tidy.gff3") into tidiedGemoma
+    set val(name), file("gemoma_tidy.gff3") into gemomaPredictions4Stats
     set val(name),
         val("gemoma"),
         file("gemoma.faa") into gemomaPredictions4Busco
@@ -3080,10 +3090,9 @@ process runAugustusHints {
       --softmasking=on \
       --alternatives-from-evidence=true \
       --min_intron_len="${params.min_intron_hard}" \
-      --start=on \
-      --stop=on \
-      --introns=on \
-      --cds=on \
+      --start=off \
+      --stop=off \
+      --introns=off \
       --gff3=on \
       --outfile="out.gff" \
       --errfile=augustus.err \
@@ -3102,7 +3111,7 @@ augustusDenovoResults
  */
 process joinAugustusChunks {
 
-    label "genometools"
+    label "aegean"
     label "small_task"
     publishDir "${params.outdir}/annotations/${name}"
 
@@ -3123,17 +3132,24 @@ process joinAugustusChunks {
 
     set val(name),
         val(paramset),
+        file("${name}_${paramset}.gff3") into augustusJoinedChunks4Stats
+
+    set val(name),
+        val(paramset),
         file("${name}_${paramset}.gff3") into augustusJoinedChunks4Busco
 
     script:
     """
     for f in *chunks.gff
     do
-        awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+        awk -F '\t' 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+      | grep -v "^#" \
       | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
     done
 
-    gt merge -tidy -o "${name}_${paramset}.gff3" *_tidied.gff3
+      gt merge -tidy *_tidied.gff3 \
+    | canon-gff3 -i - \
+    > "${name}_${paramset}.gff3"
 
     gt extractfeat \
       -type CDS \
@@ -3296,7 +3312,7 @@ process joinAugustusPredsChunks {
     """
     for f in *chunks.gff
     do
-        awk 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
+        awk -F '\t' 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
       | grep -v "^#" \
       | gt gff3 -tidy -sort -o \${f}_tidied.gff3 -
     done
@@ -3324,6 +3340,11 @@ process joinAugustusPredsChunks {
     > "${name}_preds.fna"
     """
 }
+
+augustusJoinedPreds.set {
+    augustusJoinedPreds4Stats
+}
+
 
 // 6 If no genome alignment, run sibelliaz
 
@@ -3392,6 +3413,7 @@ pasaPredictions4Busco.map { n, g, c, p -> [n, "transdecoder", p] }
  * Evaluate gene predictions using protein comparisons with BUSCO sets.
  */
 process runBuscoProteins {
+
     label "busco"
     label "medium_task"
 
@@ -3422,5 +3444,49 @@ process runBuscoProteins {
       --lineage_path "lineage"
 
     mv "run_${name}" "${analysis}_busco"
+    """
+}
+
+
+pasaPredictions4Stats.map { n, g -> [n, "transdecoder", g] }
+    .mix(
+        genemarkPredictions4Stats.map { n, g -> [n, "genemark", g] },
+        codingQuarryPredictions4Stats.map { n, g -> [n, "codingquarry", g] },
+        codingQuarryPMPredictions4Stats.map { n, g -> [n, "codingquarrypm", g] },
+        gemomaPredictions4Stats.map { n, g -> [n, "gemoma", g] },
+        augustusJoinedChunks4Stats,
+        augustusJoinedPreds4Stats.map {n, g -> [n, "augustus_preds", g] },
+    )
+    .set { predictions4Stats }
+
+/*
+ *
+ */
+process getKnownStats {
+
+    label "aegean"
+    label "small_task"
+
+    tag "${name} - ${analysis}"
+
+    publishDir "${params.outdir}/qc/${name}"
+
+    input:
+    set val(name), val(analysis), file(preds), file(known) from predictions4Stats
+        .combine(genomes4GetKnownStats.map { n, f, i, g -> [n, g] }, by: 0)
+        .filter { n, a, p, k -> k.name != "WAS_NULL" }
+
+    output:
+    file "${name}_${analysis}_parseval.txt"
+
+    script:
+    """
+    parseval \
+      --nogff3 \
+      --outformat "text" \
+      --summary \
+      --outfile "${name}_${analysis}_parseval.txt" \
+      "${known}" \
+      "${preds}"
     """
 }
