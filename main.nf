@@ -1129,8 +1129,9 @@ process tidySpalnTranscripts {
     gt gff3 \
       -tidy \
       -retainids \
-      -addintrons <(grep -v "^#" transcripts.gff3) \
+      -addintrons \
       -setsource "spaln" \
+      <(grep -v "^#" transcripts.gff3) \
     > "tidied.gff3"
     """
 }
@@ -1153,6 +1154,7 @@ process extractSpalnTranscriptHints {
 
     output:
     set val(name),
+        val("spaln_transcripts"),
         file("${name}_spaln_transcript_hints.gff3") into spalnTranscriptHints
 
     script:
@@ -1381,7 +1383,9 @@ process extractSpalnProteinHints {
     set val(name), file("spaln.gff3") from spalnTidiedProteins
 
     output:
-    set val(name), file("${name}_spaln_protein_hints.gff3") into spalnProteinHints
+    set val(name),
+        val("spaln_proteins"),
+        file("${name}_spaln_protein_hints.gff3") into spalnProteinHints
 
     script:
     """
@@ -1589,6 +1593,7 @@ process extractExonerateRemoteProteinHints {
 
     output:
     set val(name),
+        val("exonerate_proteins"),
         file("${name}_exonerate_remote_protein_hints.gff3") into exonerateRemoteProteinHints
 
     script:
@@ -1624,18 +1629,18 @@ process extractExonerateRemoteProteinHints {
 /*
  * Add the stringtie assembled and gmap aligned transcripts to the pasa input channel.
  */
-if ( params.fastq || params.crams ) {
+if ( params.notfungus && (params.fastq || params.crams) ) {
     genomes4RunPASA
         .join(stringtieMergedTranscripts4PASA, by: 0, remainder: true)
         .map { n, f, i, ks, sg ->
-            [ n, f, i, ks, !is_null(sg) ? sg : file("WAS_NULL") ]
+            [ n, f, i, ks, !is_null(sg) ? sg : file("SGT_WAS_NULL") ]
         }
         .join(gmapAlignedTranscripts4RunPASA, by: 0, remainder: true)
         .set { processed4RunPASA }
 
 } else {
     genomes4RunPASA
-        .map { n, f, i, ks -> [ n, gf, gi, ks, file("WAS_NULL") ]}
+        .map { n, f, i, ks -> [ n, f, i, ks, file("SGT_WAS_NULL") ]}
         .join(gmapAlignedTranscripts4RunPASA, by: 0, remainder: true)
         .set { processed4RunPASA }
 }
@@ -1647,7 +1652,7 @@ if ( params.fastq || params.crams ) {
 process runPASA {
 
     label "pasa"
-    label "medium_task"
+    label "small_task"
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -1673,7 +1678,7 @@ process runPASA {
     // Don't use stringtie if it is fungus
     // Stringtie and cufflinks tend to merge overlapping features,
     // which doesn't work well for organisms with high gene density.
-    def use_stringtie = (stringtie_gtf.name == "WAS_NULL" || !params.notfungus) ? '' : "--trans_gtf ${stringtie_gtf} "
+    def use_stringtie = (stringtie_gtf.name == "SGT_WAS_NULL" || !params.notfungus) ? '' : "--trans_gtf ${stringtie_gtf} "
     def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
     // Transdecoder doesn't support standard integer based table access.
@@ -1733,7 +1738,7 @@ process tidyPasa {
     """
     gt gff3 -tidy -sort -retainids -setsource "TransDecoder" pasa.gff3 \
     | canon-gff3 -i - \
-    > pasa_tidy.gff3
+    > "${name}_pasa_tidy.gff3"
     """
 }
 
@@ -1783,7 +1788,7 @@ process extractPasaHints {
           print
         }
       ' \
-    > "${name}_pasa_hints.gff3"
+    > "pasa_hints.gff3"
 
     awk -F '\t' '\$3 != "exon" && \$3 != "intron"' pasa.gff3 \
     | gffpal hints \
@@ -1801,7 +1806,7 @@ process extractPasaHints {
           print
         }
       ' \
-    > "${name}_transdecoder_hints.gff3"
+    > "transdecoder_hints.gff3"
 
     cat pasa_hints.gff3 transdecoder_hints.gff3 > "${name}_pasa_hints.gff3"
     """
@@ -2063,8 +2068,8 @@ process runCodingQuarry {
 
     mv out/DubiousSet.gff3 "${name}_codingquarry_dubiousset.gff3"
     mv out/PredictedPass.gff3 "${name}_codingquarry.gff3"
-    mv out/Predicted_CDS.fa "${name}_codingquarry_cds.fna"
-    mv out/Predicted_Proteins.faa "${name}_codingquarry_proteins.faa"
+    mv out/Predicted_CDS.fa "${name}_codingquarry.fna"
+    mv out/Predicted_Proteins.faa "${name}_codingquarry.faa"
     mv out/fusions.txt "${name}_codingquarry_fusions.txt"
     mv out/overlapReport.txt "${name}_codingquarry_overlapreport.txt"
 
@@ -2134,10 +2139,14 @@ process extractCodingQuarryHints {
     !params.notfungus
 
     input:
-    set val(name), file("codingquarry.gff3") from codingQuarryPredictions4Hints
+    set val(name),
+        val(analysis),
+        file("codingquarry.gff3") from codingQuarryPredictions4Hints
 
     output:
-    set val(name), file("${name}_codingquarry_hints.gff3") into codingQuarryHints
+    set val(name),
+        val(analysis),
+        file("${name}_codingquarry_hints.gff3") into codingQuarryHints
 
     script:
     """
@@ -2150,7 +2159,7 @@ process extractCodingQuarryHints {
         --intron-trim 0 \
         -- \
         codingquarry.gff3 \
-    | awk -F '\t' '
+    | awk -F '\\t' '
         BEGIN {OFS="\\t"}
         {
           sub(/group=/, "group=${name}_codingquarry_", \$9);
@@ -2778,7 +2787,7 @@ process tidyGemoma {
     output:
     set val(name),
         val("gemoma"),
-        file("gemoma_tidy.gff3") into tidiedGemomaPredictions
+        file("${name}_gemoma_tidy.gff3") into tidiedGemomaPredictions
 
     script:
     """
@@ -2983,7 +2992,6 @@ process runAugustusDenovo {
     """
 }
 
-
 augustusRnaseqHints4JoinHints
     .map { n, rg, i -> [n, "introns", i] }
     .mix(
@@ -3128,7 +3136,6 @@ process joinAugustusChunks {
     """
 }
 
-
 augustusJoinedChunks.into {
     augustusJoinedChunks4Stats;
     augustusJoinedChunks4Hints;
@@ -3137,7 +3144,6 @@ augustusJoinedChunks.into {
 
 
 /*
- */
 process extractAugustusHintsHints {
 
     label "gffpal"
@@ -3189,10 +3195,10 @@ augustusExtrinsicHints4Preds
     .map { n, a, h -> [n, h] }
     .groupTuple(by: 0)
     .set { augustusPredHints4Pred }
+ */
 
 
 /*
- */
 process runAugustusPreds {
 
     label "augustus"
@@ -3255,10 +3261,10 @@ process runAugustusPreds {
       "${fasta}"
     """
 }
+ */
 
 
 /*
- */
 process joinAugustusPredsChunks {
 
     label "genometools"
@@ -3300,6 +3306,7 @@ augustusJoinedPreds.into {
     augustusJoinedPreds4Stats;
     augustusJoinedPreds4ExtractSeqs;
 }
+ */
 
 
 // 6 If no genome alignment, run sibelliaz
@@ -3350,7 +3357,6 @@ process runBusco {
     """
 }
 
-
 pasaPredictions4ExtractSeqs
     .mix(
         genemarkPredictions4ExtractSeqs,
@@ -3358,11 +3364,13 @@ pasaPredictions4ExtractSeqs
         codingQuarryPMPredictions4ExtractSeqs,
         tidiedGemomaPredictions4ExtractSeqs,
         augustusJoinedChunks4ExtractSeqs,
-        augustusJoinedPreds4ExtractSeqs
     )
-    .set(gffs4ExtractSeqs)
+    .set { gffs4ExtractSeqs }
 
 
+/*
+ *
+ */
 process extractSeqs {
 
     label "genometools"
@@ -3373,7 +3381,7 @@ process extractSeqs {
     input:
     set val(name),
         val(analysis),
-        file(gff),
+        file(gff3),
         file(fasta),
         file(faidx) from gffs4ExtractSeqs
             .combine(genomes4ExtractSeqs, by: 0)
@@ -3381,7 +3389,11 @@ process extractSeqs {
     output:
     set val(name),
         val(analysis),
-        file("${name}_${analysis}.faa") into extractedProteins
+        file("${name}_${analysis}_tidy.faa") into extractedProteins
+
+    set val(name),
+        val(analysis),
+        file("${name}_${analysis}_tidy.fna") into extractedCDSs
 
     script:
     """
@@ -3394,22 +3406,19 @@ process extractSeqs {
       -matchdescstart \
       -seqfile "${fasta}" \
       "${gff3}" \
-    > "${name}_${analysis}.faa"
+    > "${name}_${analysis}_tidy.faa"
+
+    gt extractfeat \
+      -type CDS \
+      -join \
+      -retainids \
+      -gcode "${params.trans_table}" \
+      -matchdescstart \
+      -seqfile "${fasta}" \
+      "${gff3}" \
+    > "${name}_${analysis}_tidy.fna"
     """
 }
-
-pasaPredictions4Busco.map { n, g, c, p -> [n, "transdecoder", p] }
-    .mix(
-        genemarkPredictions4Busco,
-        codingQuarryPredictions4Busco
-            .map { n, g, c, p, d, f, o -> [n, "codingquarry", p] },
-        codingQuarryPMPredictions4Busco
-            .map { n, g, c, p -> [n, "codingquarrypm", p] },
-        gemomaPredictions4Busco,
-        augustusJoinedChunks4Busco,
-        augustusJoinedPreds4Busco
-    )
-    .set { proteins4Busco }
 
 
 /*
@@ -3428,7 +3437,7 @@ process runBuscoProteins {
     params.busco_lineage
 
     input:
-    set val(name), val(analysis), file(fasta) from proteins4Busco
+    set val(name), val(analysis), file(fasta) from extractedProteins
     file "lineage" from buscoLineage
     file "augustus_config" from augustusConfig
 
@@ -3450,21 +3459,20 @@ process runBuscoProteins {
     """
 }
 
-
+/*
 pasaPredictions4Stats.map { n, g -> [n, "transdecoder", g] }
     .mix(
         genemarkPredictions4Stats.map { n, g -> [n, "genemark", g] },
         codingQuarryPredictions4Stats.map { n, g -> [n, "codingquarry", g] },
         codingQuarryPMPredictions4Stats.map { n, g -> [n, "codingquarrypm", g] },
-        gemomaPredictions4Stats.map { n, g -> [n, "gemoma", g] },
+        tidiedGemomaPredictions4Stats.map { n, g -> [n, "gemoma", g] },
         augustusJoinedChunks4Stats,
         augustusJoinedPreds4Stats.map {n, g -> [n, "augustus_preds", g] },
     )
     .set { predictions4Stats }
 
-/*
+
  *
- */
 process getKnownStats {
 
     label "aegean"
@@ -3493,3 +3501,4 @@ process getKnownStats {
       "${preds}"
     """
 }
+ */
