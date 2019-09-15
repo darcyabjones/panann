@@ -3125,9 +3125,17 @@ process joinAugustusChunks {
     """
     for f in *chunks.gff
     do
-        awk -F '\t' 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
-      | grep -v "^#" \
-      | gt gff3 -tidy -sort -setsource "augustus" -o \${f}_tidied.gff3 -
+      awk -F '\\t' '
+        BEGIN {OFS="\\t"}
+        \$3 == "transcript" {\$3="mRNA"}
+        \$0 !~ /^#/ {print}
+      ' "\${f}" \
+      > "\${f}.tmp"
+
+      if [ -s "\${f}.tmp" ]
+      then
+        gt gff3 -tidy -sort -setsource "augustus" -o "\${f}_tidied.gff3" "\${f}.tmp"
+      fi
     done
 
       gt merge -tidy *_tidied.gff3 \
