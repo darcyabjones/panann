@@ -100,6 +100,10 @@ GFFPAL_TAG=v0.0.2
 GFFPAL_REPO=https://github.com/darcyabjones/gffpal.git
 GFFPAL_PREFIX_ARG=$(INSTALL_BASE)/gffpal/$(GFFPAL_TAG)
 
+SEQTK_COMMIT=ca4785c
+SEQTK_REPO=https://github.com/lh3/seqtk.git
+SEQTK_PREFIX_ARG=$(INSTALL_BASE)/seqtk/$(SEQTK_COMMIT)
+
 
 AUGUSTUS_COMMIT=8b1b14a7489e4545e89c8725dc33268f6c2a9117
 AUGUSTUS_REPO=https://github.com/Gaius-Augustus/Augustus.git
@@ -147,8 +151,21 @@ KERAS_VERSION=2.2.4
 KERAS_PREFIX_ARG=$(INSTALL_BASE)/keras/$(KERAS_VERSION)
 
 
-GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal
-ALIGNMENT=spaln gmap mmseqs
+SIBELIAZ_COMMIT=c9e2257
+SIBELIAZ_REPO=https://github.com/medvedevgroup/SibeliaZ.git
+SIBELIAZ_PREFIX_ARG=$(INSTALL_BASE)/sibeliaz/$(SIBELIAZ_COMMIT)
+
+SKMER_COMMIT=d6f7c23
+SKMER_REPO=https://github.com/shahab-sarmashghi/Skmer.git
+SKMER_PREFIX_ARG=$(INSTALL_BASE)/skmer/$(SKMER_COMMIT)
+SKMER_PREFIX=$(SKMER_PREFIX_ARG)
+
+MASH_VERSION=v2.2
+MASH_URL=https://github.com/marbl/Mash/releases/download/v2.2/mash-Linux64-v2.2.tar
+
+
+GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal seqtk
+ALIGNMENT=spaln gmap mmseqs sibeliaz
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
 OPEN=$(GENERAL) $(ALIGNMENT) $(RNASEQ) $(ANNOTATION)
@@ -199,12 +216,12 @@ clean:
 	docker stop $(shell docker ps -aq) || true
 	docker rm $(shell docker ps -a -q) || true
 	docker rmi $(shell docker images -q) || true
-	singularity cache clean -a
+	singularity cache clean --force
 	rm -rf -- docker
 
 tidy:
 	# Just removes untagged images to free up space
-	singularity cache clean -a
+	singularity cache clean --force
 	docker image prune -f
 
 # Generic rules
@@ -240,6 +257,16 @@ docker/base: base.Dockerfile
 
 
 docker/python3: python3.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/r: r.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
 	  --file $< \
@@ -456,6 +483,19 @@ docker/gffpal: gffpal.Dockerfile docker/base
 	  --build-arg GFFPAL_TAG="$(GFFPAL_TAG)" \
 	  --build-arg GFFPAL_REPO="$(GFFPAL_REPO)" \
 	  --build-arg GFFPAL_PREFIX_ARG="$(GFFPAL_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/seqtk: seqtk.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg SEQTK_COMMIT="$(SEQTK_COMMIT)" \
+	  --build-arg SEQTK_REPO="$(SEQTK_REPO)" \
+	  --build-arg SEQTK_PREFIX_ARG="$(SEQTK_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
@@ -701,6 +741,40 @@ docker/deepsig: deepsig.Dockerfile docker/base
 	  --build-arg TENSORFLOW_PREFIX_ARG="$(TENSORFLOW_PREFIX_ARG)" \
 	  --build-arg KERAS_VERSION="$(KERAS_VERSION)" \
 	  --build-arg KERAS_PREFIX_ARG="$(KERAS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/sibeliaz: sibeliaz.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg SIBELIAZ_COMMIT="$(SIBELIAZ_COMMIT)" \
+	  --build-arg SIBELIAZ_REPO="$(SIBELIAZ_REPO)" \
+	  --build-arg SIBELIAZ_PREFIX_ARG="$(SIBELIAZ_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+
+docker/skmer: skmer.Dockerfile docker/base docker/jellyfish docker/seqtk
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg SKMER_COMMIT="$(SKMER_COMMIT)" \
+	  --build-arg SKMER_REPO="$(SKMER_REPO)" \
+	  --build-arg SKMER_PREFIX_ARG="$(SKMER_PREFIX_ARG)" \
+	  --build-arg MASH_VERSION="$(MASH_VERSION)" \
+	  --build-arg MASH_URL="$(MASH_URL)" \
+	  --build-arg JELLYFISH_IMAGE="$(call make_image_name,jellyfish)" \
+	  --build-arg JELLYFISH_VERSION="$(JELLYFISH_VERSION)" \
+	  --build-arg JELLYFISH_PREFIX_ARG="$(JELLYFISH_PREFIX_ARG)" \
+	  --build-arg SEQTK_IMAGE="$(call make_image_name,seqtk)" \
+	  --build-arg SEQTK_COMMIT="$(SEQTK_COMMIT)" \
+	  --build-arg SEQTK_PREFIX_ARG="$(SEQTK_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .

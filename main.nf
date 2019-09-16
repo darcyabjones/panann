@@ -437,6 +437,9 @@ genomesWithFaidx
         genomes4JoinAugustusChunks;
         genomes4JoinAugustusPredsChunks;
         genomes4ExtractSeqs;
+        genomes4RunSibeliaZ;
+        genomes4FindDistances;
+        genomes4PrepGenomes;
 }
 
 
@@ -2912,17 +2915,6 @@ if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusMultiStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
-        genomes4RunAugustusPreds;
-    }
-
-} else if ( !params.notfungus ) {
-    genomes4RunAugustusSingleStrand.into {
-        genomes4RunAugustusDenovo;
-        genomes4RunAugustusHints;
-    }
-
-    genomes4RunAugustusMultiStrand.set {
-        genomes4RunAugustusPreds
     }
 
 } else {
@@ -2930,7 +2922,6 @@ if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusSingleStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
-        genomes4RunAugustusPreds;
     }
 
 }
@@ -3001,7 +2992,7 @@ augustusRnaseqHints4JoinHints
         gemomaHints,
         pasaHints,
     )
-    .tap { augustusExtrinsicHints4Preds }
+    .tap { augustusExtrinsicHints4CPG }
     .map { n, a, h -> [n, h] }
     .groupTuple(by: 0)
     .set { augustusExtrinsicHints4Hints }
@@ -3146,180 +3137,208 @@ process joinAugustusChunks {
 
 augustusJoinedChunks.into {
     augustusJoinedChunks4Stats;
-    augustusJoinedChunks4Hints;
     augustusJoinedChunks4ExtractSeqs;
 }
 
 
+// 6 If no genome alignment, run sibelliaz
+
 /*
-process extractAugustusHintsHints {
+ */
+process addGenomeNameToFasta {
 
-    label "gffpal"
+    label "posix"
     label "small_task"
-    publishDir "${params.outdir}/hints/${name}"
 
-    tag "${name}"
+    tag { name }
 
     input:
-    set val(name),
-        val(analysis),
-        file("augustus.gff3") from augustusJoinedChunks4Hints
-            .filter { n, p, g -> p == "augustus_hints" }
+    set val(name), file(fasta), file(faidx) from genomes4RunSibeliaZ
 
     output:
-    set val(name),
-        val(analysis),
-        file("${name}_augustus_hints_hints.gff3") into augustusHintsHints
+    file "out.fasta" into genomesWithName
 
     script:
     """
-      gffpal hints \
-        --source AUGHINTS \
-        --group-level mRNA \
-        --priority 4 \
-        --cds-trim 6 \
-        --exon-trim 6 \
-        --utr-trim 9 \
-        --intron-trim 0 \
-        augustus.gff3 \
-    | awk -F '\t' '
-        BEGIN {OFS="\\t"}
-        {
-          sub(/group=/, "group=${name}_augustus_", \$9);
-          \$2 = "augustus";
-          print
-        }' \
-    > "${name}_augustus_hints_hints.gff3"
+    sed 's/^>/>${name}/' "${fasta}" > "out.fasta"
     """
 }
 
-augustusExtrinsicHints4Preds
-    .mix(
-        genemarkHints,
-        codingQuarryHints,
-        codingQuarryPMHints,
-        augustusHintsHints,
-    )
-    .map { n, a, h -> [n, h] }
-    .groupTuple(by: 0)
-    .set { augustusPredHints4Pred }
+
+/*
+ * Get MAF file for augustus CPG mode using sibeliaz
+ * TODO: split the pipeline up, some long steps don't use all cores, so we
+ * can save some compute time.
  */
+process runSibeliaZ {
+
+    label "sibeliaz"
+    label "big_task"
+
+    input:
+    file "*genomes.fasta" from genomes4RunSibeliaZ
+
+    output:
+    file "alignment.maf" into multipleGenomeAlignment
+    file "blocks_coords.gff"
+
+    script:
+    """
+    sibeliaz \
+      -k 18 \
+      -m 30 \
+      -t "${task.cpus}" \
+      -b 250 \
+      -a 150 \
+      -o outdir \
+      *genomes.fasta
+
+    mv outdir/alignments.maf ./
+    mv outdir/blocks_coords.gff ./
+    rmdir outdir
+    """
+}
+
+
+process combineHints {
+
+    label "posix"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file("*hints.gff") from augustusExtrinsicHints4CPG
+        .mix(codingQuarryHints, codingQuarryPMHints, genemarkHints)
+        .map { n, a, h -> [n, h] }
+        .groupTuple(by: 0)
+
+    output:
+    set val(name), file("${name}_hints.gff3") into combinedHints4CPG
+
+    script:
+    """
+    cat *hints.gff > "${name}_hints.gff3"
+    """
+}
+
+
+process findDistances {
+
+    label "skmer"
+    label "medium_task"
+
+    input:
+    set val(names), file(fastas) from genomes4FindDistances
+        .map { n, f, i -> [n, f] }
+        .collect()
+
+    output:
+    file "ref-dist-mat.txt" into distances
+
+    script:
+    def link_fastas = [names, fastas]
+        .transpose()
+        .collect { n, f -> "ln -sf ${f} genomes/${n}.fasta" }
+        .join('\n')
+
+    script:
+    """
+    mkdir genomes
+    ${link_fastas}
+
+    skmer reference genomes -k 28 -t -p "${task.cpus}"
+    rm -rf -- library
+    """
+}
 
 
 /*
-process runAugustusPreds {
+ */
+process distToTree {
+
+    label "R"
+    label "small_task"
+
+    input:
+    file "dists.tsv" from distances
+
+    output:
+    file "tree.nwk" into tree
+
+    script:
+    """
+    dist2tree.R -i dists.tsv -o tree.nwk
+    """
+}
+
+
+/*
+ */
+process prepGenomesForCPG {
 
     label "augustus"
     label "small_task"
 
-    tag "${name} - ${strand}"
-
-    when:
-    params.augustus_species
-
     input:
-    set val(name),
-        val(strand),
-        file(fasta),
-        file("*hints") from genomes4RunAugustusPreds
-            .combine(augustusPredHints4Pred, by: 0)
-
-    file "augustus_config" from augustusConfig
-    file "extrinsic.cfg" from augustusPredWeights
+    set val(names), file(fastas), file(gffs) from genomes4PrepGenomes
+        .join(combinedHints4CPG, by: 0)
+        .collect()
 
     output:
-    set val(name),
-        val(strand),
-        file("out.gff") into augustusPredsResults
+    set file("genomes.db"),
+        file("genomes.tsv"),
+        file("hints"),
+        file("genomes") into preppedGenomesForCPG
 
     script:
-    if ( strand == "forward" ) {
-        strand_param = "--strand=forward"
-    } else if ( strand == "reverse" ) {
-        strand_param = "--strand=backward"
-    } else {
-        strand_param = "--strand=both"
-    }
+    new File("hints.tsv") << [names, gffs]
+        .transpose()
+        .collect { n, g -> "${n}\thints/${g}" }
+        .join('\n') + '\n'
+
+    new File("genomes.tsv") << [names, fastas]
+        .transpose()
+        .collect { n, f -> "${n}\tgenomes/${f}" }
+        .join('\n') + '\n'
+
+    fasta_names = fastas.collect { it.name }.join(' ')
+    gffs_names = gffs.collect { it.name }.join(' ')
 
     """
-    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+    mkdir genomes
+    mkdir hints
 
-    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+    cp -L ${fasta_names} genomes
+    cp -L ${gffs_names} hints
 
-    cat *hints > hints.gff
-    getLinesMatching.pl seqids.txt 1 < hints.gff > hints_filtered.gff
-
-    augustus \
-      --species="${params.augustus_species}" \
-      --extrinsicCfgFile=extrinsic.cfg \
-      --hintsfile=hints_filtered.gff \
-      ${strand_param} \
-      --UTR=on \
-      --allow_hinted_splicesites="${params.valid_splicesites}" \
-      --softmasking=on \
-      --alternatives-from-evidence=true \
-      --min_intron_len="${params.min_intron_hard}" \
-      --start=on \
-      --stop=on \
-      --introns=on \
-      --cds=on \
-      --gff3=on \
-      --outfile="out.gff" \
-      --errfile=augustus.err \
-      "${fasta}"
-    """
-}
- */
-
-
-/*
-process joinAugustusPredsChunks {
-
-    label "genometools"
-    label "small_task"
-    publishDir "${params.outdir}/annotations/${name}"
-
-    tag "${name}"
-
-    input:
-    set val(name),
-        file("*chunks.gff"),
-        file(fasta),
-        file(faidx) from augustusPredsResults
-            .map { n, s, f -> [n, f] }
-            .groupTuple(by: 0)
-            .combine(genomes4JoinAugustusPredsChunks, by: 0)
-
-    output:
-    set val(name),
-        val("augustus_preds"),
-        file("${name}_preds.gff3") into augustusJoinedPreds
-
-    script:
-    """
-    for f in *chunks.gff
+    while read line
     do
-        awk -F '\t' 'BEGIN {OFS="\t"} \$3 == "transcript" {\$3="mRNA"} {print}' \${f} \
-      | grep -v "^#" \
-      | gt gff3 -tidy -sort -setsource "augustus" -o \${f}_tidied.gff3 -
-    done
+      species=\$(echo "\${line}" | cut -f 1)
+      genome=\$(echo "\${line}" | cut -f 2)
 
-      gt merge -tidy *_tidied.gff3 \
-    | canon-gff3 -i - \
-    > "${name}_preds.gff3"
+      load2sqlitedb \
+        --noIdx \
+        --species="\${species}" \
+        --dbaccess="genomes.db" \
+        "\${genome}"
+
+    done < genomes.tsv
+
+    while read line
+    do
+      species=\$(echo "\${line}" | cut -f 1)
+      hints=\$(echo "\${line}" | cut -f 2)
+
+      load2sqlitedb \
+        --noIdx \
+        --species="\${species}" \
+        --dbaccess="genomes.db" \
+        "\${hints}"
+    done < hints.tsv
     """
 }
 
-augustusJoinedPreds.into {
-    augustusJoinedPreds4Stats;
-    augustusJoinedPreds4ExtractSeqs;
-}
- */
-
-
-// 6 If no genome alignment, run sibelliaz
-
-// 7 Combine estimates using augustus.
 
 // 8 Screen proteins using database of TEs
 
