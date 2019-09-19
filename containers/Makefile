@@ -164,7 +164,7 @@ MASH_VERSION=v2.2
 MASH_URL=https://github.com/marbl/Mash/releases/download/v2.2/mash-Linux64-v2.2.tar
 
 
-GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal seqtk
+GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal seqtk skmer r
 ALIGNMENT=spaln gmap mmseqs sibeliaz
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker

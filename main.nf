@@ -127,6 +127,7 @@ params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 // The weighting config file for combining annotations from
 // multiple sources.
 params.augustus_pred_weights = "data/extrinsic_pred.cfg"
+params.augustus_cpg_weights = "data/extrinsic_cpg.cfg"
 
 
 // RNAseq params
@@ -298,6 +299,11 @@ Channel
     .fromPath(params.augustus_hint_weights, checkIfExists: true, type: "file")
     .first()
     .set { augustusHintWeights }
+
+Channel
+    .fromPath(params.augustus_cpg_weights, checkIfExists: true, type: "file")
+    .first()
+    .set { augustusCpgWeights }
 
 
 // Because augustus requires the config folder to be editable, it's easier
@@ -3160,7 +3166,7 @@ process addGenomeNameToFasta {
 
     script:
     """
-    sed 's/^>/>${name}/' "${fasta}" > "out.fasta"
+    sed 's/^>/>${name}./' "${fasta}" > "out.fasta"
     """
 }
 
@@ -3169,14 +3175,17 @@ process addGenomeNameToFasta {
  * Get MAF file for augustus CPG mode using sibeliaz
  * TODO: split the pipeline up, some long steps don't use all cores, so we
  * can save some compute time.
+ * TODO: make rmdir -rf because twopaco leaves stuff behind.
  */
 process runSibeliaZ {
 
     label "sibeliaz"
     label "big_task"
 
+    publishDir "${params.outdir}/genome_alignment"
+
     input:
-    file "*genomes.fasta" from genomes4RunSibeliaZ
+    file "*genomes.fasta" from genomesWithName.collect()
 
     output:
     file "alignment.maf" into multipleGenomeAlignment
@@ -3185,7 +3194,7 @@ process runSibeliaZ {
     script:
     """
     sibeliaz \
-      -k 18 \
+      -k 17 \
       -m 30 \
       -t "${task.cpus}" \
       -b 250 \
@@ -3193,7 +3202,7 @@ process runSibeliaZ {
       -o outdir \
       *genomes.fasta
 
-    mv outdir/alignments.maf ./
+    mv outdir/alignment.maf ./
     mv outdir/blocks_coords.gff ./
     rmdir outdir
     """
@@ -3214,11 +3223,11 @@ process combineHints {
         .groupTuple(by: 0)
 
     output:
-    set val(name), file("${name}_hints.gff3") into combinedHints4CPG
+    set val(name), file("${name}.gff3") into combinedHints4CPG
 
     script:
     """
-    cat *hints.gff > "${name}_hints.gff3"
+    cat *hints.gff > "${name}.gff3"
     """
 }
 
@@ -3229,17 +3238,16 @@ process findDistances {
     label "medium_task"
 
     input:
-    set val(names), file(fastas) from genomes4FindDistances
-        .map { n, f, i -> [n, f] }
+    file fastas from genomes4FindDistances
+        .map { n, f, i -> f }
         .collect()
 
     output:
     file "ref-dist-mat.txt" into distances
 
     script:
-    def link_fastas = [names, fastas]
-        .transpose()
-        .collect { n, f -> "ln -sf ${f} genomes/${n}.fasta" }
+    def link_fastas = fastas
+        .collect { f -> "cp -L ${f} genomes/${f.baseName}.fasta" }
         .join('\n')
 
     script:
@@ -3248,7 +3256,7 @@ process findDistances {
     ${link_fastas}
 
     skmer reference genomes -k 28 -t -p "${task.cpus}"
-    rm -rf -- library
+    rm -rf -- library genomes
     """
 }
 
@@ -3281,9 +3289,8 @@ process prepGenomesForCPG {
     label "small_task"
 
     input:
-    set val(names), file(fastas), file(gffs) from genomes4PrepGenomes
-        .join(combinedHints4CPG, by: 0)
-        .collect()
+    file fastas from genomes4PrepGenomes.collect { n, f, i -> f }
+    file gffs from combinedHints4CPG.collect { n, g -> g }
 
     output:
     set file("genomes.db"),
@@ -3292,15 +3299,13 @@ process prepGenomesForCPG {
         file("genomes") into preppedGenomesForCPG
 
     script:
-    new File("hints.tsv") << [names, gffs]
-        .transpose()
-        .collect { n, g -> "${n}\thints/${g}" }
-        .join('\n') + '\n'
+    gff_table = gffs
+        .collect { g -> "${g.baseName}\thints/${g.name}" }
+        .join('\n')
 
-    new File("genomes.tsv") << [names, fastas]
-        .transpose()
-        .collect { n, f -> "${n}\tgenomes/${f}" }
-        .join('\n') + '\n'
+    fasta_table = fastas
+        .collect { f -> "${f.baseName}\tgenomes/${f.name}" }
+        .join('\n')
 
     fasta_names = fastas.collect { it.name }.join(' ')
     gffs_names = gffs.collect { it.name }.join(' ')
@@ -3311,6 +3316,9 @@ process prepGenomesForCPG {
 
     cp -L ${fasta_names} genomes
     cp -L ${gffs_names} hints
+
+    echo "${gff_table}" > hints.tsv
+    echo "${fasta_table}" > genomes.tsv
 
     while read line
     do
@@ -3336,6 +3344,45 @@ process prepGenomesForCPG {
         --dbaccess="genomes.db" \
         "\${hints}"
     done < hints.tsv
+    """
+}
+
+
+process trainAugustusCPG {
+
+    label "augustus"
+    label "small_task"
+
+    input:
+    set file("genomes.db"),
+        file("genomes.tsv"),
+        file("hints"),
+        file("genomes"),
+        file("aln.maf"),
+        file("tree.nwk") from preppedGenomesForCPG
+            .combine(multipleGenomeAlignment)
+            .combine(tree)
+
+    file "cpg.cfg" from augustusCpgWeights
+
+    file "augustus_config" from augustusConfig
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+   
+    augustus \
+      --species="${params.augustus_species}" \
+      --softmasking=on \
+      --singlestrand=true \
+      --min_intron_len=${params.min_intron_hard} \
+      --allow_hinted_splicesites="${params.valid_splicesites}" \
+      --treefile=tree.nwk \
+      --alnfile=aln.maf \
+      --dbaccess=genomes.db \
+      --speciesfilenames=genomes.tsv \
+      --dbhints=true \
+      --extrinsicCfgFile=cpg.cfg
     """
 }
 

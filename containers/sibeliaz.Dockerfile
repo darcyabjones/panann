@@ -29,7 +29,7 @@ RUN  set -eu \
   && cd build \
   && cmake .. -DCMAKE_INSTALL_PREFIX="${SIBELIAZ_PREFIX}" \
   && make install \
-  && add_runtime_dep libtbb2
+  && add_runtime_dep libgomp1 libtbb2 time
 
 
 FROM "${IMAGE}"
