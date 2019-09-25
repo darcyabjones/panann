@@ -157,13 +157,13 @@ params.min_intron_soft = 20
 params.min_intron_hard = 5
 params.max_intron_hard = 15000
 params.star_novel_params = "--outSJfilterReads Unique " +
-     "--outSJfilterOverhangMin 15 6 6 6 " +
+     "--outSJfilterOverhangMin 30 12 12 12 " +
      "--outSJfilterCountUniqueMin 10 5 5 5 " +
-     "--outSJfilterDistToOtherSJmin 10 0 3 3 " +
+     "--outSJfilterDistToOtherSJmin 10 0 5 5 " +
      "--outSJfilterIntronMaxVsReadN 10 100 500 1000 5000 10000"
 params.star_align_params = "--outSJfilterReads All " +
-     "--outSJfilterCountUniqueMin 10 5 5 5 " +
-     "--outSJfilterIntronMaxVsReadN 5 500 5000"
+     "--outSJfilterCountUniqueMin 20 10 10 10 " +
+     "--outSJfilterIntronMaxVsReadN 10 15 20 30 50 100 500 1000"
 params.max_gene_hard = 20000
 
 params.spaln_species = "phaenodo"
@@ -279,6 +279,7 @@ if ( params.busco_lineage ) {
 }
 
 
+/*
 if ( params.genome_alignment ) {
     Channel
         .fromPath(params.genome_alignment, checkIfExists: true, type: "file")
@@ -288,6 +289,7 @@ if ( params.genome_alignment ) {
     // We can align it here or can do it later.
     genomeAlignment = false
 }
+*/
 
 
 Channel
@@ -441,7 +443,11 @@ genomesWithFaidx
         genomes4TidyGemoma;
         genomes4ChunkifyGenomes;
         genomes4JoinAugustusChunks;
-        genomes4JoinAugustusPredsChunks;
+        genomes4ExtractGemomaComparativeCDSParts;
+        genomes4AlignGemomaComparativeCDSParts;
+        genomes4RunGemomaComparative;
+        genomes4CombineGemomaComparative;
+        genomes4TidyGemomaComparative;
         genomes4ExtractSeqs;
         genomes4RunSibeliaZ;
         genomes4FindDistances;
@@ -740,8 +746,8 @@ process starFindNovelSpliceSites {
       ${extra_params} \
       --alignIntronMin ${min_intron_len} \
       --alignIntronMax ${max_intron_len} \
-      --alignSJoverhangMin 5 \
-      --alignSJDBoverhangMin 1 \
+      --alignSJoverhangMin 10 \
+      --alignSJDBoverhangMin 3 \
       --alignSoftClipAtReferenceEnds No \
       --outFileNamePrefix "${name}_${read_group}." \
       --readFilesIn "${r1_joined}" "${r2_joined}"
@@ -810,7 +816,7 @@ process starAlignReads {
       --alignIntronMin ${min_intron_len} \
       --alignIntronMax ${max_intron_len} \
       --alignSJoverhangMin 10 \
-      --alignSJDBoverhangMin 1 \
+      --alignSJDBoverhangMin 3 \
       --alignSoftClipAtReferenceEnds No \
       --outFilterType BySJout \
       --outFilterMultimapNmax 1 \
@@ -1754,6 +1760,7 @@ process tidyPasa {
 tidiedPasa.into {
     pasaPredictions4Hints;
     pasaPredictions4Stats;
+    pasaPredictions4Comparative;
     pasaPredictions4ExtractSeqs;
 }
 
@@ -2129,6 +2136,7 @@ process tidyCodingQuarry {
 tidiedCodingQuarry.into {
     codingQuarryPredictions4Hints;
     codingQuarryPredictions4Stats;
+    codingQuarryPredictions4Comparative;
     codingQuarryPredictions4ExtractSeqs;
 }
 
@@ -2377,6 +2385,7 @@ process tidyCodingQuarryPM {
 tidiedCodingQuarryPM.into {
     codingQuarryPMPredictions4Hints;
     codingQuarryPMPredictions4Stats;
+    codingQuarryPMPredictions4Comparative;
     codingQuarryPMPredictions4ExtractSeqs;
 }
 
@@ -2532,6 +2541,8 @@ process combineGemomaRnaseqHints {
 combinedGemomaRnaseqHints.into {
     combinedGemomaRnaseqHints4Run;
     combinedGemomaRnaseqHints4Combine;
+    combinedGemomaRnaseqHints4RunComparative;
+    combinedGemomaRnaseqHints4CombineComparative;
 }
 
 
@@ -3143,248 +3154,296 @@ process joinAugustusChunks {
 
 augustusJoinedChunks.into {
     augustusJoinedChunks4Stats;
+    augustusJoinedChunks4Comparative;
     augustusJoinedChunks4ExtractSeqs;
 }
 
 
-// 6 If no genome alignment, run sibelliaz
+// Run all-v-all gemoma
 
-/*
- */
-process addGenomeNameToFasta {
 
-    label "posix"
+pasaPredictions4Comparative
+    .mix(
+        codingQuarryPredictions4Comparative,
+        codingQuarryPMPredictions4Comparative,
+        augustusJoinedChunks4Comparative,
+    )
+    .set { gffs4ExtractComparative}
+
+
+process extractGemomaComparativeCDSParts {
+
+    label "gemoma"
     label "small_task"
 
-    tag { name }
+    tag "${name} - ${analysis}"
 
     input:
-    set val(name), file(fasta), file(faidx) from genomes4RunSibeliaZ
+    set val(name),
+        file(fasta),
+        file(faidx),
+        val(analysis),
+        file(gff) from genomes4ExtractGemomaComparativeCDSParts
+            .combine(gffs4ExtractComparative, by: 0)
 
     output:
-    file "out.fasta" into genomesWithName
+    set val(name),
+        val(analysis),
+        file("cds-parts.fasta"),
+        file("assignment.tabular"),
+        file("proteins.fasta") into gemomaComparativeCDSParts
 
     script:
     """
-    sed 's/^>/>${name}./' "${fasta}" > "out.fasta"
+    java -jar \${GEMOMA_JAR} CLI Extractor \
+      a=${gff} \
+      g=${fasta} \
+      p=true \
+      outdir=.
+
+    rm -rf -- GeMoMa_temp
+    rm protocol_Extractor.txt
     """
 }
 
 
 /*
- * Get MAF file for augustus CPG mode using sibeliaz
- * TODO: split the pipeline up, some long steps don't use all cores, so we
- * can save some compute time.
- * TODO: make rmdir -rf because twopaco leaves stuff behind.
+ * Align proteins to genomes for Gemoma.
+ * Do this separately as the gemoma pipeline
+ * currently crashes and we can control parallelism better.
  */
-process runSibeliaZ {
+process alignGemomaComparativeCDSParts {
 
-    label "sibeliaz"
-    label "big_task"
-
-    publishDir "${params.outdir}/genome_alignment"
-
-    input:
-    file "*genomes.fasta" from genomesWithName.collect()
-
-    output:
-    file "alignment.maf" into multipleGenomeAlignment
-    file "blocks_coords.gff"
-
-    script:
-    """
-    sibeliaz \
-      -k 17 \
-      -m 30 \
-      -t "${task.cpus}" \
-      -b 250 \
-      -a 150 \
-      -o outdir \
-      *genomes.fasta
-
-    mv outdir/alignment.maf ./
-    mv outdir/blocks_coords.gff ./
-    rmdir outdir
-    """
-}
-
-
-process combineHints {
-
-    label "posix"
-    label "small_task"
-
-    tag { name }
-
-    input:
-    set val(name), file("*hints.gff") from augustusExtrinsicHints4CPG
-        .mix(codingQuarryHints, codingQuarryPMHints, genemarkHints)
-        .map { n, a, h -> [n, h] }
-        .groupTuple(by: 0)
-
-    output:
-    set val(name), file("${name}.gff3") into combinedHints4CPG
-
-    script:
-    """
-    cat *hints.gff > "${name}.gff3"
-    """
-}
-
-
-process findDistances {
-
-    label "skmer"
+    label "mmseqs"
     label "medium_task"
 
+    tag "${target_name} - ${ref_name} - ${analysis}"
+
     input:
-    file fastas from genomes4FindDistances
-        .map { n, f, i -> f }
-        .collect()
+    set val(ref_name),
+        val(analysis),
+        file("cds-parts.fasta"),
+        file("assignment.tabular"),
+        file("proteins.fasta"),
+        val(target_name),
+        file(fasta),
+        file(faidx) from gemomaComparativeCDSParts
+            .combine( genomes4AlignGemomaComparativeCDSParts )
+            .filter { rn, an, cds, ass, pro, tn, fa, fi -> rn != tn }
 
     output:
-    file "ref-dist-mat.txt" into distances
-
-    script:
-    def link_fastas = fastas
-        .collect { f -> "cp -L ${f} genomes/${f.baseName}.fasta" }
-        .join('\n')
+    set val(target_name),
+        val(ref_name),
+        val(analysis),
+        file("cds-parts.fasta"),
+        file("matches.tsv"),
+        file("assignment.tabular"),
+        file("proteins.fasta") into alignedGemomaComparativeCDSParts
 
     script:
     """
-    mkdir genomes
-    ${link_fastas}
+    mkdir -p genome
+    # Stopping splitting by len is important. Otherwise scaffold names don't match.
+    mmseqs createdb "${fasta}" genome/db --dont-split-seq-by-len
 
-    skmer reference genomes -k 28 -t -p "${task.cpus}"
-    rm -rf -- library genomes
+    mkdir -p proteins
+    mmseqs createdb cds-parts.fasta proteins/db
+
+    mkdir -p alignment tmp
+    mmseqs search \
+      proteins/db \
+      genome/db \
+      alignment/db \
+      tmp \
+      --threads ${task.cpus} \
+      -e 100 \
+      --min-length 10 \
+      --comp-bias-corr 1 \
+      --split-mode 1 \
+      --realign \
+      --max-seqs 100 \
+      --mask 0 \
+      --orf-start-mode 1 \
+      --translation-table "${params.trans_table}" \
+      --use-all-table-starts
+
+    mmseqs convertalis \
+      proteins/db \
+      genome/db \
+      alignment/db \
+      matches.tsv \
+      --threads ${task.cpus} \
+      --format-mode 0 \
+      --format-output 'query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,empty,raw,nident,empty,empty,empty,qframe,tframe,qaln,taln,qlen,tlen'
+
+    rm -rf -- genome proteins alignment tmp
     """
 }
 
 
 /*
+ * Predict genes with gemoma for each known-sites set.
+ * Merges adjacent MMseqs matches and checks intron-exon boundaries.
  */
-process distToTree {
+process runGemomaComparative {
 
-    label "R"
+    label "gemoma"
     label "small_task"
 
+    tag "${target_name} - ${ref_name} - ${analysis}"
+
     input:
-    file "dists.tsv" from distances
+    set val(target_name),
+        file(fasta),
+        file(faidx),
+        val(ref_name),
+        val(analysis),
+        file("cds-parts.fasta"),
+        file("matches.tsv"),
+        file("assignment.tabular"),
+        file("proteins.fasta"),
+        file("introns.gff"),
+        file("coverage_forward.bedgraph"),
+        file("coverage_reverse.bedgraph") from genomes4RunGemomaComparative
+            .combine(alignedGemomaComparativeCDSParts, by: 0)
+            .combine(combinedGemomaRnaseqHints4RunComparative, by: 0)
+            .filter { tn, fa, fi, rn, an, cp, bl, a, p, i, fc, rc -> tn != rn }
 
     output:
-    file "tree.nwk" into tree
+    set val(target_name),
+        val(analysis),
+        val(ref_name),
+        file("${target_name}_${ref_name}_preds.gff3") into indivGemomaComparativePredictions
 
     script:
+    // option g= allows genetic code to be provided as some kind of file.
     """
-    dist2tree.R -i dists.tsv -o tree.nwk
+    mkdir -p out
+    java -jar \${GEMOMA_JAR} CLI GeMoMa \
+      s=matches.tsv \
+      t=${fasta} \
+      c=cds-parts.fasta \
+      a=assignment.tabular \
+      q=proteins.fasta \
+      outdir=out \
+      sort=true \
+      i=introns.gff \
+      r=2 \
+      coverage=STRANDED \
+      coverage_forward=coverage_forward.bedgraph \
+      coverage_reverse=coverage_reverse.bedgraph
+
+    mv out/predicted_annotation.gff "${target_name}_${ref_name}_preds.gff3"
+
+    rm -rf -- GeMoMa_temp out
     """
 }
 
 
-/*
- */
-process prepGenomesForCPG {
+process combineGemomaComparativePredictions {
 
-    label "augustus"
+    label "gemoma"
     label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag "${name} - ${analysis}"
 
     input:
-    file fastas from genomes4PrepGenomes.collect { n, f, i -> f }
-    file gffs from combinedHints4CPG.collect { n, g -> g }
+    set val(name),
+        val(analysis),
+        val(ref_names),
+        file(pred_gffs),
+        file(fasta),
+        file(faidx),
+        file("introns.gff"),
+        file("coverage_forward.bedgraph"),
+        file("coverage_reverse.bedgraph") from indivGemomaComparativePredictions
+            .groupTuple(by: [0, 1])
+            .join(genomes4CombineGemomaComparativeGemoma, by: 0, remainder: false)
+            .combine(combinedGemomaRnaseqHints4CombineComparative, by: 0)
 
     output:
-    set file("genomes.db"),
-        file("genomes.tsv"),
-        file("hints"),
-        file("genomes") into preppedGenomesForCPG
+    set val(name),
+        val(analysis),
+        file("${name}_gemoma_comparative_${analysis}.gff3") into gemomaComparativePredictions
 
     script:
-    gff_table = gffs
-        .collect { g -> "${g.baseName}\thints/${g.name}" }
-        .join('\n')
+    def ref_names_list = ref_names
+    def pred_gffs_list = (pred_gffs instanceof List) ? pred_gffs : [pred_gffs]
+    assert pred_gffs_list.size() == ref_names_list.size()
 
-    fasta_table = fastas
-        .collect { f -> "${f.baseName}\tgenomes/${f.name}" }
-        .join('\n')
+   // The format for GAF is a bit weird so do it here.
+   // transpose is like zip() and collect is like map.
+    def preds = [ref_names_list, pred_gffs_list]
+        .transpose()
+        .collect { rn, pred -> "p=${rn} g=${pred.name}" }
+        .join(' ')
 
-    fasta_names = fastas.collect { it.name }.join(' ')
-    gffs_names = gffs.collect { it.name }.join(' ')
+    get_utr = params.notfungus ? "true": "false"
 
     """
-    mkdir genomes
-    mkdir hints
+    mkdir -p gaf
+    java -jar \${GEMOMA_JAR} CLI GAF \
+      ${preds} \
+      outdir=gaf
 
-    cp -L ${fasta_names} genomes
-    cp -L ${gffs_names} hints
+    if ${get_utr}
+    then
+      mkdir -p finalised
+      java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
+        g=${fasta} \
+        a=gaf/filtered_predictions.gff \
+        i=introns.gff \
+        u=YES \
+        c=STRANDED \
+        coverage_forward=coverage_forward.bedgraph \
+        coverage_reverse=coverage_reverse.bedgraph \
+        outdir=finalised \
+        rename=NO
 
-    echo "${gff_table}" > hints.tsv
-    echo "${fasta_table}" > genomes.tsv
+      mv finalised/final_annotation.gff "${name}_gemoma_comparative_${analysis}.gff3"
+    else
+      mv gaf/filtered_predictions.gff "${name}_gemoma_comparative_${analysis}.gff3"
+    fi
 
-    while read line
-    do
-      species=\$(echo "\${line}" | cut -f 1)
-      genome=\$(echo "\${line}" | cut -f 2)
-
-      load2sqlitedb \
-        --noIdx \
-        --species="\${species}" \
-        --dbaccess="genomes.db" \
-        "\${genome}"
-
-    done < genomes.tsv
-
-    while read line
-    do
-      species=\$(echo "\${line}" | cut -f 1)
-      hints=\$(echo "\${line}" | cut -f 2)
-
-      load2sqlitedb \
-        --noIdx \
-        --species="\${species}" \
-        --dbaccess="genomes.db" \
-        "\${hints}"
-    done < hints.tsv
+    rm -rf -- gaf finalised GeMoMa_temp
     """
 }
 
 
-process trainAugustusCPG {
+process tidyComparativeGemoma {
 
-    label "augustus"
+    label "aegean"
     label "small_task"
 
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag "${name} - ${analysis}"
+
     input:
-    set file("genomes.db"),
-        file("genomes.tsv"),
-        file("hints"),
-        file("genomes"),
-        file("aln.maf"),
-        file("tree.nwk") from preppedGenomesForCPG
-            .combine(multipleGenomeAlignment)
-            .combine(tree)
+    set val(name),
+        val(analysis),
+        file("gemoma.gff3"),
+        file(fasta),
+        file(faidx) from gemomaComparativePredictions
+            .join(genomes4TidyGemomaComparative, by: 0)
 
-    file "cpg.cfg" from augustusCpgWeights
-
-    file "augustus_config" from augustusConfig
+    output:
+    set val(name),
+        val("gemoma_${analysis}"),
+        file("${name}_gemoma_comparative_${analysis}_tidy.gff3") into tidiedGemomaComparativePredictions
 
     script:
     """
-    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
-   
-    augustus \
-      --species="${params.augustus_species}" \
-      --softmasking=on \
-      --singlestrand=true \
-      --min_intron_len=${params.min_intron_hard} \
-      --allow_hinted_splicesites="${params.valid_splicesites}" \
-      --treefile=tree.nwk \
-      --alnfile=aln.maf \
-      --dbaccess=genomes.db \
-      --speciesfilenames=genomes.tsv \
-      --dbhints=true \
-      --extrinsicCfgFile=cpg.cfg
+      gt gff3 -tidy -sort -retainids -setsource "GeMoMa" gemoma.gff3 \
+    | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
+    | canon-gff3 -i - \
+    > "${name}_gemoma_comparative_${analysis}_tidy.gff3"
     """
 }
+
+
+
 
 
 // 8 Screen proteins using database of TEs
@@ -3533,7 +3592,6 @@ process runBuscoProteins {
     """
 }
 
-/*
 pasaPredictions4Stats.map { n, g -> [n, "transdecoder", g] }
     .mix(
         genemarkPredictions4Stats.map { n, g -> [n, "genemark", g] },
@@ -3546,7 +3604,9 @@ pasaPredictions4Stats.map { n, g -> [n, "transdecoder", g] }
     .set { predictions4Stats }
 
 
- *
+/*
+ * Get stats when we have known sites
+ */
 process getKnownStats {
 
     label "aegean"
@@ -3575,4 +3635,236 @@ process getKnownStats {
       "${preds}"
     """
 }
- */
+
+
+/*
+process addGenomeNameToFasta {
+
+    label "posix"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file(fasta), file(faidx) from genomes4RunSibeliaZ
+
+    output:
+    file "out.fasta" into genomesWithName
+
+    script:
+    """
+    sed 's/^>/>${name}./' "${fasta}" > "out.fasta"
+    """
+}
+
+
+ * Get MAF file for augustus CPG mode using sibeliaz
+ * TODO: split the pipeline up, some long steps don't use all cores, so we
+ * can save some compute time.
+ * TODO: make rmdir -rf because twopaco leaves stuff behind.
+process runSibeliaZ {
+
+    label "sibeliaz"
+    label "big_task"
+
+    publishDir "${params.outdir}/genome_alignment"
+
+    input:
+    file "*genomes.fasta" from genomesWithName.collect()
+
+    output:
+    file "alignment.maf" into multipleGenomeAlignment
+    file "blocks_coords.gff"
+
+    script:
+    """
+    sibeliaz \
+      -k 17 \
+      -m 30 \
+      -t "${task.cpus}" \
+      -b 250 \
+      -a 150 \
+      -o outdir \
+      *genomes.fasta
+
+    mv outdir/alignment.maf ./
+    mv outdir/blocks_coords.gff ./
+    rmdir outdir
+    """
+}
+
+
+process combineHints {
+
+    label "posix"
+    label "small_task"
+
+    tag { name }
+
+    input:
+    set val(name), file("*hints.gff") from augustusExtrinsicHints4CPG
+        .mix(codingQuarryHints, codingQuarryPMHints, genemarkHints)
+        .map { n, a, h -> [n, h] }
+        .groupTuple(by: 0)
+
+    output:
+    set val(name), file("${name}.gff3") into combinedHints4CPG
+
+    script:
+    """
+    cat *hints.gff > "${name}.gff3"
+    """
+}
+
+
+process findDistances {
+
+    label "skmer"
+    label "medium_task"
+
+    input:
+    file fastas from genomes4FindDistances
+        .map { n, f, i -> f }
+        .collect()
+
+    output:
+    file "ref-dist-mat.txt" into distances
+
+    script:
+    def link_fastas = fastas
+        .collect { f -> "cp -L ${f} genomes/${f.baseName}.fasta" }
+        .join('\n')
+
+    script:
+    """
+    mkdir genomes
+    ${link_fastas}
+
+    skmer reference genomes -k 28 -t -p "${task.cpus}"
+    rm -rf -- library genomes
+    """
+}
+
+
+process distToTree {
+
+    label "R"
+    label "small_task"
+
+    input:
+    file "dists.tsv" from distances
+
+    output:
+    file "tree.nwk" into tree
+
+    script:
+    """
+    dist2tree.R -i dists.tsv -o tree.nwk
+    """
+}
+
+
+process prepGenomesForCPG {
+
+    label "augustus"
+    label "small_task"
+
+    input:
+    file fastas from genomes4PrepGenomes.collect { n, f, i -> f }
+    file gffs from combinedHints4CPG.collect { n, g -> g }
+
+    output:
+    set file("genomes.db"),
+        file("genomes.tsv"),
+        file("hints"),
+        file("genomes") into preppedGenomesForCPG
+
+    script:
+    gff_table = gffs
+        .collect { g -> "${g.baseName}\thints/${g.name}" }
+        .join('\n')
+
+    fasta_table = fastas
+        .collect { f -> "${f.baseName}\tgenomes/${f.name}" }
+        .join('\n')
+
+    fasta_names = fastas.collect { it.name }.join(' ')
+    gffs_names = gffs.collect { it.name }.join(' ')
+
+    """
+    mkdir genomes
+    mkdir hints
+
+    cp -L ${fasta_names} genomes
+    cp -L ${gffs_names} hints
+
+    echo "${gff_table}" > hints.tsv
+    echo "${fasta_table}" > genomes.tsv
+
+    while read line
+    do
+      species=\$(echo "\${line}" | cut -f 1)
+      genome=\$(echo "\${line}" | cut -f 2)
+
+      load2sqlitedb \
+        --noIdx \
+        --species="\${species}" \
+        --dbaccess="genomes.db" \
+        "\${genome}"
+
+    done < genomes.tsv
+
+    while read line
+    do
+      species=\$(echo "\${line}" | cut -f 1)
+      hints=\$(echo "\${line}" | cut -f 2)
+
+      load2sqlitedb \
+        --noIdx \
+        --species="\${species}" \
+        --dbaccess="genomes.db" \
+        "\${hints}"
+    done < hints.tsv
+    """
+}
+
+
+process trainAugustusCPG {
+
+    label "augustus"
+    label "small_task"
+
+    input:
+    set file("genomes.db"),
+        file("genomes.tsv"),
+        file("hints"),
+        file("genomes"),
+        file("aln.maf"),
+        file("tree.nwk") from preppedGenomesForCPG
+            .combine(multipleGenomeAlignment)
+            .combine(tree)
+
+    file "cpg.cfg" from augustusCpgWeights
+
+    file "augustus_config" from augustusConfig
+
+    script:
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --softmasking=on \
+      --singlestrand=true \
+      --min_intron_len=${params.min_intron_hard} \
+      --allow_hinted_splicesites="${params.valid_splicesites}" \
+      --treefile=tree.nwk \
+      --alnfile=aln.maf \
+      --dbaccess=genomes.db \
+      --speciesfilenames=genomes.tsv \
+      --dbhints=true \
+      --extrinsicCfgFile=cpg.cfg
+    """
+}
+*/
+
