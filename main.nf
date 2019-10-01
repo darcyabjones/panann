@@ -3295,13 +3295,13 @@ process clusterGemomaCDSParts {
 
     input:
     set file("cdsparts.fasta"),
-        file("assignment.fasta"),
+        file("assignment.tsv"),
         file("proteins.fasta") from combinedGemomaComparativeCDSParts
 
     output:
     set file("protein_clusters.tsv"),
         file("cdsparts.fasta"),
-        file("assignment.fasta"),
+        file("assignment.tsv"),
         file("proteins.fasta") into clusteredGemomaComparativeCDSParts
 
     script:
@@ -3323,6 +3323,32 @@ process clusterGemomaCDSParts {
     """
 }
 
+
+process selectGemomaCDSParts {
+
+    label "python3"
+    label "small_task"
+
+    input:
+    set file("protein_clusters.tsv"),
+        file("old_cdsparts.fasta"),
+        file("old_assignment.tsv"),
+        file("old_proteins.fasta") from clusteredGemomaComparativeCDSParts
+
+    output:
+    set file("cdsparts.fasta"),
+        file("assignment.tsv"),
+        file("proteins.fasta") into selectedGemomaComparativeCDSParts
+
+    script:
+    """
+    select_comparative_proteins.py \
+      --clusters protein_clusters.tsv \
+      --assignments old_assignment.tsv \
+      --cdsparts old_cdsparts.fasta \
+      --proteins old_proteins.fasta
+    """
+}
 
 /*
  * Align proteins to genomes for Gemoma.
