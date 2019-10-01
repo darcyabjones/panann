@@ -220,6 +220,7 @@ if ( params.genomes ) {
     exit 1
 }
 
+
 if ( params.known_sites ) {
     Channel
         .fromPath(params.known_sites, checkIfExists: true, type: "file")
@@ -520,9 +521,12 @@ fastqNoGenome
 
 
 //
-// Indexing and preprocessing
+// STEP: Indexing and preprocessing
 //
 
+/*
+ * Download the univec database, which we use to filter transcripts.
+ */
 process getUnivec {
 
     label "download"
@@ -620,7 +624,7 @@ process indexRemoteProteins {
     mkdir -p tmp proteins
 
     mmseqs createdb "${fasta}" proteins/db
-    mmseqs createindex proteins/db tmp --threads "${task.cpus}"
+    # mmseqs createindex proteins/db tmp --threads "${task.cpus}"
 
     awk '
       /^>/ {
@@ -692,7 +696,7 @@ starIndices.into {
 
 
 //
-// RNAseq alignments and assembly
+// STEP: RNAseq alignments and assembly
 //
 
 /*
@@ -1005,7 +1009,7 @@ process trinityAssemble {
 
 
 //
-// 1 align transcripts to all genomes
+// STEP align transcripts and proteins to all genomes
 //
 
 
@@ -1075,6 +1079,8 @@ cleanedTranscripts.into {
 
 /*
  * Align transcripts using Spaln
+ * This performs pretty well, especially if you have a
+ * good set of consensus splice sites in their package.
  */
 process alignSpalnTranscripts {
     label "spaln"
@@ -1250,10 +1256,6 @@ process alignGmapTranscripts {
 gmapAlignedTranscripts.set { gmapAlignedTranscripts4RunPASA }
 
 
-//
-// 2 align proteins to all genomes
-//
-
 /*
  * Deduplicate identical user provided proteins and concat into single file.
  */
@@ -1425,7 +1427,7 @@ process extractSpalnProteinHints {
 
 /*
  * Quickly find genomic regions with matches to remote proteins.
- * This is an approximate method which we refine later.
+ * This is an approximate method which we refine later with exonerate.
  */
 process matchRemoteProteinsToGenome {
 
@@ -1522,7 +1524,7 @@ process clusterRemoteProteinsToGenome {
     script:
     // We extend the region to align against by this many basepairs.
     // This should be a bit longer than your absolute maximum expected gene length.
-    def exonerate_buffer_region = 20000
+    def exonerate_buffer_region = params.max_gene_hard
 
     """
     mkdir -p tmp
@@ -1638,11 +1640,13 @@ process extractExonerateRemoteProteinHints {
 
 
 //
-// 5 Run genemark, pasa, braker2, codingquarry on all genomes using previous steps.
+// STEP run individual predictions for each genome.
 //
 
 /*
  * Add the stringtie assembled and gmap aligned transcripts to the pasa input channel.
+ * The conditional block means that if we aren't using stringtie, pasa can start before the
+ * stringtie assemblies have completed.
  */
 if ( params.notfungus && (params.fastq || params.crams) ) {
     genomes4RunPASA
@@ -1955,7 +1959,7 @@ process runGenemark {
 
 
 /*
- * Convert genemark gtf to gff. Add introns etc. Extract protiens.
+ * Convert genemark gtf to gff. Add introns etc.
  */
 process tidyGenemark {
 
@@ -2041,6 +2045,7 @@ process extractGenemarkHints {
 
 /*
  * Predict genes using codingquarry
+ * Note that we still need the proteins extracted from here for codingquarrypm.
  */
 process runCodingQuarry {
 
@@ -2284,8 +2289,11 @@ if (params.signalp) {
  * CQPM also uses a lot of memory at a specific point, which can cause
  * random segfaults. We retry a few times, but if it keeps failing you
  * probably need to increase the available RAM.
+ *
  * Try setting `vm.overcommit_memory = 1` if you get segfaults before
  * reaching max memory.
+ *
+ * We also set the output to be optional because it requires > 500 proteins to train from.
  */
 process runCodingQuarryPM {
 
@@ -2497,6 +2505,8 @@ process extractGemomaRnaseqHints {
 
 
 /*
+ * Gemoma joins the rnaseq hints into one.
+ * I think it's basically just a cat | sort.
  */
 process combineGemomaRnaseqHints {
 
@@ -2587,6 +2597,8 @@ process extractGemomaCDSParts {
  * Align proteins to genomes for Gemoma.
  * Do this separately as the gemoma pipeline
  * currently crashes and we can control parallelism better.
+ * The output format order is important.
+ * I had to reverse engineer it from the GeMoMa jar binaries!
  */
 process alignGemomaCDSParts {
 
@@ -2617,7 +2629,7 @@ process alignGemomaCDSParts {
     script:
     """
     mkdir -p genome
-    # Stopping splitting by len is important. Otherwise scaffold names don't match.
+    # Stopping splitting by len is important. Otherwise scaffold names dont match.
     mmseqs createdb "${fasta}" genome/db --dont-split-seq-by-len
 
     mkdir -p proteins
@@ -2897,7 +2909,10 @@ process extractGemomaHints {
 
 
 /*
- *
+ * Augustus is pretty slow so we split it into ~16 roughly
+ * equally sized chunks to run in parallel.
+ * NB this doesnt split within chromosomes/scaffolds/contigs.
+ * They are kept intact
  */
 process chunkifyGenomes {
 
@@ -2945,6 +2960,9 @@ if ( params.augustus_utr && !params.notfungus ) {
 
 
 /*
+ * Augustus denovo is mosly just run for QC to see what it looks like
+ * without hints.
+ * We don't actually use the output for the final predictions.
  */
 process runAugustusDenovo {
 
@@ -3016,6 +3034,10 @@ augustusRnaseqHints4JoinHints
 
 
 /*
+ * Run augustus with hints for each chunked genome.
+ * If the genome is expected to have overlapping genes
+ * and we are predicting UTRs, then we run each strand separately.
+ * Without utrs, we can use the singlestrand parameter.
  */
 process runAugustusHints {
 
@@ -3107,6 +3129,7 @@ augustusDenovoResults
 
 
 /*
+ * This is a naive merge, it assumes that the contigs were intact.
  */
 process joinAugustusChunks {
 
@@ -3159,9 +3182,13 @@ augustusJoinedChunks.into {
 }
 
 
-// Run all-v-all gemoma
+//
+// STEP run comparative genomics prediction.
+//
 
-
+/*
+ * Merge predictions from individual genomes into channels.
+ */
 pasaPredictions4Comparative
     .mix(
         codingQuarryPredictions4Comparative,
@@ -3170,7 +3197,9 @@ pasaPredictions4Comparative
     )
     .set { gffs4ExtractComparative}
 
-
+/*
+ * Extract CDS parts for each individual prediction set.
+ */
 process extractGemomaComparativeCDSParts {
 
     label "gemoma"
@@ -3189,17 +3218,34 @@ process extractGemomaComparativeCDSParts {
     output:
     set val(name),
         val(analysis),
-        file("cds-parts.fasta"),
-        file("assignment.tabular"),
-        file("proteins.fasta") into gemomaComparativeCDSParts
+        file("${name}_${analysis}_cdsparts.fasta"),
+        file("${name}_${analysis}_assignment.tsv"),
+        file("${name}_${analysis}_proteins.fasta") into gemomaComparativeCDSParts
 
     script:
     """
+    awk -F'\\t' -v name="${name}" -v analysis="${analysis}" '
+      BEGIN { OFS="\\t" }
+      !/^#/ {
+        \$1=name"."\$1;
+        \$9=gensub(/Parent=([^;]+)/, "Parent="name"."analysis".\\\\1", "g", \$9);
+        \$9=gensub(/ID=([^;]+)/, "ID="name"."analysis".\\\\1", "g", \$9);
+        print
+      }
+    ' < "${gff}" \
+    > renamed.gff3
+
+    sed "/^>/s/^>/>${name}./" < "${fasta}" > renamed.fasta
+
     java -jar \${GEMOMA_JAR} CLI Extractor \
-      a=${gff} \
-      g=${fasta} \
+      a=renamed.gff3 \
+      g=renamed.fasta \
       p=true \
       outdir=.
+
+    mv cds-parts.fasta "${name}_${analysis}_cdsparts.fasta"
+    mv assignment.tabular "${name}_${analysis}_assignment.tsv"
+    mv proteins.fasta "${name}_${analysis}_proteins.fasta"
 
     rm -rf -- GeMoMa_temp
     rm protocol_Extractor.txt
@@ -3207,34 +3253,102 @@ process extractGemomaComparativeCDSParts {
 }
 
 
+process combineGemomaCDSParts {
+
+    label "posix"
+    label "small_task"
+
+    input:
+    file "*" from gemomaComparativeCDSParts
+           .map { n, a, c, t, p -> [c, t, p] }       
+           .collect()
+
+    output:
+    set file("cdsparts.fasta"),
+        file("assignment.tsv"),
+        file("proteins.fasta") into combinedGemomaComparativeCDSParts
+
+    script:
+    """
+    cat *_cdsparts.fasta > "cdsparts.fasta"
+    cat *_proteins.fasta > "proteins.fasta"
+
+    FIRST_FILE=1
+    for f in *_assignment.tsv;
+    do
+      if [ \${FIRST_FILE} == 1 ];
+      then
+        cat "\${f}" > assignment.tsv
+        FIRST_FILE=0
+      else
+        tail -n+2 "\${f}" >> assignment.tsv
+      fi
+    done 
+    """
+}
+
+
+process clusterGemomaCDSParts {
+
+    label "mmseqs"
+    label "medium_task"
+
+    input:
+    set file("cdsparts.fasta"),
+        file("assignment.fasta"),
+        file("proteins.fasta") from combinedGemomaComparativeCDSParts
+
+    output:
+    set file("protein_clusters.tsv"),
+        file("cdsparts.fasta"),
+        file("assignment.fasta"),
+        file("proteins.fasta") into clusteredGemomaComparativeCDSParts
+
+    script:
+    """
+    mkdir -p proteins protein_clusters tmp
+
+    mmseqs createdb proteins.fasta proteins/db
+    mmseqs cluster \
+      proteins/db \
+      protein_clusters/db \
+      tmp \
+      --threads "${task.cpus}" \
+      --min-seq-id 0.9 \
+      -c 0.95 \
+      --cov-mode 0 \
+      --cluster-mode 0
+
+    mmseqs createtsv proteins/db proteins/db protein_clusters/db protein_clusters.tsv
+    """
+}
+
+
 /*
  * Align proteins to genomes for Gemoma.
- * Do this separately as the gemoma pipeline
- * currently crashes and we can control parallelism better.
- */
+ * We currently still to this using each of the other genomes
+ * and prediction tools as a reference set.
+ * So this starts about n*n tasks.
+ * possibly we can combine the results from each genome, so we
+ * only have to run this for each prediction method.
 process alignGemomaComparativeCDSParts {
 
     label "mmseqs"
     label "medium_task"
 
-    tag "${target_name} - ${ref_name} - ${analysis}"
+    tag "${name}"
 
     input:
-    set val(ref_name),
-        val(analysis),
+    set val(name),
+        file(fasta),
+        file(faidx),
         file("cds-parts.fasta"),
         file("assignment.tabular"),
-        file("proteins.fasta"),
-        val(target_name),
-        file(fasta),
-        file(faidx) from gemomaComparativeCDSParts
-            .combine( genomes4AlignGemomaComparativeCDSParts )
-            .filter { rn, an, cds, ass, pro, tn, fa, fi -> rn != tn }
+        file("proteins.fasta") from genomes4AlignGemomaComparativeCDSParts
+            .combine( combinedGemomaComparativeCDSParts )
 
     output:
-    set val(target_name),
-        val(ref_name),
-        val(analysis),
+    set val(name),
         file("cds-parts.fasta"),
         file("matches.tsv"),
         file("assignment.tabular"),
@@ -3279,25 +3393,23 @@ process alignGemomaComparativeCDSParts {
     rm -rf -- genome proteins alignment tmp
     """
 }
+ */
 
 
 /*
- * Predict genes with gemoma for each known-sites set.
- * Merges adjacent MMseqs matches and checks intron-exon boundaries.
- */
+ * Predict genes with gemoma for each combination of "ref"
+ * isolate and prediction method.
 process runGemomaComparative {
 
     label "gemoma"
-    label "small_task"
+    label "medium_task"
 
-    tag "${target_name} - ${ref_name} - ${analysis}"
+    tag "${name}"
 
     input:
-    set val(target_name),
+    set val(name),
         file(fasta),
         file(faidx),
-        val(ref_name),
-        val(analysis),
         file("cds-parts.fasta"),
         file("matches.tsv"),
         file("assignment.tabular"),
@@ -3307,13 +3419,10 @@ process runGemomaComparative {
         file("coverage_reverse.bedgraph") from genomes4RunGemomaComparative
             .combine(alignedGemomaComparativeCDSParts, by: 0)
             .combine(combinedGemomaRnaseqHints4RunComparative, by: 0)
-            .filter { tn, fa, fi, rn, an, cp, bl, a, p, i, fc, rc -> tn != rn }
 
     output:
-    set val(target_name),
-        val(analysis),
-        val(ref_name),
-        file("${target_name}_${ref_name}_preds.gff3") into indivGemomaComparativePredictions
+    set val(name),
+        file("${name}_preds.gff3") into indivGemomaComparativePredictions
 
     script:
     // option g= allows genetic code to be provided as some kind of file.
@@ -3333,58 +3442,55 @@ process runGemomaComparative {
       coverage_forward=coverage_forward.bedgraph \
       coverage_reverse=coverage_reverse.bedgraph
 
-    mv out/predicted_annotation.gff "${target_name}_${ref_name}_preds.gff3"
+    mv out/predicted_annotation.gff "${name}_preds.gff3"
 
     rm -rf -- GeMoMa_temp out
     """
 }
+ */
 
 
+/*
+ * Merge the individual gemoma predictions for each analysis method.
+ * I.E. Predictions from each isolate are merged into a single set  from
+ * augustus, pasa etc.
+ * I've decided to do this because i'd still like to be able to weight
+ * comparative predictions from each genome differently.
+ * It would be nice if we could get the number of isolates supporting a locus,
+ * which could be used as a 'mult' field in augustus hints.
+ * E.G. proteins only found in one or two genomes are weighted lower.
 process combineGemomaComparativePredictions {
 
     label "gemoma"
     label "small_task"
     publishDir "${params.outdir}/annotations/${name}"
 
-    tag "${name} - ${analysis}"
+    tag "${name}"
 
     input:
     set val(name),
-        val(analysis),
-        val(ref_names),
-        file(pred_gffs),
+        file(pred_gff),
         file(fasta),
         file(faidx),
         file("introns.gff"),
         file("coverage_forward.bedgraph"),
         file("coverage_reverse.bedgraph") from indivGemomaComparativePredictions
-            .groupTuple(by: [0, 1])
-            .join(genomes4CombineGemomaComparativeGemoma, by: 0, remainder: false)
+            .combine(genomes4CombineGemomaComparative, by: 0)
             .combine(combinedGemomaRnaseqHints4CombineComparative, by: 0)
+            .view()
 
     output:
     set val(name),
-        val(analysis),
-        file("${name}_gemoma_comparative_${analysis}.gff3") into gemomaComparativePredictions
+        file("${name}_gemoma_comparative.gff3") into gemomaComparativePredictions
 
     script:
-    def ref_names_list = ref_names
-    def pred_gffs_list = (pred_gffs instanceof List) ? pred_gffs : [pred_gffs]
-    assert pred_gffs_list.size() == ref_names_list.size()
-
-   // The format for GAF is a bit weird so do it here.
-   // transpose is like zip() and collect is like map.
-    def preds = [ref_names_list, pred_gffs_list]
-        .transpose()
-        .collect { rn, pred -> "p=${rn} g=${pred.name}" }
-        .join(' ')
-
     get_utr = params.notfungus ? "true": "false"
 
     """
     mkdir -p gaf
     java -jar \${GEMOMA_JAR} CLI GAF \
-      ${preds} \
+      p="combined" \
+      g="${pred_gff}" \
       outdir=gaf
 
     if ${get_utr}
@@ -3401,16 +3507,19 @@ process combineGemomaComparativePredictions {
         outdir=finalised \
         rename=NO
 
-      mv finalised/final_annotation.gff "${name}_gemoma_comparative_${analysis}.gff3"
+      mv finalised/final_annotation.gff "${name}_gemoma_comparative.gff3"
     else
-      mv gaf/filtered_predictions.gff "${name}_gemoma_comparative_${analysis}.gff3"
+      mv gaf/filtered_predictions.gff "${name}_gemoma_comparative.gff3"
     fi
 
     rm -rf -- gaf finalised GeMoMa_temp
     """
 }
+ */
 
 
+/*
+ * Fix the gemoma source columns, add implicit features etc.
 process tidyComparativeGemoma {
 
     label "aegean"
@@ -3441,21 +3550,24 @@ process tidyComparativeGemoma {
     > "${name}_gemoma_comparative_${analysis}_tidy.gff3"
     """
 }
+ */
+
+
+//
+// STEP: Combine annotations using EVM and/or Augustus.
+//
 
 
 
-
-
-// 8 Screen proteins using database of TEs
-
-// 9 stats
+//
+// STEP: Get statistics for each base. 
+//
 
 
 /*
  * Evaluate genome completeness with BUSCO on the genomes.
  * Later we evaluate each gene prediction set too.
  * Could compare this number with that one.
- */
 process runBusco {
     label "busco"
     label "medium_task"
@@ -3499,11 +3611,11 @@ pasaPredictions4ExtractSeqs
         augustusJoinedChunks4ExtractSeqs,
     )
     .set { gffs4ExtractSeqs }
+ */
 
 
 /*
  *
- */
 process extractSeqs {
 
     label "genometools"
@@ -3552,11 +3664,11 @@ process extractSeqs {
     > "${name}_${analysis}_tidy.fna"
     """
 }
+ */
 
 
 /*
  * Evaluate gene predictions using protein comparisons with BUSCO sets.
- */
 process runBuscoProteins {
 
     label "busco"
@@ -3599,14 +3711,13 @@ pasaPredictions4Stats.map { n, g -> [n, "transdecoder", g] }
         codingQuarryPMPredictions4Stats.map { n, g -> [n, "codingquarrypm", g] },
         tidiedGemomaPredictions4Stats.map { n, g -> [n, "gemoma", g] },
         augustusJoinedChunks4Stats,
-        augustusJoinedPreds4Stats.map {n, g -> [n, "augustus_preds", g] },
     )
     .set { predictions4Stats }
+ */
 
 
 /*
  * Get stats when we have known sites
- */
 process getKnownStats {
 
     label "aegean"
@@ -3635,7 +3746,15 @@ process getKnownStats {
       "${preds}"
     """
 }
+ */
 
+
+
+//
+// Below are some commands to run the Augustus CPG pipeline.
+// My experience was that CPG really needs Cactus alignments.
+// The sibeliaz alignments seem to be too fragmented.
+//
 
 /*
 process addGenomeNameToFasta {
@@ -3867,4 +3986,3 @@ process trainAugustusCPG {
     """
 }
 */
-
