@@ -163,8 +163,12 @@ SKMER_PREFIX=$(SKMER_PREFIX_ARG)
 MASH_VERSION=v2.2
 MASH_URL=https://github.com/marbl/Mash/releases/download/v2.2/mash-Linux64-v2.2.tar
 
+EVM_COMMIT=73350ce
+EVM_REPO=https://github.com/EVidenceModeler/EVidenceModeler.git
+EVM_PREFIX_ARG=$(INSTALL_BASE)/evm/$(EVM_COMMIT)
 
-GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal seqtk skmer r
+
+GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal seqtk skmer r evm
 ALIGNMENT=spaln gmap mmseqs sibeliaz
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
@@ -624,6 +628,18 @@ docker/pasa: pasa.Dockerfile docker/base docker/gmap docker/fasta docker/htslib
 	  --build-arg HTSLIB_PREFIX_ARG="$(HTSLIB_PREFIX_ARG)" \
 	  --build-arg SAMTOOLS_TAG="$(SAMTOOLS_TAG)" \
 	  --build-arg SAMTOOLS_PREFIX_ARG="$(SAMTOOLS_PREFIX_ARG)" \
+	  --file $< \
+	  -t "$(call make_image_name,$@)" \
+	  .
+	@mkdir -p "$(dir $@)"
+	@touch $@
+
+docker/evm: evm.Dockerfile docker/base
+	docker build \
+	  --build-arg IMAGE="$(BASE_IMAGE)" \
+	  --build-arg EVM_COMMIT="$(EVM_COMMIT)" \
+	  --build-arg EVM_REPO="$(EVM_REPO)" \
+	  --build-arg EVM_PREFIX_ARG="$(EVM_PREFIX_ARG)" \
 	  --file $< \
 	  -t "$(call make_image_name,$@)" \
 	  .
