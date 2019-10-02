@@ -3253,6 +3253,10 @@ process extractGemomaComparativeCDSParts {
 }
 
 
+/*
+ * Concatenate the gemoma parts for all isolates and prediction
+ * methods into single files.
+ */
 process combineGemomaCDSParts {
 
     label "posix"
@@ -3288,6 +3292,13 @@ process combineGemomaCDSParts {
 }
 
 
+/*
+ * To reduce the number of alignments/prediction steps, we
+ * do a pretty strict clustering to remove redundancy, and
+ * use the seed sequence as the representative.
+ * The coverage requirements and high identity means that this
+ * should mostly just remove nearly identical matches.
+ */
 process clusterGemomaCDSParts {
 
     label "mmseqs"
@@ -3315,7 +3326,7 @@ process clusterGemomaCDSParts {
       tmp \
       --threads "${task.cpus}" \
       --min-seq-id 0.9 \
-      -c 0.95 \
+      -c 0.98 \
       --cov-mode 0 \
       --cluster-mode 0
 
@@ -3324,6 +3335,9 @@ process clusterGemomaCDSParts {
 }
 
 
+/*
+ * Select the CDS parts to use based on the clustering results.
+ */
 process selectGemomaCDSParts {
 
     label "python3"
@@ -3342,6 +3356,7 @@ process selectGemomaCDSParts {
 
     script:
     """
+    # The script outputs are hardcoded. 
     select_comparative_proteins.py \
       --clusters protein_clusters.tsv \
       --assignments old_assignment.tsv \
@@ -3350,13 +3365,10 @@ process selectGemomaCDSParts {
     """
 }
 
+
 /*
  * Align proteins to genomes for Gemoma.
- * We currently still to this using each of the other genomes
- * and prediction tools as a reference set.
- * So this starts about n*n tasks.
- * possibly we can combine the results from each genome, so we
- * only have to run this for each prediction method.
+ */
 process alignGemomaComparativeCDSParts {
 
     label "mmseqs"
@@ -3371,7 +3383,7 @@ process alignGemomaComparativeCDSParts {
         file("cds-parts.fasta"),
         file("assignment.tabular"),
         file("proteins.fasta") from genomes4AlignGemomaComparativeCDSParts
-            .combine( combinedGemomaComparativeCDSParts )
+            .combine( selectedGemomaComparativeCDSParts )
 
     output:
     set val(name),
@@ -3419,12 +3431,12 @@ process alignGemomaComparativeCDSParts {
     rm -rf -- genome proteins alignment tmp
     """
 }
- */
 
 
 /*
- * Predict genes with gemoma for each combination of "ref"
- * isolate and prediction method.
+ * Predict genes with gemoma for each isolate with the combined
+ * comparative set.
+ */
 process runGemomaComparative {
 
     label "gemoma"
@@ -3473,19 +3485,14 @@ process runGemomaComparative {
     rm -rf -- GeMoMa_temp out
     """
 }
- */
 
 
 /*
- * Merge the individual gemoma predictions for each analysis method.
- * I.E. Predictions from each isolate are merged into a single set  from
- * augustus, pasa etc.
- * I've decided to do this because i'd still like to be able to weight
- * comparative predictions from each genome differently.
- * It would be nice if we could get the number of isolates supporting a locus,
- * which could be used as a 'mult' field in augustus hints.
- * E.G. proteins only found in one or two genomes are weighted lower.
-process combineGemomaComparativePredictions {
+ * This filters bad matches, possibly duplicate matches.
+ * If the organism does not have high gene density (`--notfungus`)
+ * then will add UTRs based on read alignments.
+ */
+process finishGemomaComparativePredictions {
 
     label "gemoma"
     label "small_task"
@@ -3503,7 +3510,6 @@ process combineGemomaComparativePredictions {
         file("coverage_reverse.bedgraph") from indivGemomaComparativePredictions
             .combine(genomes4CombineGemomaComparative, by: 0)
             .combine(combinedGemomaRnaseqHints4CombineComparative, by: 0)
-            .view()
 
     output:
     set val(name),
@@ -3541,11 +3547,11 @@ process combineGemomaComparativePredictions {
     rm -rf -- gaf finalised GeMoMa_temp
     """
 }
- */
 
 
 /*
  * Fix the gemoma source columns, add implicit features etc.
+ */
 process tidyComparativeGemoma {
 
     label "aegean"
@@ -3553,11 +3559,10 @@ process tidyComparativeGemoma {
 
     publishDir "${params.outdir}/annotations/${name}"
 
-    tag "${name} - ${analysis}"
+    tag "${name}"
 
     input:
     set val(name),
-        val(analysis),
         file("gemoma.gff3"),
         file(fasta),
         file(faidx) from gemomaComparativePredictions
@@ -3565,18 +3570,17 @@ process tidyComparativeGemoma {
 
     output:
     set val(name),
-        val("gemoma_${analysis}"),
-        file("${name}_gemoma_comparative_${analysis}_tidy.gff3") into tidiedGemomaComparativePredictions
+        val("gemoma_comparative"),
+        file("${name}_gemoma_comparative_tidy.gff3") into tidiedGemomaComparativePredictions
 
     script:
     """
       gt gff3 -tidy -sort -retainids -setsource "GeMoMa" gemoma.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
     | canon-gff3 -i - \
-    > "${name}_gemoma_comparative_${analysis}_tidy.gff3"
+    > "${name}_gemoma_comparative_tidy.gff3"
     """
 }
- */
 
 
 //
