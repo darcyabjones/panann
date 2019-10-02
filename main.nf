@@ -101,6 +101,10 @@ params.genome_alignment = false
 // The busco lineage to use to evaluate gene prediction completeness.
 // If this is not provided, busco will not be run.
 params.busco_lineage = false
+// Flag to run busco on the genomes as well as checking the protein completeness.
+// This takes considerably more time but might allow you to compare with protein
+// completeness.
+params.busco_genomes = false
 
 
 // Augustus params
@@ -169,6 +173,10 @@ params.max_gene_hard = 20000
 params.spaln_species = "phaenodo"
 
 params.trans_table = 1
+
+// The config file for evidence modeller
+params.evm_config = false
+
 
 // Misc parameters.
 
@@ -277,6 +285,14 @@ if ( params.busco_lineage ) {
 
 } else {
     buscoLineage = false
+}
+
+
+if ( params.evm_config ) {
+    Channel
+        .fromPath(params.evm_config, checkIfExists: true, type: "file")
+        .first()
+        .set { evmConfig }
 }
 
 
@@ -453,6 +469,7 @@ genomesWithFaidx
         genomes4RunSibeliaZ;
         genomes4FindDistances;
         genomes4PrepGenomes;
+        genomes4RunEVM;
 }
 
 
@@ -485,6 +502,7 @@ genomesWithKnownSites
         genomes4AssembleStringtie;
         genomes4MergeStringtie;
         genomes4RunPASA;
+        genomes4ExtractManualHints;
         genomes4GetKnownStats;
     }
 
@@ -1157,6 +1175,10 @@ process tidySpalnTranscripts {
     """
 }
 
+spalnTidiedTranscripts.into {
+    spalnTidiedTranscripts4Hints;
+    spalnTidiedTranscripts4EVM;
+}
 
 /*
  * Get augustus hints from spaln results.
@@ -1171,7 +1193,7 @@ process extractSpalnTranscriptHints {
     tag "${name}"
 
     input:
-    set val(name), file("spaln.gff3") from spalnTidiedTranscripts
+    set val(name), file("spaln.gff3") from spalnTidiedTranscripts4Hints
 
     output:
     set val(name),
@@ -1202,7 +1224,7 @@ process extractSpalnTranscriptHints {
 
 
 /*
- * Align transcripts using gmap
+ * Align transcripts using map
  * We run this separately to PASA to control the number of threads PASA uses.
  * If you use BLAT + gmap in pasa it can run 2*cpus threads, which would screw
  * with our provisioning. Most of the PASA time is spent running transdecoder.
@@ -1253,7 +1275,10 @@ process alignGmapTranscripts {
     """
 }
 
-gmapAlignedTranscripts.set { gmapAlignedTranscripts4RunPASA }
+gmapAlignedTranscripts.into {
+    gmapAlignedTranscripts4RunPASA;
+    gmapAlignedTranscripts4EVM;
+}
 
 
 /*
@@ -1379,9 +1404,13 @@ process tidySpalnProteins {
     | canon-gff3 -i - \
     > spaln_tidied.gff3
     """
-
 }
 
+
+spalnTidiedProteins.into {
+    spalnTidiedProteins4Hints;
+    spalnTidiedProteins4EVM;
+}
 
 
 /*
@@ -1397,7 +1426,7 @@ process extractSpalnProteinHints {
     publishDir "${params.outdir}/hints/${name}"
 
     input:
-    set val(name), file("spaln.gff3") from spalnTidiedProteins
+    set val(name), file("spaln.gff3") from spalnTidiedProteins4Hints
 
     output:
     set val(name),
@@ -1612,6 +1641,8 @@ process extractExonerateRemoteProteinHints {
     set val(name),
         val("exonerate_proteins"),
         file("${name}_exonerate_remote_protein_hints.gff3") into exonerateRemoteProteinHints
+    set val(name),
+        file("${name}_exonerate_remote_protein_evm.gff3") into exonerateRemoteProteinHints4EVM
 
     script:
     """
@@ -1625,18 +1656,43 @@ process extractExonerateRemoteProteinHints {
       --priority=2 \
       --source=T
 
-    awk -F '\t' '
+    awk -F '\\t' '
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
-        sub(/grp=/, "grp=${name}_exonerate_remote_proteins_", \$9)
+        sub(/grp=/, "grp=${name}_exonerate_", \$9)
         \$2 = "Exonerate";
         print
       }
       ' \
       hints.gff3 \
     > "${name}_exonerate_remote_protein_hints.gff3"
+
+
+    align2hints.pl \
+      --in=exonerate.gff \
+      --out=evm.gff3 \
+      --prg=exonerate \
+      --CDSpart_cutoff=0 \
+      --minintronlen="${params.min_intron_soft}" \
+      --maxintronlen="${params.max_intron_hard}" \
+      --priority=2 \
+      --source=T
+
+    awk -F '\\t' '
+      BEGIN {OFS="\\t"}
+      \$3 == "CDSpart" {
+        id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
+        \$9="ID=${name}_exonerate_"id;
+        \$2 = "Exonerate";
+        \$3 = "nucleotide_to_protein_match";
+        print
+      }
+      ' \
+      evm.gff3 \
+    > "${name}_exonerate_remote_protein_evm.gff3"
     """
 }
+
 
 
 //
@@ -1766,6 +1822,7 @@ tidiedPasa.into {
     pasaPredictions4Stats;
     pasaPredictions4Comparative;
     pasaPredictions4ExtractSeqs;
+    pasaPredictions4EVM;
 }
 
 
@@ -1789,6 +1846,10 @@ process extractPasaHints {
     set val(name),
         val(analysis),
         file("${name}_pasa_hints.gff3") into pasaHints
+
+    set val(name),
+        val(analysis),
+        file("${name}_pasa_final_hints.gff3") into pasaFinalHints
 
     script:
     """
@@ -1829,6 +1890,64 @@ process extractPasaHints {
     > "transdecoder_hints.gff3"
 
     cat pasa_hints.gff3 transdecoder_hints.gff3 > "${name}_pasa_hints.gff3"
+
+
+    awk -F '\t' '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' pasa.gff3 \
+    | gffpal hints \
+        --source PASA \
+        --group-level mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_pasa_", \$9);
+          \$2 = "PASA";
+          print
+        }
+      ' \
+    > "pasa_hints.gff3"
+
+
+    awk -F '\t' '\$3 != "exon" && \$3 != "intron"' pasa.gff3 \
+    | gffpal hints \
+        --source TD \
+        --group-level mRNA \
+        --priority 3 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_transdecoder_", \$9);
+          \$2 = "TransDecoder";
+          print
+        }
+      ' \
+    > "transdecoder_hints.gff3"
+
+    cat pasa_hints.gff3 transdecoder_hints.gff3 > "${name}_pasa_final_hints.gff3"
     """
 }
 
@@ -1993,6 +2112,7 @@ tidiedGenemark.into {
     genemarkPredictions4Hints;
     genemarkPredictions4ExtractSeqs;
     genemarkPredictions4Stats;
+    genemarkPredictions4EVM;
 }
 
 
@@ -2020,6 +2140,10 @@ process extractGenemarkHints {
         val(analysis),
         file("${name}_genemark_hints.gff3") into genemarkHints
 
+    set val(name),
+        val(analysis),
+        file("${name}_genemark_final_hints.gff3") into genemarkFinalHints
+
     script:
     """
     gffpal hints \
@@ -2039,6 +2163,33 @@ process extractGenemarkHints {
         }
       ' \
     > "${name}_genemark_hints.gff3"
+
+
+    gffpal hints \
+        --source GM \
+        --group-level mRNA \
+        --priority 3 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        genemark.gff3 \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_genemark_", \$9);
+          \$2 = "GeneMarkET";
+          print
+        }
+      ' \
+    > "${name}_genemark_final_hints.gff3"
     """
 }
 
@@ -2143,6 +2294,7 @@ tidiedCodingQuarry.into {
     codingQuarryPredictions4Stats;
     codingQuarryPredictions4Comparative;
     codingQuarryPredictions4ExtractSeqs;
+    codingQuarryPredictions4EVM;
 }
 
 
@@ -2170,6 +2322,10 @@ process extractCodingQuarryHints {
         val(analysis),
         file("${name}_codingquarry_hints.gff3") into codingQuarryHints
 
+    set val(name),
+        val(analysis),
+        file("${name}_codingquarry_final_hints.gff3") into codingQuarryFinalHints
+
     script:
     """
     gffpal hints \
@@ -2189,6 +2345,33 @@ process extractCodingQuarryHints {
           print
         }' \
     > "${name}_codingquarry_hints.gff3"
+
+
+    gffpal hints \
+        --source CQ \
+        -g mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        -- \
+        codingquarry.gff3 \
+    | awk -F '\\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_codingquarry_", \$9);
+          \$2 = "CodingQuarry";
+          print
+        }' \
+    > "${name}_codingquarry_final_hints.gff3"
     """
 }
 
@@ -2395,6 +2578,7 @@ tidiedCodingQuarryPM.into {
     codingQuarryPMPredictions4Stats;
     codingQuarryPMPredictions4Comparative;
     codingQuarryPMPredictions4ExtractSeqs;
+    codingQuarryPMPredictions4EVM;
 }
 
 
@@ -2422,6 +2606,10 @@ process extractCodingQuarryPMHints {
         val(analysis),
         file("${name}_codingquarrypm_hints.gff3") into codingQuarryPMHints
 
+    set val(name),
+        val(analysis),
+        file("${name}_codingquarrypm_final_hints.gff3") into codingQuarryPMFinalHints
+
     script:
     """
       gffpal hints \
@@ -2441,6 +2629,32 @@ process extractCodingQuarryPMHints {
         }
       ' \
     > "${name}_codingquarrypm_hints.gff3"
+
+      gffpal hints \
+        --source CQPM \
+        -g mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        codingquarry.gff3 \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_codingquarrypm_", \$9);
+          \$2 = "CodingQuarryPM";
+          print
+        }
+      ' \
+    > "${name}_codingquarrypm_final_hints.gff3"
     """
 }
 
@@ -2834,6 +3048,8 @@ tidiedGemomaPredictions.into {
     tidiedGemomaPredictions4Hints;
     tidiedGemomaPredictions4Stats;
     tidiedGemomaPredictions4ExtractSeqs;
+    tidiedGemomaPredictions4FinalHints;
+    tidiedGemomaPredictions4EVM;
 }
 
 
@@ -2858,15 +3074,30 @@ process extractGemomaHints {
         val(analysis),
         file("${name}_gemoma_hints.gff3") into gemomaHints
 
+    set val(name),
+        val(analysis),
+        file("${name}_gemoma_final_hints.gff3") into gemomaFinalHints
+
     script:
     """
-    awk -F '\t' '\$3 == "exon" || \$3 == "intron"' gemoma.gff3 \
+    # Separate these out into multiple groups so that they
+    # can be excluded as groups.
+    # Gemoma's strength is CDS parts not so much UTRs
+
+    awk -F '\t' '
+        \$3 == "exon" ||
+        \$3 == "intron" ||
+        \$3 == "three_prime_UTR" ||
+        \$3 == "five_prime_UTR" ||
+        \$3 == "mRNA"' \
+      gemoma.gff3 \
     | gffpal hints \
         --source GEMOMA \
         --group-level mRNA \
         --priority 4 \
         --exon-trim 9 \
         --intron-trim 0 \
+        --utr-trim 9 \
         - \
     | awk -F '\t' '
         BEGIN {OFS="\\t"}
@@ -2878,19 +3109,17 @@ process extractGemomaHints {
     > "exon_hints.gff3"
 
 
-    awk -F '\t' '\$3 == "CDS" ||
-         \$3 == "three_prime_UTR" ||
-         \$3 == "five_prime_UTR" ||
-         \$3 == "start_codon" ||
-         \$3 == "stop_codon" ||
-         \$3 == "mRNA"' \
+    awk -F '\t' '
+        \$3 == "CDS" ||
+        \$3 == "start_codon" ||
+        \$3 == "stop_codon" ||
+        \$3 == "mRNA"' \
       gemoma.gff3 \
     | gffpal hints \
         --source GEMOMA \
         --group-level mRNA \
         --priority 4 \
         --cds-trim 6 \
-        --utr-trim 9 \
         - \
     | awk -F '\t' '
         BEGIN {OFS="\\t"}
@@ -2904,6 +3133,75 @@ process extractGemomaHints {
     cat exon_hints.gff3 cds_hints.gff3 \
     | awk -F '\t' 'BEGIN {OFS="\\t"} {\$2 = "GeMoMa"; print}' \
     > ${name}_gemoma_hints.gff3
+
+
+    awk -F '\t' '
+        \$3 == "exon" ||
+        \$3 == "intron" ||
+        \$3 == "three_prime_UTR" ||
+        \$3 == "five_prime_UTR" ||
+        \$3 == "mRNA"' \
+      gemoma.gff3 \
+    | gffpal hints \
+        --source GEMOMA \
+        --group-level mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_gemoma_exon_", \$9);
+          print
+        }
+      ' \
+    > "exon_hints.gff3"
+
+
+    awk -F '\t' '
+        \$3 == "CDS" ||
+        \$3 == "start_codon" ||
+        \$3 == "stop_codon" ||
+        \$3 == "mRNA"' \
+      gemoma.gff3 \
+    | gffpal hints \
+        --source GEMOMA \
+        --group-level mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_gemoma_cds_", \$9);
+          print
+        }
+      ' \
+    > "cds_hints.gff3"
+
+    cat exon_hints.gff3 cds_hints.gff3 \
+    | awk -F '\t' 'BEGIN {OFS="\\t"} {\$2 = "GeMoMa"; print}' \
+    > "${name}_gemoma_final_hints.gff3"
     """
 }
 
@@ -3017,6 +3315,82 @@ process runAugustusDenovo {
       "${fasta}"
     """
 }
+
+
+process tidyKnownSites {
+
+    label "aegean"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file(gff) from genomes4ExtractManualHints
+            .filter { n, f, i, g -> g.name != "WAS_NULL" }
+
+    output:
+    set val(name), file("tidied.gff3") into tidiedKnownSites
+
+    script:
+    """
+    gt gff3 -tidy -sort -retainids -setsource "manual" "${gff3}" \
+    | canon-gff3 -i - \
+    > tidied.gff3
+    """
+}
+
+tidiedKnownSites.into {
+    tidiedKnownSites4Hints;
+    tidiedKnownSites4EVM;
+}
+
+
+process extractManualHints {
+
+    label "gffpal"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name), file(gff) from tidiedKnownSites4Hints
+
+    output:
+    set val(name),
+        val("manual"),
+        file("${name}_manual_hints.gff3") into manualHints
+
+    script:
+    """
+    gffpal hints \
+      --source M \
+      --group-level mRNA \
+      --priority 50 \
+      --exon-trim 0 \
+      --intron-trim 0 \
+      --cds-trim 0 \
+      --utr-trim 0 \
+      "${name}_manual_hints.gff3" \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_manual_", \$9);
+          \$2 = "manual";
+          print
+        }
+      ' \
+    > "${name}_manual_hints.gff3"
+    """
+}
+
+manualHints.into {
+    manualHints4Hints;
+    manualHints4FinalHints;
+}
+
 
 augustusRnaseqHints4JoinHints
     .map { n, rg, i -> [n, "introns", i] }
@@ -3179,8 +3553,58 @@ augustusJoinedChunks.into {
     augustusJoinedChunks4Stats;
     augustusJoinedChunks4Comparative;
     augustusJoinedChunks4ExtractSeqs;
+    augustusJoinedChunks4FinalHints;
+    augustusJoinedChunks4EVM;
 }
 
+
+process extractAugustusFinalHints {
+
+    label "gffpal"
+    label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        val(analysis),
+        file("augustus.gff3") from augustusJoinedChunks4FinalHints
+
+    output:
+    set val(name),
+        val(analysis),
+        file("${name}_${analysis}_final_hints.gff3") into augustusFinalHints
+
+    script:
+    """
+    gffpal hints \
+        --source AUG \
+        --group-level mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        genemark.gff3 \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_augustus_", \$9);
+          \$2 = "augustus";
+          print
+        }
+      ' \
+    > "${name}_augustus_final_hints.gff3"
+    """
+}
 
 //
 // STEP run comparative genomics prediction.
@@ -3264,7 +3688,7 @@ process combineGemomaCDSParts {
 
     input:
     file "*" from gemomaComparativeCDSParts
-           .map { n, a, c, t, p -> [c, t, p] }       
+           .map { n, a, c, t, p -> [c, t, p] }
            .collect()
 
     output:
@@ -3287,7 +3711,7 @@ process combineGemomaCDSParts {
       else
         tail -n+2 "\${f}" >> assignment.tsv
       fi
-    done 
+    done
     """
 }
 
@@ -3356,7 +3780,7 @@ process selectGemomaCDSParts {
 
     script:
     """
-    # The script outputs are hardcoded. 
+    # The script outputs are hardcoded.
     select_comparative_proteins.py \
       --clusters protein_clusters.tsv \
       --assignments old_assignment.tsv \
@@ -3575,10 +3999,115 @@ process tidyComparativeGemoma {
 
     script:
     """
-      gt gff3 -tidy -sort -retainids -setsource "GeMoMa" gemoma.gff3 \
+      gt gff3 -tidy -sort -retainids -setsource "ComparativeGeMoMa" gemoma.gff3 \
     | awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
     | canon-gff3 -i - \
     > "${name}_gemoma_comparative_tidy.gff3"
+    """
+}
+
+tidiedGemomaComparativePredictions.into {
+    tidiedGemomaComparativePredictions4Stats;
+    tidiedGemomaComparativePredictions4ExtractSeqs;
+    tidiedGemomaComparativePredictions4FinalHints;
+    tidiedGemomaComparativePredictions4EVM;
+}
+
+
+/*
+ * Get hints for augustus
+ */
+process extractGemomaComparativeHints {
+
+    label "gffpal"
+    label "small_task"
+    publishDir "${params.outdir}/hints/${name}"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        val(analysis),
+        file("gemoma.gff3") from tidiedGemomaComparativePredictions4FinalHints
+
+    output:
+    set val(name),
+        val(analysis),
+        file("${name}_gemoma_comparative_final_hints.gff3") into gemomaComparativeFinalHints
+
+    script:
+    """
+    # Separate these out into multiple groups so that they
+    # can be excluded as groups.
+    # Gemoma's strength is CDS parts not so much UTRs
+
+    awk -F '\t' '
+        \$3 == "exon" ||
+        \$3 == "intron" ||
+        \$3 == "three_prime_UTR" ||
+        \$3 == "five_prime_UTR" ||
+        \$3 == "mRNA"' \
+      gemoma.gff3 \
+    | gffpal hints \
+        --source GEMOMA \
+        --group-level mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_gemoma_comparative_exon_", \$9);
+          print
+        }
+      ' \
+    > "exon_hints.gff3"
+
+
+    awk -F '\t' '
+        \$3 == "CDS" ||
+        \$3 == "start_codon" ||
+        \$3 == "stop_codon" ||
+        \$3 == "mRNA"' \
+      gemoma.gff3 \
+    | gffpal hints \
+        --source GEMOMA \
+        --group-level mRNA \
+        --priority 4 \
+        --cds CDS \
+        --cds-trim 0 \
+        --utr UTR \
+        --utr3 UTR \
+        --utr5 UTR \
+        --utr-trim 0 \
+        --exon exon \
+        --exon-trim 0 \
+        --intron intron \
+        --intron-trim 0 \
+        --gene-trim 0 \
+        - \
+    | awk -F '\t' '
+        BEGIN {OFS="\\t"}
+        {
+          sub(/group=/, "group=${name}_gemoma_comparative_cds_", \$9);
+          print
+        }
+      ' \
+    > "cds_hints.gff3"
+
+    cat exon_hints.gff3 cds_hints.gff3 \
+    | awk -F '\t' 'BEGIN {OFS="\\t"} {\$2 = "GeMoMa"; print}' \
+    > "${name}_gemoma_comparative_final_hints.gff3"
     """
 }
 
@@ -3587,10 +4116,189 @@ process tidyComparativeGemoma {
 // STEP: Combine annotations using EVM and/or Augustus.
 //
 
+tidiedKnownSites4EVM.map {n, a, g -> n, g}
+    .join(genemarkPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
+    .join(pasaPredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
+    .join(codingQuarryPredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
+    .join(codingQuarryPMPredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
+    .join(tidiedGemomaPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
+    .join(augustusJoinedChunks4EVM.map { n, a, g -> [n, g] }, by: 0)
+    .join(tidiedGemomaComparativePredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
+    .join(gmapAlignedTranscripts4EVM, by: 0)
+    .join(spalnTidiedTranscripts4EVM, by: 0)
+    .join(spalnTidiedProteins4EVM, by: 0)
+    .join(exonerateRemoteProteinHints4EVM, by: 0)
+    .map { m, g, p, c, cp, g, a, cpg, gmap, spt, spp, ex -> [
+        is_null(m) ? file('WAS_NULL_MANUAL') : m,
+        g,
+        p,
+        c,
+        cp,
+        is_null(g) ? file('WAS_NULL_GEMOMA') : g,
+        a,
+        cpg,
+        gmap,
+        spt,
+        is_null(spp) ? file('WAS_NULL_SPP'): spp,
+        ex,
+    ]}
+    .set { joinedPreds4EVM }
+
+
+process combineEVMHints {
+
+    label "posix"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    set val(name),
+        file("manual.gff3"),
+        file("genemark.gff3"),
+        file("pasa.gff3"),
+        file("codingquarry.gff3"),
+        file("codingquarrypm.gff3"),
+        file("gemoma.gff3"),
+        file("augustus.gff3"),
+        file("comparative.gff3"),
+        file("gmap.gff3"),
+        file("spaln_trans.gff3"),
+        file("spaln_proteins.gff3"),
+        file("exonerate.gff3") from joinedPreds4EVM
+
+    output:
+    set val(name),
+        file("denovo.gff3"),
+        file("transcripts.gff3"),
+        file("proteins.gff3"),
+        file("other.gff3") into combinedPreds4EVM
+
+    script:
+    """
+    grep -v "^#" genemark.gff3 > denovo.gff3
+
+    # Transcript hints
+    awk -F'\t' '
+      BEGIN { OFS="\t" }
+      \$3 == "cDNA_match" {
+        \$2="gmap";
+        print
+      }
+    ' gmap.gff3 \
+    > transcripts.gff3
+
+    awk -F'\t' '
+      BEGIN { OFS="\t" }
+      \$3 == "exon" {
+        parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
+        target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
+        \$9="ID=${name}_spaln_transcript" parent ";Target=" target;
+        \$2="spaln_transcript";
+        \$3="cDNA_match";
+        print
+      }
+    ' spaln_trans.gff3 \
+    >> transcripts.gff3
+
+    grep -v "^#" exonerate.gff3 > proteins.gff3
+    if [ -e "spaln_proteins.gff3" ];
+    then
+      awk -F'\t' '
+        BEGIN { OFS="\t" }
+        \$3 == "CDS" {
+          parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
+          target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
+          \$9="ID=${name}_spaln_protein" parent ";Target=" target;
+          \$2="spaln_protein";
+          \$3="nucleotide_to_protein_match";
+          print
+        }
+      ' spaln_proteins.gff3 \
+      >> proteins.gff3
+    fi
+
+    cat pasa.gff3 \
+        codingquarry.gff3 \
+        codingquarrypm.gff3 \
+        augustus.gff3 \
+        comparative.gff3 \
+    | grep -v "^#" > other.gff3
+
+    if [ -e "manual.gff3" ];
+    then
+      grep -v "^#" manual.gff3 >> other.gff3
+    fi
+
+    if [ -e "gemoma.gff3" ];
+    then
+      grep -v "^#" gemoma.gff3 >> other.gff3
+    fi
+    """
+}
+
+
+process runEVM {
+
+    label "evm"
+    label "big_task"
+
+    tag "${name}"
+
+    input:
+    file "weights.txt" from evmConfig
+    set val(name),
+        file(fasta),
+        file(faidx),
+        file("denovo.gff3"),
+        file("transcripts.gff3"),
+        file("proteins.gff3"),
+        file("other.gff3") from genomes4RunEVM
+            .combine(combinedPreds4EVM, by: 0)
+
+    output:
+    set val(name), file("${name}_evm.gff3")
+
+    script:
+    """
+    partition_EVM_inputs.pl \
+      --genome "${fasta}" \
+      --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --protein_alignments proteins.gff3 \
+      --transcript_alignments transcripts.gff3 \
+      --segmentSize 500000 \
+      --overlapSize 10000 \
+      --partition partitions_list.out
+
+    write_EVM_commands.pl \
+      --genome "${fasta}" \
+      --weights "${PWD}/weights.txt" \
+      --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --protein_alignments proteins.gff3 \
+      --transcript_alignments transcripts.gff3 \
+      --output_file_name evm.out \
+      --partitions partitions_list.out \
+    > commands.list
+
+    xargs -I{} -P${task.cpus} -- sh -c "{};" < commands.list
+
+    recombine_EVM_partial_outputs.pl \
+      --partitions partitions_list.out \
+      --output_file_name evm.out
+
+    convert_EVM_outputs_to_GFF3.pl \
+      --partitions partitions_list.out \
+      --output evm.out \
+      --genome "${fasta}"
+
+    find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
+    """
+
+}
 
 
 //
-// STEP: Get statistics for each base. 
+// STEP: Get statistics for each base.
 //
 
 
@@ -3598,6 +4306,7 @@ process tidyComparativeGemoma {
  * Evaluate genome completeness with BUSCO on the genomes.
  * Later we evaluate each gene prediction set too.
  * Could compare this number with that one.
+ */
 process runBusco {
     label "busco"
     label "medium_task"
@@ -3607,7 +4316,7 @@ process runBusco {
     publishDir "${params.outdir}/qc/${name}"
 
     when:
-    params.busco_lineage
+    params.busco_lineage && params.busco_genomes
 
     input:
     set val(name), file(fasta), file(faidx) from genomes4Busco
@@ -3639,13 +4348,14 @@ pasaPredictions4ExtractSeqs
         codingQuarryPMPredictions4ExtractSeqs,
         tidiedGemomaPredictions4ExtractSeqs,
         augustusJoinedChunks4ExtractSeqs,
+        tidiedGemomaComparativePredictions4ExtractSeqs
     )
     .set { gffs4ExtractSeqs }
- */
 
 
 /*
  *
+ */
 process extractSeqs {
 
     label "genometools"
@@ -3694,11 +4404,11 @@ process extractSeqs {
     > "${name}_${analysis}_tidy.fna"
     """
 }
- */
 
 
 /*
  * Evaluate gene predictions using protein comparisons with BUSCO sets.
+ */
 process runBuscoProteins {
 
     label "busco"
@@ -3734,20 +4444,21 @@ process runBuscoProteins {
     """
 }
 
-pasaPredictions4Stats.map { n, g -> [n, "transdecoder", g] }
+pasaPredictions4Stats
     .mix(
-        genemarkPredictions4Stats.map { n, g -> [n, "genemark", g] },
-        codingQuarryPredictions4Stats.map { n, g -> [n, "codingquarry", g] },
-        codingQuarryPMPredictions4Stats.map { n, g -> [n, "codingquarrypm", g] },
-        tidiedGemomaPredictions4Stats.map { n, g -> [n, "gemoma", g] },
+        genemarkPredictions4Stats,
+        codingQuarryPredictions4Stats,
+        codingQuarryPMPredictions4Stats,
+        tidiedGemomaPredictions4Stats,
         augustusJoinedChunks4Stats,
+        tidiedGemomaComparativePredictions4Stats
     )
     .set { predictions4Stats }
- */
 
 
 /*
  * Get stats when we have known sites
+ */
 process getKnownStats {
 
     label "aegean"
@@ -3776,7 +4487,6 @@ process getKnownStats {
       "${preds}"
     """
 }
- */
 
 
 
