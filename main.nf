@@ -3245,6 +3245,7 @@ if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusMultiStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
+        genomes4RunAugustusFinal;
     }
 
 } else {
@@ -3252,6 +3253,7 @@ if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusSingleStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
+        genomes4RunAugustusFinal;
     }
 
 }
@@ -3386,22 +3388,22 @@ process extractManualHints {
     """
 }
 
-manualHints.into {
-    manualHints4Hints;
-    manualHints4FinalHints;
-}
-
-
+/*
+ * The final augustus step uses full length hints, not parts.
+ */
 augustusRnaseqHints4JoinHints
     .map { n, rg, i -> [n, "introns", i] }
     .mix(
         spalnTranscriptHints,
         spalnProteinHints,
         exonerateRemoteProteinHints,
+        manualHints,
+    )
+    .tap { augustusExtrinsicHints4Final }
+    .mix(
         gemomaHints,
         pasaHints,
     )
-    .tap { augustusExtrinsicHints4CPG }
     .map { n, a, h -> [n, h] }
     .groupTuple(by: 0)
     .set { augustusExtrinsicHints4Hints }
@@ -4302,9 +4304,148 @@ process runEVM {
 
     find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
     """
-
 }
 
+
+augustusExtrinsicHints4Final
+    .mix(
+        pasaFinalHints,
+        genemarkFinalHints,
+        codingQuarryFinalHints,
+        codingQuarryPMFinalHints,
+        gemomaFinalHints;
+        augustusFinalHints,
+        gemomaComparativeFinalHints,
+    )
+    .map { n, a, h -> [n, h] }
+    .groupTuple(by: 0)
+    .set { augustusHints4Final }
+
+process runAugustusFinal {
+
+    label "augustus"
+    label "small_task"
+
+    tag "${name} - ${strand}"
+
+    when:
+    params.augustus_species
+
+    input:
+    set val(name),
+        val(strand),
+        file(fasta),
+        file("*hints") from genomes4RunAugustusFinal
+            .combine(augustusHints4Final, by: 0)
+
+    file "augustus_config" from augustusConfig
+    file "extrinsic.cfg" from augustusFinalWeights
+
+    output:
+    set val(name), file("out.gff") into augustusFinalChunks
+
+    script:
+    if ( params.augustus_utr && params.notfungus ) {
+        strand_param = "--singlestrand=false --UTR=on"
+    } else if ( !params.augustus_utr && params.notfungus ) {
+        strand_param = "--singlestrand=true --UTR=off"
+    } else if ( !params.augustus_utr && !params.notfungus ) {
+        strand_param = "--singlestrand=true --UTR=off"
+    } else if ( strand == "forward" ) {
+        strand_param = "--strand=forward --UTR=on"
+    } else if ( strand == "reverse" ) {
+        strand_param = "--strand=backward --UTR=on"
+    }
+
+    is_utr = params.augustus_utr ? "true" : "false"
+    is_fungus = params.notfungus ? "false" : "true"
+
+    """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
+    if ${is_utr} && ${is_fungus}
+    then
+      # Gemoma doesn't do fungal utrs well.
+      cat *hints \
+      | awk -F '\t' '! ((\$2 == "GeMoMa" || \$2 == "ComparativeGeMoMa") && (\$3 == "exon" || \$3 == "UTRpart"))' \
+      > hints.gff
+    elif ${is_utr} && ! ${is_fungus}
+    then
+      cat *hints > hints.gff
+    else
+      cat *hints \
+      | awk -F '\t' '\$3 != "exonpart" && \$3 != "exon" && \$3 != "UTRpart"' \
+      > hints.gff
+    fi
+
+    getLinesMatching.pl seqids.txt 1 < hints.gff > hints_filtered.gff
+
+    augustus \
+      --species="${params.augustus_species}" \
+      --extrinsicCfgFile=extrinsic.cfg \
+      --hintsfile=hints_filtered.gff \
+      ${strand_param} \
+      --allow_hinted_splicesites="${params.valid_splicesites}" \
+      --softmasking=on \
+      --alternatives-from-evidence=true \
+      --min_intron_len="${params.min_intron_hard}" \
+      --start=off \
+      --stop=off \
+      --introns=off \
+      --gff3=on \
+      --outfile="out.gff" \
+      --errfile=augustus.err \
+      "${fasta}"
+    """
+}
+
+
+/*
+ * This is a naive merge, it assumes that the contigs were intact.
+ */
+process joinAugustusFinalChunks {
+
+    label "aegean"
+    label "small_task"
+    publishDir "${params.outdir}/annotations/${name}"
+
+    tag "${name}"
+
+    input:
+    set val(name), file("*chunks.gff") from augustusFinalChunks
+
+    output:
+    set val(name),
+        file("${name}_augustus_final.gff3") into augustusFinalJoinedChunks
+
+    script:
+    """
+    for f in *chunks.gff
+    do
+      awk -F '\\t' '
+        BEGIN {OFS="\\t"}
+        \$3 == "transcript" {\$3="mRNA"}
+        \$0 !~ /^#/ {print}
+      ' "\${f}" \
+      > "\${f}.tmp"
+
+      if [ -s "\${f}.tmp" ]
+      then
+        gt gff3 -tidy -sort -setsource "augustus" -o "\${f}_tidied.gff3" "\${f}.tmp"
+      fi
+    done
+
+      gt merge -tidy *_tidied.gff3 \
+    | canon-gff3 -i - \
+    > "${name}_final.gff3"
+    """
+}
+
+augustusFinalJoinedChunks.into {
+    augustusFinalJoinedChunks4ExtractSeqs;
+    augustusFinalJoinedChunks4Stats;
+}
 
 //
 // STEP: Get statistics for each base.
@@ -4357,7 +4498,8 @@ pasaPredictions4ExtractSeqs
         codingQuarryPMPredictions4ExtractSeqs,
         tidiedGemomaPredictions4ExtractSeqs,
         augustusJoinedChunks4ExtractSeqs,
-        tidiedGemomaComparativePredictions4ExtractSeqs
+        tidiedGemomaComparativePredictions4ExtractSeqs,
+        augustusFinalJoinedChunks4ExtractSeqs,
     )
     .set { gffs4ExtractSeqs }
 
@@ -4460,7 +4602,8 @@ pasaPredictions4Stats
         codingQuarryPMPredictions4Stats,
         tidiedGemomaPredictions4Stats,
         augustusJoinedChunks4Stats,
-        tidiedGemomaComparativePredictions4Stats
+        tidiedGemomaComparativePredictions4Stats,
+        augustusFinalJoinedChunks4Stats,
     )
     .set { predictions4Stats }
 
