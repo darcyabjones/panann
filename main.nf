@@ -175,7 +175,7 @@ params.spaln_species = "phaenodo"
 params.trans_table = 1
 
 // The config file for evidence modeller
-params.evm_config = false
+params.evm_config = "data/evm.cfg"
 
 
 // Misc parameters.
@@ -3328,7 +3328,7 @@ process tidyKnownSites {
     set val(name),
         file(fasta),
         file(faidx),
-        file(gff) from genomes4ExtractManualHints
+        file(gff3) from genomes4ExtractManualHints
             .filter { n, f, i, g -> g.name != "WAS_NULL" }
 
     output:
@@ -3574,7 +3574,7 @@ process extractAugustusFinalHints {
     output:
     set val(name),
         val(analysis),
-        file("${name}_${analysis}_final_hints.gff3") into augustusFinalHints
+        file("${name}_augustus_final_hints.gff3") into augustusFinalHints
 
     script:
     """
@@ -3593,7 +3593,7 @@ process extractAugustusFinalHints {
         --intron intron \
         --intron-trim 0 \
         --gene-trim 0 \
-        genemark.gff3 \
+        augustus.gff3 \
     | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
@@ -4116,25 +4116,28 @@ process extractGemomaComparativeHints {
 // STEP: Combine annotations using EVM and/or Augustus.
 //
 
-tidiedKnownSites4EVM.map {n, a, g -> n, g}
+/*
+ */
+tidiedKnownSites4EVM
     .join(genemarkPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
-    .join(pasaPredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
-    .join(codingQuarryPredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
-    .join(codingQuarryPMPredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
+    .join(pasaPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
+    .join(codingQuarryPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
+    .join(codingQuarryPMPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
     .join(tidiedGemomaPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
-    .join(augustusJoinedChunks4EVM.map { n, a, g -> [n, g] }, by: 0)
-    .join(tidiedGemomaComparativePredictions4EVM.map { n, a, g -> [n, g] }, by: 0)
-    .join(gmapAlignedTranscripts4EVM, by: 0)
-    .join(spalnTidiedTranscripts4EVM, by: 0)
-    .join(spalnTidiedProteins4EVM, by: 0)
-    .join(exonerateRemoteProteinHints4EVM, by: 0)
-    .map { m, g, p, c, cp, g, a, cpg, gmap, spt, spp, ex -> [
+    .join(augustusJoinedChunks4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
+    .join(tidiedGemomaComparativePredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
+    .join(gmapAlignedTranscripts4EVM, by: 0, remainder: true)
+    .join(spalnTidiedTranscripts4EVM, by: 0, remainder: true)
+    .join(spalnTidiedProteins4EVM, by: 0, remainder: true)
+    .join(exonerateRemoteProteinHints4EVM, by: 0, remainder: true)
+    .map { n, m, g, p, c, cp, gem, a, cpg, gmap, spt, spp, ex -> [
+        n,
         is_null(m) ? file('WAS_NULL_MANUAL') : m,
         g,
         p,
         c,
         cp,
-        is_null(g) ? file('WAS_NULL_GEMOMA') : g,
+        is_null(gem) ? file('WAS_NULL_GEMOMA') : gem,
         a,
         cpg,
         gmap,
@@ -4238,6 +4241,11 @@ process combineEVMHints {
 }
 
 
+/*
+ * TODO: EVM write evm commands doesn't seem to have an option
+ * to provide alternative translation tables.
+ * Might have to fork it?
+ */
 process runEVM {
 
     label "evm"
@@ -4272,8 +4280,9 @@ process runEVM {
 
     write_EVM_commands.pl \
       --genome "${fasta}" \
-      --weights "${PWD}/weights.txt" \
+      --weights "\${PWD}/weights.txt" \
       --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --min_intron_length "${params.min_intron_hard}" \
       --protein_alignments proteins.gff3 \
       --transcript_alignments transcripts.gff3 \
       --output_file_name evm.out \
