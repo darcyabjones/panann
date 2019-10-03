@@ -130,8 +130,7 @@ params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 
 // The weighting config file for combining annotations from
 // multiple sources.
-params.augustus_pred_weights = "data/extrinsic_pred.cfg"
-params.augustus_cpg_weights = "data/extrinsic_cpg.cfg"
+params.augustus_final_weights = "data/extrinsic_final.cfg"
 
 
 // RNAseq params
@@ -310,19 +309,14 @@ if ( params.genome_alignment ) {
 
 
 Channel
-    .fromPath(params.augustus_pred_weights, checkIfExists: true, type: "file")
-    .first()
-    .set { augustusPredWeights }
-
-Channel
     .fromPath(params.augustus_hint_weights, checkIfExists: true, type: "file")
     .first()
     .set { augustusHintWeights }
 
 Channel
-    .fromPath(params.augustus_cpg_weights, checkIfExists: true, type: "file")
+    .fromPath(params.augustus_final_weights, checkIfExists: true, type: "file")
     .first()
-    .set { augustusCpgWeights }
+    .set { augustusFinalWeights }
 
 
 // Because augustus requires the config folder to be editable, it's easier
@@ -4051,7 +4045,7 @@ process extractGemomaComparativeHints {
         \$3 == "mRNA"' \
       gemoma.gff3 \
     | gffpal hints \
-        --source GEMOMA \
+        --source COMPGEMOMA \
         --group-level mRNA \
         --priority 4 \
         --cds CDS \
@@ -4083,7 +4077,7 @@ process extractGemomaComparativeHints {
         \$3 == "mRNA"' \
       gemoma.gff3 \
     | gffpal hints \
-        --source GEMOMA \
+        --source COMPGEMOMA \
         --group-level mRNA \
         --priority 4 \
         --cds CDS \
@@ -4313,7 +4307,7 @@ augustusExtrinsicHints4Final
         genemarkFinalHints,
         codingQuarryFinalHints,
         codingQuarryPMFinalHints,
-        gemomaFinalHints;
+        gemomaFinalHints,
         augustusFinalHints,
         gemomaComparativeFinalHints,
     )
