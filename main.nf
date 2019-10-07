@@ -4247,6 +4247,8 @@ process runEVM {
     label "evm"
     label "big_task"
 
+    publishDir "${params.outdir}/annotations/${name}"
+
     tag "${name}"
 
     input:
@@ -4261,7 +4263,8 @@ process runEVM {
             .combine(combinedPreds4EVM, by: 0)
 
     output:
-    set val(name), file("${name}_evm.gff3")
+    set val(name), file("${name}_evm.gff3") into evmResults
+    set val(name), file("to_redo.txt") into evmThrewOut
 
     script:
     """
@@ -4297,8 +4300,53 @@ process runEVM {
       --genome "${fasta}"
 
     find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
+
+    find . -name "evm.out.log" -exec cat {} \\; \
+    | sed "s/Sorry, prediction \\([^[:space:]]*\\) fails validation./\\\\1/" \
+    > to_redo.txt
+
+    cat denovo.gff3 transcripts.gff3 proteins.gff3 other.gff3 \
+    | awk -F'\\t' '
+      BEGIN {OFS="\\t"}
+      \$3 == "mRNA" {
+            id=gensub(/.*ID=([^;]+).*/, "\\\\1", "g", \$9);
+            print \$1, \$4 - 1, \$5, \$2 "_" id, "0", \$7;
+      }
+    ' \
+    > all.bed
+
+    awk -F'\\t' '
+      NR==FNR {ARR[\$0]; next}
+      \$4 in ARR { print }
+    ' to_redo.txt all.bed \
+    > to_redo.bed
     """
 }
+
+
+process findMissingEVMPredictions {
+
+    label "bedtools"
+    label "small_task"
+
+    input:
+    set val(name), file("to_redo.bed") from evmThrewOut
+
+    output:
+    set val(name), file("regions.bed") into regionsToRedo
+
+    script:
+    """
+    sort \
+      -k1,1 -k2,2n -k3,3n \
+      --temporary-directory=tmp \
+    | sed 's/,/%2C/g' \
+    | bedtools merge -s -d 100 -c 4 -o distinct -i - \
+    | bedtools slop -g "${faidx}" -b 400 -i - \
+    | clustered.bed
+    """
+}
+
 
 
 augustusExtrinsicHints4Final
@@ -4377,6 +4425,7 @@ process runAugustusFinal {
 
     augustus \
       --species="${params.augustus_species}" \
+      --genemodel=complete \
       --extrinsicCfgFile=extrinsic.cfg \
       --hintsfile=hints_filtered.gff \
       ${strand_param} \
@@ -4384,6 +4433,9 @@ process runAugustusFinal {
       --softmasking=on \
       --alternatives-from-evidence=true \
       --min_intron_len="${params.min_intron_hard}" \
+      --predictionStart=A \
+      --predictionEnd=B \
+      --noInFrameStop=true \
       --start=off \
       --stop=off \
       --introns=off \

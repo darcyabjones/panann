@@ -30,7 +30,7 @@ RUN  set -eu \
   && chmod a+x "${EVM_PREFIX}"/EvmUtils/*.pl \
   && chmod a+x "${EVM_PREFIX}"/EvmUtils/misc/*.pl \
   && rm -rf -- "${EVM_PREFIX}/EvmUtils/misc/example_data_files" \
-  && add_runtime_dep liburi-perl perl perl-tk
+  && add_runtime_dep libdbi-perl liburi-perl perl perl-tk
 
 #libfindbin-libs-perl
 
