@@ -295,19 +295,6 @@ if ( params.evm_config ) {
 }
 
 
-/*
-if ( params.genome_alignment ) {
-    Channel
-        .fromPath(params.genome_alignment, checkIfExists: true, type: "file")
-        .first()
-        .set { genomeAlignment }
-} else {
-    // We can align it here or can do it later.
-    genomeAlignment = false
-}
-*/
-
-
 Channel
     .fromPath(params.augustus_hint_weights, checkIfExists: true, type: "file")
     .first()
@@ -4359,6 +4346,7 @@ tidiedEVM.into {
     tidiedEVM4Stats;
 }
 
+
 /*
  * Select regions to re-predict genes in because EVM threw them out.
  */
@@ -4390,7 +4378,9 @@ process findMissingEVMPredictions {
 }
 
 
-
+/*
+ * Run austustus to find genes in the regions overlooked by evm.
+ */
 augustusExtrinsicHints4Final
     .mix(
         pasaFinalHints,
@@ -4520,6 +4510,10 @@ process getFinalSet {
 
     label "genometools"
     label "small_task"
+
+    tag "${name}"
+
+    publishDir "${params.outdir}/annotations/${name}"
 
     input:
     set val(name),
