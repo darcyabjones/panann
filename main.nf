@@ -130,7 +130,10 @@ params.augustus_hint_weights = "data/extrinsic_hints.cfg"
 
 // The weighting config file for combining annotations from
 // multiple sources.
-params.augustus_final_weights = "data/extrinsic_final.cfg"
+params.augustus_gapfiller_weights = "data/extrinsic_gapfiller.cfg"
+
+// The config file for evidence modeller
+params.evm_config = "data/evm.cfg"
 
 
 // RNAseq params
@@ -172,9 +175,6 @@ params.max_gene_hard = 20000
 params.spaln_species = "phaenodo"
 
 params.trans_table = 1
-
-// The config file for evidence modeller
-params.evm_config = "data/evm.cfg"
 
 
 // Misc parameters.
@@ -314,9 +314,9 @@ Channel
     .set { augustusHintWeights }
 
 Channel
-    .fromPath(params.augustus_final_weights, checkIfExists: true, type: "file")
+    .fromPath(params.augustus_gapfiller_weights, checkIfExists: true, type: "file")
     .first()
-    .set { augustusFinalWeights }
+    .set { augustusGapFillerWeights }
 
 
 // Because augustus requires the config folder to be editable, it's easier
@@ -464,6 +464,9 @@ genomesWithFaidx
         genomes4FindDistances;
         genomes4PrepGenomes;
         genomes4RunEVM;
+        genomes4FindMissingEVMPredictions;
+        genomes4RunAugustusGapFiller;
+        genomes4GetSpliceSiteInfo;
 }
 
 
@@ -3239,7 +3242,6 @@ if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusMultiStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
-        genomes4RunAugustusFinal;
     }
 
 } else {
@@ -3247,7 +3249,6 @@ if ( params.augustus_utr && !params.notfungus ) {
     genomes4RunAugustusSingleStrand.into {
         genomes4RunAugustusDenovo;
         genomes4RunAugustusHints;
-        genomes4RunAugustusFinal;
     }
 
 }
@@ -3554,7 +3555,7 @@ augustusJoinedChunks.into {
 }
 
 
-process extractAugustusFinalHints {
+process extractAugustusGapFillerHints {
 
     label "gffpal"
     label "small_task"
@@ -3570,7 +3571,7 @@ process extractAugustusFinalHints {
     output:
     set val(name),
         val(analysis),
-        file("${name}_augustus_final_hints.gff3") into augustusFinalHints
+        file("${name}_augustus_final_hints.gff3") into augustusGapFillerHints
 
     script:
     """
@@ -4324,13 +4325,54 @@ process runEVM {
 }
 
 
+/*
+ * Tidy EVM gffs and get introns.
+ */
+process tidyEVM {
+
+    label "aegean"
+    label "small_task"
+
+    tag "${name}"
+
+    publishDir "${params.outdir}/annotations/${name}"
+
+    input:
+    set val(name), file("evm.gff3") from evmResults
+
+    output:
+    set val(name),
+        val("evm"),
+        file("${name}_evm_tidy.gff3") into tidiedEVM
+
+    script:
+    """
+    gt gff3 -tidy -sort -setsource 'EVM' evm.gff3 \
+    | canon-gff3 -i - \
+    > "${name}_evm_tidy.gff3"
+    """
+}
+
+tidiedEVM.into {
+    tidiedEVM4FinalSet;
+    tidiedEVM4ExtractSeqs;
+    tidiedEVM4Stats;
+}
+
+/*
+ * Select regions to re-predict genes in because EVM threw them out.
+ */
 process findMissingEVMPredictions {
 
     label "bedtools"
     label "small_task"
 
     input:
-    set val(name), file("to_redo.bed") from evmThrewOut
+    set val(name),
+        file("to_redo.bed"),
+        file(fasta),
+        file(faidx) from evmThrewOut
+            .combine(genomes4FindMissingEVMPredictions, by: 0)
 
     output:
     set val(name), file("regions.bed") into regionsToRedo
@@ -4356,61 +4398,50 @@ augustusExtrinsicHints4Final
         codingQuarryFinalHints,
         codingQuarryPMFinalHints,
         gemomaFinalHints,
-        augustusFinalHints,
+        augustusGapFillerHints,
         gemomaComparativeFinalHints,
     )
     .map { n, a, h -> [n, h] }
     .groupTuple(by: 0)
     .set { augustusHints4Final }
 
-process runAugustusFinal {
+process runAugustusGapFiller {
 
     label "augustus"
-    label "small_task"
+    label "big_task"
 
-    tag "${name} - ${strand}"
+    tag "${name}"
 
     when:
     params.augustus_species
 
     input:
     set val(name),
-        val(strand),
         file(fasta),
-        file("*hints") from genomes4RunAugustusFinal
+        file(faidx),
+        file("toredo.bed"),
+        file("*hints") from genomes4RunAugustusGapFiller
+            .combine(regionsToRedo, by: 0)
             .combine(augustusHints4Final, by: 0)
 
     file "augustus_config" from augustusConfig
-    file "extrinsic.cfg" from augustusFinalWeights
+    file "extrinsic.cfg" from augustusGapFillerWeights
 
     output:
-    set val(name), file("out.gff") into augustusFinalChunks
+    set val(name), file("augustus_gaps/*.gff3") into augustusGapFillerChunks
 
     script:
-    if ( params.augustus_utr && params.notfungus ) {
-        strand_param = "--singlestrand=false --UTR=on"
-    } else if ( !params.augustus_utr && params.notfungus ) {
-        strand_param = "--singlestrand=true --UTR=off"
-    } else if ( !params.augustus_utr && !params.notfungus ) {
-        strand_param = "--singlestrand=true --UTR=off"
-    } else if ( strand == "forward" ) {
-        strand_param = "--strand=forward --UTR=on"
-    } else if ( strand == "reverse" ) {
-        strand_param = "--strand=backward --UTR=on"
-    }
-
     is_utr = params.augustus_utr ? "true" : "false"
     is_fungus = params.notfungus ? "false" : "true"
+    utr_flag = params.augustus_utr ? "-u" : ""
 
     """
-    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
-    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
-
     if ${is_utr} && ${is_fungus}
     then
       # Gemoma doesn't do fungal utrs well.
       cat *hints \
-      | awk -F '\t' '! ((\$2 == "GeMoMa" || \$2 == "ComparativeGeMoMa") && (\$3 == "exon" || \$3 == "UTRpart"))' \
+      | awk -F '\t' '! ((\$2 == "GeMoMa" || \$2 == "ComparativeGeMoMa") &&
+                        (\$3 == "exon" || \$3 == "UTRpart"))' \
       > hints.gff
     elif ${is_utr} && ! ${is_fungus}
     then
@@ -4421,28 +4452,18 @@ process runAugustusFinal {
       > hints.gff
     fi
 
-    getLinesMatching.pl seqids.txt 1 < hints.gff > hints_filtered.gff
-
-    augustus \
-      --species="${params.augustus_species}" \
-      --genemodel=complete \
-      --extrinsicCfgFile=extrinsic.cfg \
-      --hintsfile=hints_filtered.gff \
-      ${strand_param} \
-      --allow_hinted_splicesites="${params.valid_splicesites}" \
-      --softmasking=on \
-      --alternatives-from-evidence=true \
-      --min_intron_len="${params.min_intron_hard}" \
-      --predictionStart=A \
-      --predictionEnd=B \
-      --noInFrameStop=true \
-      --start=off \
-      --stop=off \
-      --introns=off \
-      --gff3=on \
-      --outfile="out.gff" \
-      --errfile=augustus.err \
-      "${fasta}"
+    augustus_region.sh \
+      -f "${fasta}" \
+      -b "toredo.bed" \
+      -g "hints.gff" \
+      -s "${params.augustus_species}" \
+      -c "extrinsic.cfg" \
+      -a "\${PWD}/augustus_config" \
+      -p "${params.valid_splicesites}" \
+      ${utr_flag} \
+      -t "${task.cpus} \
+      -m "${params.min_intron_hard} \
+      -o "augustus_gaps"
     """
 }
 
@@ -4450,7 +4471,7 @@ process runAugustusFinal {
 /*
  * This is a naive merge, it assumes that the contigs were intact.
  */
-process joinAugustusFinalChunks {
+process joinAugustusGapFillerChunks {
 
     label "aegean"
     label "small_task"
@@ -4459,11 +4480,11 @@ process joinAugustusFinalChunks {
     tag "${name}"
 
     input:
-    set val(name), file("*chunks.gff") from augustusFinalChunks
+    set val(name), file("*chunks.gff") from augustusGapFillerChunks
 
     output:
     set val(name),
-        file("${name}_augustus_final.gff3") into augustusFinalJoinedChunks
+        file("${name}_augustus_gapfiller.gff3") into augustusGapFillerJoinedChunks
 
     script:
     """
@@ -4483,18 +4504,52 @@ process joinAugustusFinalChunks {
     done
 
       gt merge -tidy *_tidied.gff3 \
-    | canon-gff3 -i - \
-    > "${name}_final.gff3"
+    | canon-gff3 -i - -source "augustus" \
+    > "${name}_augustus_gapfiller.gff3"
     """
 }
 
-augustusFinalJoinedChunks.into {
-    augustusFinalJoinedChunks4ExtractSeqs;
-    augustusFinalJoinedChunks4Stats;
+augustusGapFillerJoinedChunks.into {
+    augustusGapFillerJoinedChunks4FinalSet;
+    augustusGapFillerJoinedChunks4ExtractSeqs;
+    augustusGapFillerJoinedChunks4Stats;
 }
 
+
+process getFinalSet {
+
+    label "genometools"
+    label "small_task"
+
+    input:
+    set val(name),
+        file("evm.gff3"),
+        file("gapfilled.gff3") tidiedEVM4FinalSet
+            .map { n, a, g -> [n, g] }
+            .combine(
+                augustusGapFillerJoinedChunks4ExtractSeqs.map { n, a, g -> [n, g] },
+                by: 0
+            )
+
+    output:
+    set val(name),
+        val("final"),
+        file("${name}_final.gff3") into finalSet
+
+    script:
+    """
+    gt merge -tidy evm.gff3 gapfilled.gff3 > "${name}_final.gff3"
+    """
+}
+
+finalSet.into {
+    finalSet4ExtractSeqs;
+    finalSet4Stats;
+}
+
+
 //
-// STEP: Get statistics for each base.
+// STEP: Get statistics for each genome and analysis.
 //
 
 
@@ -4545,13 +4600,15 @@ pasaPredictions4ExtractSeqs
         tidiedGemomaPredictions4ExtractSeqs,
         augustusJoinedChunks4ExtractSeqs,
         tidiedGemomaComparativePredictions4ExtractSeqs,
-        augustusFinalJoinedChunks4ExtractSeqs,
+        tidiedEVM4ExtractSeqs,
+        augustusGapFillerJoinedChunks4ExtractSeqs,
+        finalSet4ExtractSeqs,
     )
     .set { gffs4ExtractSeqs }
 
 
 /*
- *
+ * Extracts protein and nucleotide sequences from predictions.
  */
 process extractSeqs {
 
@@ -4649,9 +4706,84 @@ pasaPredictions4Stats
         tidiedGemomaPredictions4Stats,
         augustusJoinedChunks4Stats,
         tidiedGemomaComparativePredictions4Stats,
-        augustusFinalJoinedChunks4Stats,
+        tidiedEVM4Stats,
+        augustusGapFillerJoinedChunks4Stats,
+        finalSet4Stats,
     )
-    .set { predictions4Stats }
+    .into {
+        predictions4Stats;
+        predictions4GetSpliceSiteInfo;
+        predictions4KnownStats;
+    }
+
+
+/*
+ * Get number of genes, exons, distributions of lengths etc.
+ */
+process getStats {
+
+    label "genometools"
+    label "small_task"
+
+    tag "${name} - ${analysis}"
+
+    publishDir "${params.outdir}/qc/${name}"
+
+    input:
+    set val(name), val(analysis), file(preds) from predictions4Stats
+
+    output:
+    file "${name}_${analysis}_stats.txt"
+
+    script:
+    """
+    gt stat \
+      -addintrons \
+      -genelengthdistri \
+      -genescoredistri \
+      -exonlengthdistri \
+      -exonnumberdistri \
+      -intronlengthdistri \
+      -cdslengthdistri \
+      "${preds}" \
+    > "${name}_${analysis}_stats.txt"
+    """
+}
+
+
+/*
+ * Get distributions of splice site pairs.
+ */
+proces getSpliceSiteInfo {
+
+    label "genometools"
+    label "small_task"
+
+    tag "${name} - ${analysis}"
+
+    publishDir "${params.outdir}/qc/${name}"
+
+    input:
+    set val(name),
+        val(analysis),
+        file(preds),
+        file(fasta),
+        file(faidx) from predictions4GetSpliceSiteInfo
+            .combine(genomes4GetSpliceSiteInfo, by: 0)
+
+    output:
+    file "${name}_${analysis}_splice_sites.txt"
+
+    script:
+    """
+    gt splicesiteinfo \
+      -seqfile "${fasta}" \
+      -matchdescstart \
+      -addintrons \
+      "${preds}" \
+    > "${name}_${analysis}_splice_sites.txt"
+    """
+}
 
 
 /*
@@ -4667,7 +4799,7 @@ process getKnownStats {
     publishDir "${params.outdir}/qc/${name}"
 
     input:
-    set val(name), val(analysis), file(preds), file(known) from predictions4Stats
+    set val(name), val(analysis), file(preds), file(known) from predictions4KnownStats
         .combine(genomes4GetKnownStats.map { n, f, i, g -> [n, g] }, by: 0)
         .filter { n, a, p, k -> k.name != "WAS_NULL" }
 
