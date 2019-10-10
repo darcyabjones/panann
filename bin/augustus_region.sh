@@ -5,7 +5,7 @@ set -euo pipefail
 # Default temp directory
 TMPDIR="tmp$$"
 NCPU="$(grep -c '^processor' /proc/cpuinfo)"
-OUTFILE="out"
+OUTDIR="out"
 MIN_INTRON=5
 UTR=false
 SPLICE_SITES=""
@@ -85,7 +85,7 @@ do
   esac
 done
 
-if   [ -z "${GENOME-}" ] || [ -z "${BED-}" ] || [ -z "${HINTS-}" ] || [ -z "${SPECIES-}" ]
+if   [ -z "${GENOME-}" ] || [ -z "${BED-}" ] || [ -z "${HINTS-}" ] || [ -z "${SPECIES-}" ] || [ -z "${CONFIG}" ]
 then
   usage
   echo "ERROR: One or more required arguments have not been provided"
@@ -112,6 +112,7 @@ done
 export BED
 export UTR
 export SPECIES
+export CONFIG
 export AUGUSTUS_CONFIG_PATH
 export SPLICE_SITES
 export MIN_INTRON
@@ -134,11 +135,10 @@ run_augustus() {
     CONFIG="${12}"
     TMPDIR="${13}"
 
-    STRAND_FLAG=$( [ "${STRAND}" == "-"] && echo "--strand=backward" || echo "--strand=forward" )
+    STRAND_FLAG=$( [ "${STRAND}" == "-" ] && echo "--strand=backward" || echo "--strand=forward" )
     UTR_FLAG=$( [ "${UTR}" == "true" ] && echo "--UTR" || echo "" )
 
     OUTPREFIX="${TMPDIR}/${SCAFFOLD}_${START}_${END}_${STRAND}_preds"
-    mkdir -p "${OUTDIR}"
 
     augustus \
       --species="${SPECIES}" \
@@ -168,13 +168,12 @@ export -f run_augustus
 
 # The exit 255 guard is necessary because xargs ignores all other error-codes.
 grep -v "^#" "${BED}" \
-| cut -f1,2,3,6 \
 | tr '\n' '\t' \
 | xargs -d '\t' -n 4 -P "${NCPU}" \
   bash -eu -c '
     run_augustus \
-      "${TMPDIR}/${0}.fasta \
-      "${TMPDIR}/${0}.gff3 \
+      "${TMPDIR}/${0}.fasta" \
+      "${TMPDIR}/${0}.gff3" \
       "${0}" \
       "${1}" \
       "${2}" \
@@ -185,10 +184,11 @@ grep -v "^#" "${BED}" \
       "${SPECIES}" \
       "${AUGUSTUS_CONFIG_PATH}" \
       "${CONFIG}" \
-      "${TMPDIR}"
+      "${TMPDIR}" \
     || (echo "Failed $0, $1, $2, $3"; exit 255)
   '
 
+mkdir -p "${OUTDIR}"
 mv ${TMPDIR}/*_preds.gff3 "${OUTDIR}"
 mv ${TMPDIR}/*_preds.err "${OUTDIR}"
 rm -rf -- "${TMPDIR}"

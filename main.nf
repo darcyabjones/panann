@@ -2491,8 +2491,8 @@ process runCodingQuarryPM {
     output:
     set val(name),
         file("${name}_codingquarrypm.gff3") optional true into codingQuarryPMPredictions
-    file "${name}_codingquarrypm_fusions.txt"
-    file "${name}_codingquarrypm_overlapreport.txt"
+    file "${name}_codingquarrypm_fusions.txt" optional true
+    file "${name}_codingquarrypm_overlapreport.txt" optional true
 
     script:
     """
@@ -3357,7 +3357,7 @@ process extractManualHints {
       --intron-trim 0 \
       --cds-trim 0 \
       --utr-trim 0 \
-      "${name}_manual_hints.gff3" \
+      "${gff}" \
     | awk -F '\t' '
         BEGIN {OFS="\\t"}
         {
@@ -3369,6 +3369,7 @@ process extractManualHints {
     > "${name}_manual_hints.gff3"
     """
 }
+
 
 /*
  * The final augustus step uses full length hints, not parts.
@@ -4101,6 +4102,14 @@ process extractGemomaComparativeHints {
 //
 
 /*
+ * This is a bit messy but we need to handle failures, or missing input data/software.
+ * I'm sure there's a tidier way.
+ *
+ * Essentially the point of this step is to concatenate each of the prediction
+ * gffs into 4 gffs for evm.
+ * Because we join with remainder: true, some of the files could be null
+ * so we explicitly create a reference to a non-existant file
+ * and check whether it exists in the bash command.
  */
 tidiedKnownSites4EVM
     .join(genemarkPredictions4EVM.map { n, a, g -> [n, g] }, by: 0, remainder: true)
@@ -4117,17 +4126,17 @@ tidiedKnownSites4EVM
     .map { n, m, g, p, c, cp, gem, a, cpg, gmap, spt, spp, ex -> [
         n,
         is_null(m) ? file('WAS_NULL_MANUAL') : m,
-        g,
-        p,
-        c,
-        cp,
+        is_null(g) ? file('WAS_NULL_GENEMARK') : g,
+        is_null(p) ? file('WAS_NULL_PASA') : p,
+        is_null(c) ? file('WAS_NULL_CQ') : c,
+        is_null(cp) ? file('WAS_NULL_CQPM') : cp,
         is_null(gem) ? file('WAS_NULL_GEMOMA') : gem,
-        a,
-        cpg,
-        gmap,
-        spt,
-        is_null(spp) ? file('WAS_NULL_SPP'): spp,
-        ex,
+        is_null(a) ? file('WAS_NULL_AUG') : a,
+        is_null(cpg) ? file('WAS_NULL_CPG') : cpg,
+        is_null(gmap) ? file('WAS_NULL_GMAP') : gmap,
+        is_null(spt) ? file('WAS_NULL_SPT') : spt,
+        is_null(spp) ? file('WAS_NULL_SPP') : spp,
+        is_null(ex) ? file('WAS_NULL_EXONERATE') : ex,
     ]}
     .set { joinedPreds4EVM }
 
@@ -4163,32 +4172,47 @@ process combineEVMHints {
 
     script:
     """
-    grep -v "^#" genemark.gff3 > denovo.gff3
+    touch denovo.gff3 transcripts.gff3 proteins.gff3 other.gff3
+
+    if [ -e "genemark.gff3" ];
+    then
+      grep -v "^#" genemark.gff3 >> denovo.gff3
+    fi
 
     # Transcript hints
-    awk -F'\t' '
-      BEGIN { OFS="\t" }
-      \$3 == "cDNA_match" {
-        \$2="gmap";
-        print
-      }
-    ' gmap.gff3 \
-    > transcripts.gff3
+    if [ -e "gmap.gff3" ];
+    then
+      awk -F'\t' '
+        BEGIN { OFS="\t" }
+        \$3 == "cDNA_match" {
+          \$2="gmap";
+          print
+        }
+      ' gmap.gff3 \
+      >> transcripts.gff3
+    fi
 
-    awk -F'\t' '
-      BEGIN { OFS="\t" }
-      \$3 == "exon" {
-        parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
-        target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
-        \$9="ID=${name}_spaln_transcript" parent ";Target=" target;
-        \$2="spaln_transcript";
-        \$3="cDNA_match";
-        print
-      }
-    ' spaln_trans.gff3 \
-    >> transcripts.gff3
+    if [ -e "spaln_trans.gff3" ];
+    then
+      awk -F'\t' '
+        BEGIN { OFS="\t" }
+        \$3 == "exon" {
+          parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
+          target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
+          \$9="ID=${name}_spaln_transcript" parent ";Target=" target;
+          \$2="spaln_transcript";
+          \$3="cDNA_match";
+          print
+        }
+      ' spaln_trans.gff3 \
+      >> transcripts.gff3
+    fi
 
-    grep -v "^#" exonerate.gff3 > proteins.gff3
+    if [ -e "exonerate.gff3" ];
+    then
+      grep -v "^#" exonerate.gff3 >> proteins.gff3
+    fi
+
     if [ -e "spaln_proteins.gff3" ];
     then
       awk -F'\t' '
@@ -4205,22 +4229,45 @@ process combineEVMHints {
       >> proteins.gff3
     fi
 
-    cat pasa.gff3 \
-        codingquarry.gff3 \
-        codingquarrypm.gff3 \
-        augustus.gff3 \
-        comparative.gff3 \
-    | grep -v "^#" > other.gff3
+    touch other_tmp.gff3
 
     if [ -e "manual.gff3" ];
     then
-      grep -v "^#" manual.gff3 >> other.gff3
+      cat manual.gff3 >> other_tmp.gff3
+    fi
+
+    if [ -e "pasa.gff3" ];
+    then
+      cat pasa.gff3 >> other_tmp.gff3
     fi
 
     if [ -e "gemoma.gff3" ];
     then
-      grep -v "^#" gemoma.gff3 >> other.gff3
+      cat gemoma.gff3 >> other_tmp.gff3
     fi
+
+    if [ -e "codingquarry.gff3" ];
+    then
+      cat codingquarry.gff3 >> other_tmp.gff3
+    fi
+
+    if [ -e "codingquarrypm.gff3" ];
+    then
+      cat codingquarrypm.gff3 >> other_tmp.gff3
+    fi
+
+    if [ -e "augustus.gff3" ];
+    then
+      cat augustus.gff3 >> other_tmp.gff3
+    fi
+
+    if [ -e "comparative.gff3" ];
+    then
+      cat comparative.gff3 >> other_tmp.gff3
+    fi
+
+    grep -v "^#" other_tmp.gff3 > other.gff3
+    rm other_tmp.gff3
     """
 }
 
@@ -4229,6 +4276,10 @@ process combineEVMHints {
  * TODO: EVM write evm commands doesn't seem to have an option
  * to provide alternative translation tables.
  * Might have to fork it?
+ *
+ * Because EVM won't do non-canonical splice sites,
+ * I catch all of the IDs that threw warnings and
+ * yield the bed file so that we can fill them in later.
  */
 process runEVM {
 
@@ -4252,7 +4303,7 @@ process runEVM {
 
     output:
     set val(name), file("${name}_evm.gff3") into evmResults
-    set val(name), file("to_redo.txt") into evmThrewOut
+    set val(name), file("to_redo.bed") into evmThrewOut
 
     script:
     """
@@ -4289,8 +4340,11 @@ process runEVM {
 
     find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
 
+    # Here we catch all of the predictions that
+    # caused errors.
     find . -name "evm.out.log" -exec cat {} \\; \
-    | sed "s/Sorry, prediction \\([^[:space:]]*\\) fails validation./\\\\1/" \
+    | grep "fails validation" \
+    | sed "s/.*prediction[[:space:]]\\+\\([^[:space:]]*\\)[[:space:]]\\+fails.*/\\\\1/" \
     > to_redo.txt
 
     cat denovo.gff3 transcripts.gff3 proteins.gff3 other.gff3 \
@@ -4342,6 +4396,7 @@ process tidyEVM {
 
 tidiedEVM.into {
     tidiedEVM4FinalSet;
+    tidiedEVM4FindMissingEVMPredictions;
     tidiedEVM4ExtractSeqs;
     tidiedEVM4Stats;
 }
@@ -4349,37 +4404,58 @@ tidiedEVM.into {
 
 /*
  * Select regions to re-predict genes in because EVM threw them out.
+ *
+ * If EVM found another gene at that locus we keep that one.
+ * We filter out any hints that overlap CDS sequence of an EVM prediction
+ * in the same strand, then we merge hints for these loci and pad the
+ * region out a bit to give some context.
  */
 process findMissingEVMPredictions {
 
     label "bedtools"
     label "small_task"
 
+    tag "${name}"
+
     input:
     set val(name),
         file("to_redo.bed"),
+        file("evm.gff3"),
         file(fasta),
         file(faidx) from evmThrewOut
+            .combine(tidiedEVM4FindMissingEVMPredictions.map {n, a, g -> [n, g]}, by: 0)
             .combine(genomes4FindMissingEVMPredictions, by: 0)
 
     output:
-    set val(name), file("regions.bed") into regionsToRedo
+    set val(name), file("clustered.bed") into regionsToRedo
 
     script:
     """
     sort \
       -k1,1 -k2,2n -k3,3n \
       --temporary-directory=tmp \
-    | sed 's/,/%2C/g' \
-    | bedtools merge -s -d 100 -c 4 -o distinct -i - \
+      to_redo.bed \
+    | bedtools subtract \
+        -a - \
+        -b <(awk '\$3 == "CDS"' "evm.gff3") \
+        -wa \
+        -s \
+        -A \
+    | bedtools merge -s -c 6 -o distinct -i - \
     | bedtools slop -g "${faidx}" -b 400 -i - \
-    | clustered.bed
+    > clustered.bed
     """
 }
 
 
 /*
  * Run austustus to find genes in the regions overlooked by evm.
+ * Because we remove lots of the intergenic space, this can be
+ * a lot faster than running on the genome, even when there are
+ * similar numbers of genes.
+ *
+ * Note that the hints here are complete, not the *part variants.
+ * In a sense we're trying to emulate EVM.
  */
 augustusExtrinsicHints4Final
     .mix(
@@ -4451,8 +4527,8 @@ process runAugustusGapFiller {
       -a "\${PWD}/augustus_config" \
       -p "${params.valid_splicesites}" \
       ${utr_flag} \
-      -t "${task.cpus} \
-      -m "${params.min_intron_hard} \
+      -n "${task.cpus}" \
+      -m "${params.min_intron_hard}" \
       -o "augustus_gaps"
     """
 }
@@ -4474,6 +4550,7 @@ process joinAugustusGapFillerChunks {
 
     output:
     set val(name),
+        val("gapfiller"),
         file("${name}_augustus_gapfiller.gff3") into augustusGapFillerJoinedChunks
 
     script:
@@ -4494,7 +4571,7 @@ process joinAugustusGapFillerChunks {
     done
 
       gt merge -tidy *_tidied.gff3 \
-    | canon-gff3 -i - -source "augustus" \
+    | canon-gff3 -i - --source "augustus" \
     > "${name}_augustus_gapfiller.gff3"
     """
 }
@@ -4505,7 +4582,9 @@ augustusGapFillerJoinedChunks.into {
     augustusGapFillerJoinedChunks4Stats;
 }
 
-
+/*
+ * Merge in the augustus predictions with the EVM ones.
+ */
 process getFinalSet {
 
     label "genometools"
@@ -4518,10 +4597,11 @@ process getFinalSet {
     input:
     set val(name),
         file("evm.gff3"),
-        file("gapfilled.gff3") tidiedEVM4FinalSet
+        file("gapfilled.gff3") from tidiedEVM4FinalSet
             .map { n, a, g -> [n, g] }
+            .view()
             .combine(
-                augustusGapFillerJoinedChunks4ExtractSeqs.map { n, a, g -> [n, g] },
+                augustusGapFillerJoinedChunks4FinalSet.map { n, a, g -> [n, g] },
                 by: 0
             )
 
@@ -4608,6 +4688,8 @@ process extractSeqs {
 
     label "genometools"
     label "small_task"
+
+    tag "${name} - ${analysis}"
 
     publishDir "${params.outdir}/annotations/${name}"
 
@@ -4748,7 +4830,7 @@ process getStats {
 /*
  * Get distributions of splice site pairs.
  */
-proces getSpliceSiteInfo {
+process getSpliceSiteInfo {
 
     label "genometools"
     label "small_task"

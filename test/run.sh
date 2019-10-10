@@ -1,0 +1,15 @@
+NXF_ANSI_LOG=false nextflow run main.nf \
+  -resume \
+  -profile dev,nimbus \
+  --genomes 'test/{A_fumigatus_A1163_chr1_chr2.fasta,A_fumigatus_Af293_chr1_chr2.fasta}' \
+  --transcripts 'test/*_mrna.fasta' \
+  --proteins 'test/*_proteins.fasta' \
+  --fastq "test/config.tsv" \
+  --known_sites "test/config.tsv" \
+  --outdir "test/results" \
+  --notrinity \
+  --signalp \
+  --genemark \
+  --remote_proteins ./uniref-identity%3A0.9+taxonomy%3A%22Fungi+%289FUNG%29+%5B4751%5D%22.fasta \
+  --busco_lineage pezizomycotina_odb9 \
+  --augustus_species aspergillus_fumigatus
