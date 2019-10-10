@@ -4168,7 +4168,7 @@ process combineEVMHints {
         file("denovo.gff3"),
         file("transcripts.gff3"),
         file("proteins.gff3"),
-        file("other.gff3") into combinedPreds4EVM
+        file("other.gff3") into combinedPreds
 
     script:
     """
@@ -4271,6 +4271,11 @@ process combineEVMHints {
     """
 }
 
+combinedPreds.into {
+    combinedPreds4EVM;
+    combinedPreds4GapFiller;
+}
+
 
 /*
  * TODO: EVM write evm commands doesn't seem to have an option
@@ -4303,7 +4308,6 @@ process runEVM {
 
     output:
     set val(name), file("${name}_evm.gff3") into evmResults
-    set val(name), file("to_redo.bed") into evmThrewOut
 
     script:
     """
@@ -4339,29 +4343,6 @@ process runEVM {
       --genome "${fasta}"
 
     find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
-
-    # Here we catch all of the predictions that
-    # caused errors.
-    find . -name "evm.out.log" -exec cat {} \\; \
-    | grep "fails validation" \
-    | sed "s/.*prediction[[:space:]]\\+\\([^[:space:]]*\\)[[:space:]]\\+fails.*/\\\\1/" \
-    > to_redo.txt
-
-    cat denovo.gff3 transcripts.gff3 proteins.gff3 other.gff3 \
-    | awk -F'\\t' '
-      BEGIN {OFS="\\t"}
-      \$3 == "mRNA" {
-            id=gensub(/.*ID=([^;]+).*/, "\\\\1", "g", \$9);
-            print \$1, \$4 - 1, \$5, \$2 "_" id, "0", \$7;
-      }
-    ' \
-    > all.bed
-
-    awk -F'\\t' '
-      NR==FNR {ARR[\$0]; next}
-      \$4 in ARR { print }
-    ' to_redo.txt all.bed \
-    > to_redo.bed
     """
 }
 
@@ -4419,11 +4400,15 @@ process findMissingEVMPredictions {
 
     input:
     set val(name),
-        file("to_redo.bed"),
         file("evm.gff3"),
+        file("denovo.gff3"),
+        file("transcripts.gff3"),
+        file("proteins.gff3"),
+        file("other.gff3"),
         file(fasta),
-        file(faidx) from evmThrewOut
-            .combine(tidiedEVM4FindMissingEVMPredictions.map {n, a, g -> [n, g]}, by: 0)
+        file(faidx) from tidiedEVM4FindMissingEVMPredictions
+            .map { n, a, g -> [n, g] }
+            .combine(combinedPreds4GapFiller, by: 0)
             .combine(genomes4FindMissingEVMPredictions, by: 0)
 
     output:
@@ -4431,18 +4416,21 @@ process findMissingEVMPredictions {
 
     script:
     """
-    sort \
+    awk -F'\\t' '
+      BEGIN { OFS="\\t" }
+      \$3 == "mRNA" {
+        print \$1, \$4, \$5, ".", ".", \$7
+      }' other.gff3 \
+    | sort \
       -k1,1 -k2,2n -k3,3n \
       --temporary-directory=tmp \
-      to_redo.bed \
     | bedtools subtract \
         -a - \
         -b <(awk '\$3 == "CDS"' "evm.gff3") \
-        -wa \
         -s \
         -A \
     | bedtools merge -s -c 6 -o distinct -i - \
-    | bedtools slop -g "${faidx}" -b 400 -i - \
+    | bedtools slop -g "${faidx}" -b 5 -i - \
     > clustered.bed
     """
 }
@@ -4575,6 +4563,7 @@ process joinAugustusGapFillerChunks {
     > "${name}_augustus_gapfiller.gff3"
     """
 }
+
 
 augustusGapFillerJoinedChunks.into {
     augustusGapFillerJoinedChunks4FinalSet;
