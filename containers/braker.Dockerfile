@@ -10,7 +10,7 @@ FROM "${BAMTOOLS_IMAGE}" as bamtools_builder
 FROM "${SPALN_IMAGE}" as spaln_builder
 
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as braker_builder
 
 ARG BRAKER_COMMIT="e117150b8ad66ecf7cd5828c7f7fe476a4a8c191"
 ARG BRAKER_REPO="https://github.com/Gaius-Augustus/BRAKER.git"
@@ -54,8 +54,8 @@ LABEL braker.version="${BRAKER_COMMIT}"
 
 ENV PATH="${BRAKER_PREFIX}/scripts:${PATH}"
 
-COPY --from=builder "${BRAKER_PREFIX}" "${BRAKER_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/braker.txt
+COPY --from=braker_builder "${BRAKER_PREFIX}" "${BRAKER_PREFIX}"
+COPY --from=braker_builder "${APT_REQUIREMENTS_FILE}" /build/apt/braker.txt
 
 ARG AUGUSTUS_COMMIT
 ARG AUGUSTUS_PREFIX_ARG="/opt/augustus/${AUGUSTUS_COMMIT}"

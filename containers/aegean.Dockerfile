@@ -3,7 +3,7 @@ ARG GENOMETOOLS_IMAGE
 
 FROM "${GENOMETOOLS_IMAGE}" as genometools_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as aegean_builder
 
 ARG AEGEAN_VERSION
 ARG AEGEAN_URL="https://github.com/standage/AEGeAn/archive/v0.15.0.tar.gz"
@@ -62,8 +62,8 @@ ENV LIBRARY_PATH="${AEGEAN_PREFIX}/lib:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${AEGEAN_PREFIX}/lib:${LD_LIBRARY_PATH}"
 ENV LD_RUN_PATH="${AEGEAN_PREFIX}/lib:${LD_RUN_PATH}"
 
-COPY --from=builder "${AEGEAN_PREFIX}" "${AEGEAN_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/aegean.txt
+COPY --from=aegean_builder "${AEGEAN_PREFIX}" "${AEGEAN_PREFIX}"
+COPY --from=aegean_builder "${APT_REQUIREMENTS_FILE}" /build/apt/aegean.txt
 
 
 ARG GENOMETOOLS_VERSION
@@ -88,3 +88,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

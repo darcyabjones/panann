@@ -5,7 +5,7 @@ ARG MMSEQS_IMAGE
 FROM "${HTSLIB_IMAGE}" as htslib_builder
 FROM "${MMSEQS_IMAGE}" as mmseqs_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as gemoma_builder
 
 ARG GEMOMA_VERSION
 ARG GEMOMA_URL="http://www.jstacs.de/downloads/GeMoMa-1.6.1.zip"
@@ -42,8 +42,8 @@ LABEL gemoma.version="${GEMOMA_VERSION}"
 
 ENV PATH="${GEMOMA_PREFIX}/bin:${PATH}"
 
-COPY --from=builder "${GEMOMA_PREFIX}" "${GEMOMA_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/gemoma.txt
+COPY --from=gemoma_builder "${GEMOMA_PREFIX}" "${GEMOMA_PREFIX}"
+COPY --from=gemoma_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gemoma.txt
 
 
 ARG HTSLIB_TAG
@@ -64,8 +64,8 @@ COPY --from=htslib_builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
 COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
 COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
 
-ARG MMSEQS_TAG="7-4e23d"
-ARG MMSEQS_PREFIX_ARG="/opt/mmseqs/${MMSEQS_TAG}"
+ARG MMSEQS_TAG
+ARG MMSEQS_PREFIX_ARG
 ENV MMSEQS_PREFIX="${MMSEQS_PREFIX_ARG}"
 LABEL mmseqs.version="${MMSEQS_TAG}"
 
@@ -84,3 +84,6 @@ RUN  set -eu \
   && java -jar "${GEMOMA_JAR}" CLI \
   && rm -rf -- GeMoMa_temp \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+
+WORKDIR /
