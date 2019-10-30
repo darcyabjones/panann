@@ -781,7 +781,7 @@ docker/panann: panann.Dockerfile docker/base
 	  --build-arg PASA_IMAGE="$(call make_image_name,pasa)" \
 	  --build-arg PASA_TAG="$(PASA_TAG)" \
 	  --build-arg PASA_PREFIX_ARG="$(PASA_PREFIX_ARG)" \
-	  --build-arg PYTHON3_IMAGER="$(call make_image_name,python3)" \
+	  --build-arg PYTHON3_IMAGE="$(call make_image_name,python3)" \
 	  --build-arg SALMON_IMAGE="$(call make_image_name,salmon)" \
 	  --build-arg SALMON_TAG="$(SALMON_TAG)" \
 	  --build-arg SALMON_PREFIX_ARG="$(SALMON_PREFIX_ARG)" \
