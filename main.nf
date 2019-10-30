@@ -377,6 +377,8 @@ if ( params.augustus_config ) {
         label "augustus"
         label "small_task"
 
+        time '1h'
+
         output:
         file "config" into augustusConfig
 
@@ -456,6 +458,7 @@ process getFaidx {
 
     label "samtools"
     label "small_task"
+    time '1h'
 
     tag "${name}"
 
@@ -589,6 +592,7 @@ process getUnivec {
 
     label "download"
     label "small_task"
+    time '3h'
 
     output:
     file "univec.fasta" into univec
@@ -607,6 +611,7 @@ process getSpalnIndex {
 
     label "spaln"
     label "small_task"
+    time '3h'
 
     tag "${name}"
 
@@ -642,6 +647,7 @@ process getGmapIndex {
 
     label "gmap"
     label "medium_task"
+    time '3h'
 
     tag "${name}"
 
@@ -669,6 +675,7 @@ process indexRemoteProteins {
 
     label "mmseqs"
     label "small_task"
+    time '3h'
 
     input:
     file fasta from remoteProteins.collectFile(newLine: true)
@@ -712,6 +719,7 @@ process getStarIndex {
 
     label "star"
     label "medium_task"
+    time '4h'
 
     tag "${name}"
 
@@ -767,6 +775,7 @@ process starFindNovelSpliceSites {
 
     label "star"
     label "medium_task"
+    time '1d'
 
     tag "${name} - ${read_group}"
 
@@ -827,6 +836,7 @@ process starAlignReads {
     label "star"
     label "medium_task"
     publishDir "${params.outdir}/aligned/${name}"
+    time '1d'
 
     tag "${name} - ${read_group}"
 
@@ -931,6 +941,8 @@ process assembleStringtie {
 
     label "stringtie"
     label "medium_task"
+    time '6h'
+
     publishDir "${params.outdir}/aligned/${name}"
 
     tag "${name} - ${read_group}"
@@ -986,6 +998,8 @@ process mergeStringtie {
 
     label "stringtie"
     label "medium_task"
+    time '6h'
+
     publishDir "${params.outdir}/aligned/${name}"
 
     tag "${name}"
@@ -1026,6 +1040,8 @@ process trinityAssemble {
 
     label "trinity"
     label "big_task"
+    time '1d'
+
     publishDir "${params.outdir}/assembled"
 
     tag "${read_group}"
@@ -1079,6 +1095,7 @@ process combineTranscripts {
 
     label "seqrenamer"
     label "small_task"
+    time '1h'
 
     input:
     file "*fasta" from transcripts
@@ -1110,6 +1127,7 @@ process combineTranscripts {
 process cleanTranscripts {
     label "pasa"
     label "small_task"
+    time '2h'
 
     input:
     file "transcripts.fasta" from combinedTranscripts
@@ -1143,6 +1161,7 @@ cleanedTranscripts.into {
 process alignSpalnTranscripts {
     label "spaln"
     label "medium_task"
+    time '5h'
 
     publishDir "${params.outdir}/aligned/${name}"
 
@@ -1193,6 +1212,7 @@ process tidySpalnTranscripts {
 
     label "genometools"
     label "small_task"
+    time '1h'
 
     tag "${name}"
 
@@ -1227,6 +1247,7 @@ process extractSpalnTranscriptHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
 
     publishDir "${params.outdir}/hints/${name}"
 
@@ -1273,6 +1294,7 @@ process alignGmapTranscripts {
 
     label "gmap"
     label "medium_task"
+    time '6h'
 
     publishDir "${params.outdir}/aligned/${name}"
 
@@ -1328,6 +1350,7 @@ process combineProteins {
 
     label "seqrenamer"
     label "small_task"
+    time '2h'
 
     input:
     file "*fasta" from proteins.collect()
@@ -1359,6 +1382,7 @@ process combineProteins {
 process alignSpalnProteins {
     label "spaln"
     label "medium_task"
+    time '6h'
 
     publishDir "${params.outdir}/aligned/${name}"
 
@@ -1408,6 +1432,7 @@ process fixSpalnProteinsStopCDS {
 
     label "gffpal"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -1429,6 +1454,7 @@ process tidySpalnProteins {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -1460,6 +1486,7 @@ process extractSpalnProteinHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -1502,6 +1529,7 @@ process matchRemoteProteinsToGenome {
 
     label "mmseqs"
     label "big_task"
+    time '1d'
 
     tag "${name}"
 
@@ -1577,6 +1605,7 @@ process clusterRemoteProteinsToGenome {
 
     label "bedtools"
     label "medium_task"
+    time '3h'
 
     tag "${name}"
 
@@ -1628,6 +1657,7 @@ process alignRemoteProteinsToGenome {
 
     label "exonerate"
     label "big_task"
+    time '1d'
 
     tag "${name}"
 
@@ -1676,6 +1706,7 @@ process extractExonerateRemoteProteinHints {
 
     label "braker"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -1776,6 +1807,7 @@ process runPASA {
     label "pasa"
     label "small_task"
     publishDir "${params.outdir}/annotations/${name}"
+    time '1d'
 
     tag "${name}"
 
@@ -1846,6 +1878,8 @@ process tidyPasa {
 
     label "aegean"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -1881,6 +1915,7 @@ process extractPasaHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
 
     publishDir "${params.outdir}/hints/${name}"
 
@@ -2010,6 +2045,8 @@ process extractAugustusRnaseqHints {
 
     label "braker"
     label "medium_task"
+    time '1d'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name} - ${read_group}"
@@ -2082,6 +2119,8 @@ process runGenemark {
 
     label "genemarkes"
     label "medium_task"
+    time '1d'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -2131,6 +2170,8 @@ process tidyGenemark {
 
     label "aegean"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -2170,6 +2211,8 @@ process extractGenemarkHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name}"
@@ -2249,6 +2292,8 @@ process runCodingQuarry {
 
     label "codingquarry"
     label "medium_task"
+    time '1d'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -2310,6 +2355,7 @@ process tidyCodingQuarry {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -2352,6 +2398,8 @@ process extractCodingQuarryHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name}"
@@ -2432,6 +2480,7 @@ if (params.signalp) {
 
         label "signalp"
         label "medium_task"
+        time '12h'
 
         tag "${name}"
 
@@ -2476,6 +2525,8 @@ if (params.signalp) {
 
         label "deepsig"
         label "medium_task"
+        time '12h'
+
         publishDir "${params.outdir}/annotations/${name}"
 
         tag "${name}"
@@ -2529,6 +2580,7 @@ process runCodingQuarryPM {
 
     label "codingquarry"
     label "bigmem_task"
+    time '1d'
 
     errorStrategy "retry"
     maxRetries 10
@@ -2593,6 +2645,7 @@ process tidyCodingQuarryPM {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     publishDir "${params.outdir}/annotations/${name}"
 
@@ -2636,6 +2689,8 @@ process extractCodingQuarryPMHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name}"
@@ -2713,6 +2768,7 @@ process extractGemomaRnaseqHints {
 
     label "gemoma"
     label "medium_task"
+    time '2h'
 
     tag "${name} - ${read_group}"
 
@@ -2773,6 +2829,7 @@ process combineGemomaRnaseqHints {
 
     label "gemoma"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -2824,6 +2881,7 @@ process extractGemomaCDSParts {
 
     label "gemoma"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -2865,6 +2923,7 @@ process alignGemomaCDSParts {
 
     label "mmseqs"
     label "medium_task"
+    time '6h'
 
     tag "${target_name} - ${ref_name}"
 
@@ -2936,6 +2995,7 @@ process runGemoma {
 
     label "gemoma"
     label "small_task"
+    time '6h'
 
     tag "${target_name} - ${ref_name}"
 
@@ -2993,6 +3053,8 @@ process combineGemomaPredictions {
 
     label "gemoma"
     label "small_task"
+    time '6h'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -3065,6 +3127,7 @@ process tidyGemoma {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     publishDir "${params.outdir}/annotations/${name}"
 
@@ -3107,6 +3170,8 @@ process extractGemomaHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name}"
@@ -3263,6 +3328,7 @@ process chunkifyGenomes {
 
     label "python3"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -3313,6 +3379,7 @@ process runAugustusDenovo {
 
     label "augustus"
     label "small_task"
+    time '1d'
 
     tag "${name} - ${strand}"
 
@@ -3368,6 +3435,7 @@ process tidyKnownSites {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -3399,6 +3467,7 @@ process extractManualHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -3465,6 +3534,7 @@ process runAugustusHints {
 
     label "augustus"
     label "small_task"
+    time '1d'
 
     tag "${name} - ${strand}"
 
@@ -3557,6 +3627,8 @@ process joinAugustusChunks {
 
     label "aegean"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name} - ${paramset}"
@@ -3610,6 +3682,8 @@ process extractAugustusGapFillerHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name}"
@@ -3676,6 +3750,7 @@ process extractGemomaComparativeCDSParts {
 
     label "gemoma"
     label "small_task"
+    time '3h'
 
     tag "${name} - ${analysis}"
 
@@ -3733,6 +3808,7 @@ process combineGemomaCDSParts {
 
     label "posix"
     label "small_task"
+    time '2h'
 
     input:
     file "*" from gemomaComparativeCDSParts
@@ -3775,6 +3851,7 @@ process clusterGemomaCDSParts {
 
     label "mmseqs"
     label "medium_task"
+    time '1d'
 
     input:
     set file("cdsparts.fasta"),
@@ -3814,6 +3891,7 @@ process selectGemomaCDSParts {
 
     label "python3"
     label "small_task"
+    time '6h'
 
     input:
     set file("protein_clusters.tsv"),
@@ -3845,6 +3923,7 @@ process alignGemomaComparativeCDSParts {
 
     label "mmseqs"
     label "medium_task"
+    time '12h'
 
     tag "${name}"
 
@@ -3913,6 +3992,7 @@ process runGemomaComparative {
 
     label "gemoma"
     label "medium_task"
+    time '6h'
 
     tag "${name}"
 
@@ -3968,6 +4048,8 @@ process finishGemomaComparativePredictions {
 
     label "gemoma"
     label "small_task"
+    time '6h'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -4028,6 +4110,7 @@ process tidyComparativeGemoma {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     publishDir "${params.outdir}/annotations/${name}"
 
@@ -4069,6 +4152,8 @@ process extractGemomaComparativeHints {
 
     label "gffpal"
     label "small_task"
+    time '2h'
+
     publishDir "${params.outdir}/hints/${name}"
 
     tag "${name}"
@@ -4208,6 +4293,7 @@ process combineEVMHints {
 
     label "posix"
     label "small_task"
+    time '6h'
 
     tag "${name}"
 
@@ -4353,6 +4439,7 @@ process runEVM {
 
     label "evm"
     label "big_task"
+    time '1d'
 
     publishDir "${params.outdir}/annotations/${name}"
 
@@ -4417,6 +4504,7 @@ process tidyEVM {
 
     label "aegean"
     label "small_task"
+    time '2h'
 
     tag "${name}"
 
@@ -4458,6 +4546,7 @@ process findMissingEVMPredictions {
 
     label "bedtools"
     label "small_task"
+    time '3h'
 
     tag "${name}"
 
@@ -4526,6 +4615,7 @@ process runAugustusGapFiller {
 
     label "augustus"
     label "big_task"
+    time '1d'
 
     tag "${name}"
 
@@ -4592,6 +4682,8 @@ process joinAugustusGapFillerChunks {
 
     label "aegean"
     label "small_task"
+    time '6h'
+
     publishDir "${params.outdir}/annotations/${name}"
 
     tag "${name}"
@@ -4641,6 +4733,7 @@ process getFinalSet {
 
     label "genometools"
     label "small_task"
+    time '6h'
 
     tag "${name}"
 
@@ -4685,8 +4778,10 @@ finalSet.into {
  * Could compare this number with that one.
  */
 process runBusco {
+
     label "busco"
     label "medium_task"
+    time '12h'
 
     tag "${name}"
 
@@ -4740,6 +4835,7 @@ process extractSeqs {
 
     label "genometools"
     label "small_task"
+    time '3h'
 
     tag "${name} - ${analysis}"
 
@@ -4795,6 +4891,7 @@ process runBuscoProteins {
 
     label "busco"
     label "medium_task"
+    time '6h'
 
     tag "${name} - ${analysis}"
 
@@ -4852,6 +4949,7 @@ process getStats {
 
     label "genometools"
     label "small_task"
+    time '3h'
 
     tag "${name} - ${analysis}"
 
@@ -4886,6 +4984,7 @@ process getSpliceSiteInfo {
 
     label "genometools"
     label "small_task"
+    time '3h'
 
     tag "${name} - ${analysis}"
 
@@ -4921,6 +5020,7 @@ process getKnownStats {
 
     label "aegean"
     label "small_task"
+    time '3h'
 
     tag "${name} - ${analysis}"
 
