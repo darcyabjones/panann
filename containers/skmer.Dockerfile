@@ -40,6 +40,7 @@ RUN  set -eu \
   && git fetch --tags \
   && git checkout "${SKMER_COMMIT}" \
   && pip3 install --prefix="${SKMER_PREFIX}" . \
+  && add_python3_site "${SKMER_PREFIX}/lib/python3.7/site-packages" \
   && wget -c -O mash.tar "${MASH_URL}" \
   && tar -xf mash.tar \
   && mv mash-*/mash "${SKMER_PREFIX}/bin" \
@@ -59,9 +60,9 @@ ENV SKMER_PREFIX="${SKMER_PREFIX_ARG}"
 LABEL skmer.version="${SKMER_COMMIT}"
 
 ENV PATH "${SKMER_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${SKMER_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=skmer_builder "${SKMER_PREFIX}" "${SKMER_PREFIX}"
+COPY --from=skmer_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/skmer.pth"
 COPY --from=skmer_builder "${APT_REQUIREMENTS_FILE}" /build/apt/skmer.txt
 
 

@@ -40,7 +40,6 @@ ENV GFFPAL_PREFIX="${GFFPAL_PREFIX_ARG}"
 LABEL gffpal.version="${GFFPAL_TAG}"
 
 ENV PATH "${GFFPAL_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${GFFPAL_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=gffpal_builder "${GFFPAL_PREFIX}" "${GFFPAL_PREFIX}"
 COPY --from=gffpal_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/gffpal.pth"
