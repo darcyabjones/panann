@@ -98,3 +98,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

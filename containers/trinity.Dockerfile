@@ -9,7 +9,7 @@ FROM "${BOWTIE2_IMAGE}" as bowtie2_builder
 FROM "${SALMON_IMAGE}" as salmon_builder
 FROM "${HTSLIB_IMAGE}" as htslib_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as trinity_builder
 
 
 ARG TRINITY_TAG
@@ -58,8 +58,8 @@ LABEL trinity.version="${TRINITY_TAG}"
 
 ENV PATH "${TRINITY_PREFIX}:${PATH}"
 
-COPY --from=builder "${TRINITY_PREFIX}" "${TRINITY_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/trinity.txt
+COPY --from=trinity_builder "${TRINITY_PREFIX}" "${TRINITY_PREFIX}"
+COPY --from=trinity_builder "${APT_REQUIREMENTS_FILE}" /build/apt/trinity.txt
 
 
 ARG JELLYFISH_VERSION
@@ -126,3 +126,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

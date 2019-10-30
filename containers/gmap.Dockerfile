@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as gmap_builder
 
 ARG GMAP_VERSION="2019-05-12"
 ARG GMAP_URL="http://research-pub.gene.com/gmap/src/gmap-gsnap-${GMAP_VERSION}.tar.gz"
@@ -42,8 +42,8 @@ LABEL gmap.version="${GMAP_VERSION}"
 
 ENV PATH "${GMAP_PREFIX}/bin:${PATH}"
 
-COPY --from=builder "${GMAP_PREFIX}" "${GMAP_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/gmap.txt
+COPY --from=gmap_builder "${GMAP_PREFIX}" "${GMAP_PREFIX}"
+COPY --from=gmap_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gmap.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -52,3 +52,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

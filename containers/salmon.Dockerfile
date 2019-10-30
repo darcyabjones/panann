@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as salmon_builder
 
 ARG SALMON_TAG="v0.13.1"
 ARG SALMON_REPO="https://github.com/COMBINE-lab/salmon.git"
@@ -51,8 +51,8 @@ LABEL salmon.version="${SALMON_TAG}"
 ENV PATH "${SALMON_PREFIX}/bin:${PATH}"
 ENV LD_LIBRARY_PATH "${SALMON_PREFIX}/lib:${LD_LIBRARY_PATH}"
 
-COPY --from=builder "${SALMON_PREFIX}" "${SALMON_PREFIX}"
-COPY --from=builder "/build/apt-requirements.txt" /build/apt/salmon.txt
+COPY --from=salmon_builder "${SALMON_PREFIX}" "${SALMON_PREFIX}"
+COPY --from=salmon_builder "/build/apt-requirements.txt" /build/apt/salmon.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -61,3 +61,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

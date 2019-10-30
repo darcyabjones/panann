@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as sibeliaz_builder
 
 ARG SIBELIAZ_COMMIT
 ARG SIBELIAZ_REPO="https://github.com/medvedevgroup/SibeliaZ.git"
@@ -41,8 +41,8 @@ LABEL sibeliaz.version="${SIBELIAZ_COMMIT}"
 
 ENV PATH="${PATH}:${SIBELIAZ_PREFIX}/bin"
 
-COPY --from=builder "${SIBELIAZ_PREFIX}" "${SIBELIAZ_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/sibeliaz.txt
+COPY --from=sibeliaz_builder "${SIBELIAZ_PREFIX}" "${SIBELIAZ_PREFIX}"
+COPY --from=sibeliaz_builder "${APT_REQUIREMENTS_FILE}" /build/apt/sibeliaz.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -51,3 +51,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

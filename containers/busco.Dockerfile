@@ -3,7 +3,7 @@ ARG AUGUSTUS_IMAGE
 
 FROM "${AUGUSTUS_IMAGE}" as augustus_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as busco_builder
 
 ARG BUSCO_COMMIT="1554283ab8ee7dd5b5290f4f748234f456c36e66"
 ARG BUSCO_REPO="https://gitlab.com/ezlab/busco.git"
@@ -38,6 +38,7 @@ RUN  set -eu \
   && python3 setup.py install --prefix=${PWD} \
   && rm -rf -- .git build src \
   && rm -rf -- *.pdf *.md setup.py CHANGELOG \
+  && add_python3_site "${BUSCO_PREFIX}/lib/python3.7/site-packages" \
   && add_runtime_dep \
        hmmer \
        ncbi-blast+ \
@@ -54,10 +55,10 @@ ENV BUSCO_PREFIX="${BUSCO_PREFIX_ARG}"
 LABEL busco.version="${BUSCO_COMMIT}"
 
 ENV PATH="${BUSCO_PREFIX}/scripts:${PATH}"
-ENV PYTHONPATH="${PYTHONPATH}:${BUSCO_PREFIX}/lib/python3.7/site-packages"
 
-COPY --from=builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
+COPY --from=busco_builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
+COPY --from=busco_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/busco.pth"
+COPY --from=busco_builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
 
 ARG AUGUSTUS_COMMIT
 ARG AUGUSTUS_PREFIX_ARG="/opt/augustus/${AUGUSTUS_COMMIT}"
@@ -77,3 +78,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

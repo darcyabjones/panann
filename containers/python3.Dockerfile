@@ -9,3 +9,5 @@ RUN  set -eu \
   && apt-get update \
   && apt_install_from_file "${APT_REQUIREMENTS_FILE}" \
   && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /

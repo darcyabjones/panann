@@ -7,7 +7,7 @@ FROM "${GMAP_IMAGE}" as gmap_builder
 FROM "${FASTA_IMAGE}" as fasta_builder
 FROM "${HTSLIB_IMAGE}" as htslib_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as pasa_builder
 
 ARG PASA_TAG
 ARG PASA_REPO="https://github.com/PASApipeline/PASApipeline.git"
@@ -65,8 +65,8 @@ LABEL pasa.version="${PASA_TAG}"
 
 ENV PATH "${PASA_PREFIX}:${PASA_PREFIX}/bin:${PASA_PREFIX}/misc_utilities:${PASA_PREFIX}/scripts:${PATH}"
 
-COPY --from=builder "${PASA_PREFIX}" "${PASA_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/pasa.txt
+COPY --from=pasa_builder "${PASA_PREFIX}" "${PASA_PREFIX}"
+COPY --from=pasa_builder "${APT_REQUIREMENTS_FILE}" /build/apt/pasa.txt
 
 ARG GMAP_VERSION
 ARG GMAP_PREFIX_ARG="/opt/gmap/${GMAP_VERSION}"
@@ -114,3 +114,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /
