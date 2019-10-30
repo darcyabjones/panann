@@ -3,7 +3,7 @@ ARG HTSLIB_IMAGE
 
 FROM "${HTSLIB_IMAGE}" as htslib_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as stringtie_builder
 
 ARG STRINGTIE_VERSION
 ARG STRINGTIE_URL="http://ccb.jhu.edu/software/stringtie/dl/stringtie-${STRINGTIE_VERSION}.tar.gz"
@@ -38,8 +38,8 @@ LABEL stringtie.version="${STRINGTIE_VERSION}"
 
 ENV PATH "${STRINGTIE_PREFIX}/bin:${PATH}"
 
-COPY --from=builder "${STRINGTIE_PREFIX}" "${STRINGTIE_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/stringtie.txt
+COPY --from=stringtie_builder "${STRINGTIE_PREFIX}" "${STRINGTIE_PREFIX}"
+COPY --from=stringtie_builder "${APT_REQUIREMENTS_FILE}" /build/apt/stringtie.txt
 
 ARG HTSLIB_TAG
 ARG SAMTOOLS_TAG
@@ -66,3 +66,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

@@ -1,6 +1,6 @@
 ARG IMAGE="darcyabjones/base"
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as deepsig_builder
 
 ARG DEEPSIG_COMMIT="69e01cb"
 ARG DEEPSIG_PREFIX_ARG="/opt/deepsig/${DEEPSIG_COMMIT}"
@@ -45,8 +45,9 @@ RUN  set -eu \
   && git checkout "${DEEPSIG_COMMIT}" \
   && rm -rf -- .git \
   && python -m pip install --prefix="${TENSORFLOW_PREFIX}" tensorflow=="${TENSORFLOW_VERSION}" \
-  && PYTHONPATH="${TENSORFLOW_PREFIX}/lib/python2.7/site-packages:${PYTHONPATH:-}" \
-     python -m pip install --prefix="${KERAS_PREFIX}" keras=="${KERAS_VERSION}" \
+  && add_python2_site "${TENSORFLOW_PREFIX}/lib/python2.7/site-packages" \
+  && python -m pip install --prefix="${KERAS_PREFIX}" keras=="${KERAS_VERSION}" \
+  && add_python2_site "${KERAS_PREFIX}/lib/python2.7/site-packages" \
   && add_runtime_dep \
        python \
        python-biopython \
@@ -79,13 +80,12 @@ LABEL keras.version="KERAS_VERSION"
 
 ENV PATH="${DEEPSIG_PREFIX}:${PATH}"
 ENV PATH="${TENSORFLOW_PREFIX}:${PATH}"
-ENV PYTHONPATH="${TENSORFLOW_PREFIX}/lib/python2.7/site-packages:${PYTHONPATH:-}"
-ENV PYTHONPATH="${KERAS_PREFIX}/lib/python2.7/site-packages:${PYTHONPATH:-}"
 
-COPY --from=builder "${DEEPSIG_PREFIX}" "${DEEPSIG_PREFIX}"
-COPY --from=builder "${TENSORFLOW_PREFIX}" "${TENSORFLOW_PREFIX}"
-COPY --from=builder "${KERAS_PREFIX}" "${KERAS_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/deepsig.txt
+COPY --from=deepsig_builder "${DEEPSIG_PREFIX}" "${DEEPSIG_PREFIX}"
+COPY --from=deepsig_builder "${TENSORFLOW_PREFIX}" "${TENSORFLOW_PREFIX}"
+COPY --from=deepsig_builder "${KERAS_PREFIX}" "${KERAS_PREFIX}"
+COPY --from=deepsig_builder "${PYTHON2_SITE_PTH_FILE}" "${PYTHON2_SITE_DIR}/deepsig.pth"
+COPY --from=deepsig_builder "${APT_REQUIREMENTS_FILE}" /build/apt/deepsig.txt
 
 
 RUN  set -eu \
@@ -95,3 +95,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

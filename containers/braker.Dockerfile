@@ -128,3 +128,5 @@ RUN  set -eu \
   && rm -rf /var/lib/apt/lists/* \
   && cpanm Logger::Simple \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

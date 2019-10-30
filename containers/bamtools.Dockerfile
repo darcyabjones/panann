@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as bamtools_builder
 
 ARG BAMTOOLS_TAG="v2.5.1"
 ARG BAMTOOLS_REPO="https://github.com/pezmaster31/bamtools.git"
@@ -44,8 +44,8 @@ ENV PATH="${BAMTOOLS_PREFIX}/bin:${PATH}"
 ENV LIBRARY_PATH="${LD_LIBRARY_PATH}:${BAMTOOLS_PREFIX}/lib"
 ENV CPATH="${CPATH}:${BAMTOOLS_PREFIX}/include"
 
-COPY --from=builder "${BAMTOOLS_PREFIX}" "${BAMTOOLS_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/bamtools.txt
+COPY --from=bamtools_builder "${BAMTOOLS_PREFIX}" "${BAMTOOLS_PREFIX}"
+COPY --from=bamtools_builder "${APT_REQUIREMENTS_FILE}" /build/apt/bamtools.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -54,3 +54,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

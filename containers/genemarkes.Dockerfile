@@ -40,3 +40,5 @@ RUN  set -eu \
   && cp /root/.gm_key "${GENEMARKES_PREFIX}/gm_key" \
   && cp -r gm_et_linux_64/gmes_petap/* "${GENEMARKES_PREFIX}" \
   && rm -rf -- gm_et_linux_64 genemark.tar.gz
+
+WORKDIR /

@@ -140,7 +140,7 @@ TRINITY_PREFIX_ARG=$(INSTALL_BASE)/trinity/$(TRINITY_TAG)
 
 
 
-GENERAL=htslib python3 posix genometools aegean seqrenamer gffpal r evm
+GENERAL=htslib python3 genometools aegean seqrenamer gffpal evm
 ALIGNMENT=spaln gmap mmseqs
 RNASEQ=trinity star stringtie
 ANNOTATION=augustus codingquarry deepsig busco pasa gemoma braker
@@ -236,26 +236,6 @@ docker/base: base.Dockerfile
 
 
 docker/python3: python3.Dockerfile docker/base
-	docker build \
-	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --file $< \
-	  -t "$(call make_image_name,$@)" \
-	  .
-	@mkdir -p "$(dir $@)"
-	@touch $@
-
-
-docker/r: r.Dockerfile docker/base
-	docker build \
-	  --build-arg IMAGE="$(BASE_IMAGE)" \
-	  --file $< \
-	  -t "$(call make_image_name,$@)" \
-	  .
-	@mkdir -p "$(dir $@)"
-	@touch $@
-
-
-docker/posix: posix.Dockerfile docker/base
 	docker build \
 	  --build-arg IMAGE="$(BASE_IMAGE)" \
 	  --file $< \
@@ -727,7 +707,7 @@ docker/panann: docker/busco docker/codingquarry docker/deepsig
 docker/panann: docker/evm docker/exonerate docker/fasta
 docker/panann: docker/gemoma docker/genometools docker/gffpal
 docker/panann: docker/gmap docker/htslib docker/jellyfish
-docker/panann: docker/mmseqs docker/pasa docker/salmon
+docker/panann: docker/mmseqs docker/pasa docker/python3 docker/salmon
 docker/panann: docker/spaln docker/seqrenamer docker/star
 docker/panann: docker/stringtie docker/trinity
 docker/panann: panann.Dockerfile docker/base
@@ -801,6 +781,7 @@ docker/panann: panann.Dockerfile docker/base
 	  --build-arg PASA_IMAGE="$(call make_image_name,pasa)" \
 	  --build-arg PASA_TAG="$(PASA_TAG)" \
 	  --build-arg PASA_PREFIX_ARG="$(PASA_PREFIX_ARG)" \
+	  --build-arg PYTHON3_IMAGER="$(call make_image_name,python3)" \
 	  --build-arg SALMON_IMAGE="$(call make_image_name,salmon)" \
 	  --build-arg SALMON_TAG="$(SALMON_TAG)" \
 	  --build-arg SALMON_PREFIX_ARG="$(SALMON_PREFIX_ARG)" \
@@ -868,6 +849,15 @@ docker/panann-plus: panann-plus.Dockerfile docker/panann docker/genemarkes docke
 #SEQTK_COMMIT=ca4785c
 #SEQTK_REPO=https://github.com/lh3/seqtk.git
 #SEQTK_PREFIX_ARG=$(INSTALL_BASE)/seqtk/$(SEQTK_COMMIT)
+#
+#docker/r: r.Dockerfile docker/base
+#	docker build \
+#	  --build-arg IMAGE="$(BASE_IMAGE)" \
+#	  --file $< \
+#	  -t "$(call make_image_name,$@)" \
+#	  .
+#	@mkdir -p "$(dir $@)"
+#	@touch $@
 #
 #
 #docker/sibeliaz: sibeliaz.Dockerfile docker/base

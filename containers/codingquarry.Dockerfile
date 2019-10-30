@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as codingquarry_builder
 
 ARG CODINGQUARRY_VERSION
 ARG CODINGQUARRY_URL="https://downloads.sourceforge.net/project/codingquarry/CodingQuarry_v2.0.tar.gz"
@@ -43,8 +43,8 @@ LABEL codingquarry.version="${CODINGQUARRY_VERSION}"
 
 ENV PATH "${CODINGQUARRY_PREFIX}/bin:${PATH}"
 
-COPY --from=builder "${CODINGQUARRY_PREFIX}" "${CODINGQUARRY_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/codingquarry.txt
+COPY --from=codingquarry_builder "${CODINGQUARRY_PREFIX}" "${CODINGQUARRY_PREFIX}"
+COPY --from=codingquarry_builder "${APT_REQUIREMENTS_FILE}" /build/apt/codingquarry.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -53,3 +53,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

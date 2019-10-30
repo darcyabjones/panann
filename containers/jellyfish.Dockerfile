@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as jellyfish_builder
 
 ARG JELLYFISH_VERSION
 ARG JELLYFISH_URL="https://github.com/gmarcais/Jellyfish/releases/download/v${JELLYFISH_VERSION}/jellyfish-${JELLYFISH_VERSION}.tar.gz"
@@ -45,4 +45,6 @@ ENV LIBRARY_PATH="${JELLYFISH_DIR}/lib:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${JELLYFISH_DIR}/lib:${LD_LIBRARY_PATH}"
 ENV LD_RUN_PATH="${JELLYFISH_DIR}/lib:${LD_RUN_PATH}"
 
-COPY --from=builder "${JELLYFISH_PREFIX}" "${JELLYFISH_PREFIX}"
+COPY --from=jellyfish_builder "${JELLYFISH_PREFIX}" "${JELLYFISH_PREFIX}"
+
+WORKDIR /

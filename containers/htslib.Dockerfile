@@ -1,6 +1,6 @@
 ARG IMAGE="darcyabjones/base"
 
-FROM ${IMAGE} as builder
+FROM "${IMAGE}" as htslib_builder
 
 ARG HTSLIB_TAG
 ARG BCFTOOLS_TAG
@@ -92,7 +92,7 @@ RUN  set -eu \
 # Samtools also depends on htslib and it's dependencies.
 
 
-FROM ${IMAGE}
+FROM "${IMAGE}"
 
 ARG HTSLIB_TAG
 ARG BCFTOOLS_TAG
@@ -115,10 +115,10 @@ ENV CPATH="${HTSLIB_PREFIX}/include:${CPATH}"
 ENV LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${HTSLIB_PREFIX}/lib:${LD_LIBRARY_PATH}"
 
-COPY --from=builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
-COPY --from=builder "${BCFTOOLS_PREFIX}" "${BCFTOOLS_PREFIX}"
-COPY --from=builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
+COPY --from=htslib_builder "${HTSLIB_PREFIX}" "${HTSLIB_PREFIX}"
+COPY --from=htslib_builder "${BCFTOOLS_PREFIX}" "${BCFTOOLS_PREFIX}"
+COPY --from=htslib_builder "${SAMTOOLS_PREFIX}" "${SAMTOOLS_PREFIX}"
+COPY --from=htslib_builder "${APT_REQUIREMENTS_FILE}" /build/apt/htslib.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -127,3 +127,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

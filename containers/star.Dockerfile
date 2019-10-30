@@ -3,7 +3,7 @@ ARG HTSLIB_IMAGE
 
 FROM "${HTSLIB_IMAGE}" as htslib_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as star_builder
 
 ARG STAR_VERSION
 ARG STAR_URL="https://github.com/alexdobin/STAR/archive/${STAR_VERSION}.tar.gz"
@@ -43,8 +43,8 @@ ENV STAR_PREFIX="${STAR_PREFIX_ARG}"
 ENV PATH="${STAR_PREFIX}/bin:${PATH}"
 LABEL star.version="${STAR_VERSION}"
 
-COPY --from=builder "${STAR_PREFIX}" "${STAR_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/star.txt
+COPY --from=star_builder "${STAR_PREFIX}" "${STAR_PREFIX}"
+COPY --from=star_builder "${APT_REQUIREMENTS_FILE}" /build/apt/star.txt
 
 ARG HTSLIB_TAG
 ARG SAMTOOLS_TAG
@@ -71,3 +71,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

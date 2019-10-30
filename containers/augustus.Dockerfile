@@ -3,7 +3,7 @@ ARG HTSLIB_IMAGE
 
 FROM "${HTSLIB_IMAGE}" as htslib_builder
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as augustus_builder
 
 ARG AUGUSTUS_COMMIT="8b1b14a7489e4545e89c8725dc33268f6c2a9117"
 ARG AUGUSTUS_REPO="https://github.com/Gaius-Augustus/Augustus.git"
@@ -118,8 +118,8 @@ LABEL augustus.version="${AUGUSTUS_COMMIT}"
 ENV PATH="${AUGUSTUS_PREFIX}/bin:${AUGUSTUS_PREFIX}/scripts:${PATH}"
 ENV AUGUSTUS_CONFIG_PATH="${AUGUSTUS_PREFIX}/config"
 
-COPY --from=builder "${AUGUSTUS_PREFIX}" "${AUGUSTUS_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/augustus.txt
+COPY --from=augustus_builder "${AUGUSTUS_PREFIX}" "${AUGUSTUS_PREFIX}"
+COPY --from=augustus_builder "${APT_REQUIREMENTS_FILE}" /build/apt/augustus.txt
 
 ARG HTSLIB_TAG
 ARG SAMTOOLS_TAG
@@ -150,3 +150,5 @@ RUN  set -eu \
 # This is useful for testing.
 # COPY --from=builder "/tmp/augustus/examples" "${AUGUSTUS_PREFIX}/examples"
 # RUN augustus --species=human --UTR=on ${AUGUSTUS_PREFIX}/examples/example.fa
+
+WORKDIR /

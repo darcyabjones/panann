@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as genometools_builder
 
 ARG GENOMETOOLS_VERSION
 ARG GENOMETOOLS_URL="http://genometools.org/pub/genometools-${GENOMETOOLS_VERSION}.tar.gz"
@@ -42,8 +42,8 @@ ENV LIBRARY_PATH="${GENOMETOOLS_PREFIX}/lib:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${GENOMETOOLS_PREFIX}/lib:${LD_LIBRARY_PATH}"
 ENV LD_RUN_PATH="${GENOMETOOLS_PREFIX}/lib:${LD_RUN_PATH}"
 
-COPY --from=builder "${GENOMETOOLS_PREFIX}" "${GENOMETOOLS_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/genometools.txt
+COPY --from=genometools_builder "${GENOMETOOLS_PREFIX}" "${GENOMETOOLS_PREFIX}"
+COPY --from=genometools_builder "${APT_REQUIREMENTS_FILE}" /build/apt/genometools.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -52,3 +52,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

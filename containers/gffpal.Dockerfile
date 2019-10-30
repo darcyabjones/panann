@@ -28,6 +28,7 @@ RUN  set -eu \
   && git fetch --tags \
   && git checkout "tags/${GFFPAL_TAG}" \
   && pip3 install --prefix="${GFFPAL_PREFIX}" . \
+  && add_python3_site "${GFFPAL_PREFIX}/lib/python3.7/site-packages" \
   && add_runtime_dep python3 python3-biopython
 
 
@@ -42,6 +43,7 @@ ENV PATH "${GFFPAL_PREFIX}/bin:${PATH}"
 ENV PYTHONPATH "${GFFPAL_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=gffpal_builder "${GFFPAL_PREFIX}" "${GFFPAL_PREFIX}"
+COPY --from=gffpal_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/gffpal.pth"
 COPY --from=gffpal_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gffpal.txt
 
 RUN  set -eu \
@@ -51,3 +53,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

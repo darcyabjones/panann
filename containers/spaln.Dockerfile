@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as spaln_builder
 
 ARG SPALN_TAG
 ARG SPALN_REPO="https://github.com/ogotoh/spaln.git"
@@ -47,8 +47,8 @@ LABEL spaln.version="${SPALN_TAG}"
 
 ENV PATH="${SPALN_PREFIX}/bin:${SPALN_PREFIX}/perl:${PATH}"
 
-COPY --from=builder "${SPALN_PREFIX}" "${SPALN_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/spaln.txt
+COPY --from=spaln_builder "${SPALN_PREFIX}" "${SPALN_PREFIX}"
+COPY --from=spaln_builder "${APT_REQUIREMENTS_FILE}" /build/apt/spaln.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -57,3 +57,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

@@ -1,6 +1,6 @@
 ARG IMAGE="darcyabjones/base"
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as bowtie2_builder
 
 ARG BOWTIE2_TAG
 ARG BOWTIE2_PREFIX_ARG="/opt/bowtie2/${BOWTIE2_TAG}"
@@ -42,8 +42,8 @@ LABEL bowtie2.version="${BOWTIE2_TAG}"
 
 ENV PATH="${PATH}:${BOWTIE2_PREFIX}/bin"
 
-COPY --from=builder "${BOWTIE2_PREFIX}" "${BOWTIE2_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/bowtie2.txt
+COPY --from=bowtie2_builder "${BOWTIE2_PREFIX}" "${BOWTIE2_PREFIX}"
+COPY --from=bowtie2_builder "${APT_REQUIREMENTS_FILE}" /build/apt/bowtie2.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -52,3 +52,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

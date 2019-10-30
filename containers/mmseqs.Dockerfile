@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as mmseqs_builder
 
 ## Config variables
 ARG MMSEQS_TAG="9-d36de"
@@ -68,15 +68,15 @@ FROM "${IMAGE}"
 
 LABEL maintainer="darcy.ab.jones@gmail.com"
 
-ARG MMSEQS_TAG="7-4e23d"
-ARG MMSEQS_PREFIX_ARG="/opt/mmseqs/${MMSEQS_TAG}"
+ARG MMSEQS_TAG
+ARG MMSEQS_PREFIX_ARG
 ENV MMSEQS_PREFIX="${MMSEQS_PREFIX_ARG}"
 LABEL mmseqs.version="${MMSEQS_TAG}"
 
 ENV PATH="${MMSEQS_PREFIX}/bin:${PATH}"
 
-COPY --from=builder "${MMSEQS_PREFIX}" "${MMSEQS_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/mmseqs.txt
+COPY --from=mmseqs_builder "${MMSEQS_PREFIX}" "${MMSEQS_PREFIX}"
+COPY --from=mmseqs_builder "${APT_REQUIREMENTS_FILE}" /build/apt/mmseqs.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -85,3 +85,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

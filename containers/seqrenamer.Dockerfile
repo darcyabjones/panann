@@ -16,9 +16,9 @@ ENV GFFPAL_PREFIX="${GFFPAL_PREFIX_ARG}"
 LABEL gffpal.version="${GFFPAL_TAG}"
 
 ENV PATH "${GFFPAL_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${GFFPAL_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=gffpal_builder "${GFFPAL_PREFIX}" "${GFFPAL_PREFIX}"
+COPY --from=gffpal_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/gffpal.pth"
 COPY --from=gffpal_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gffpal.txt
 
 
@@ -42,6 +42,7 @@ RUN  set -eu \
   && git fetch --tags \
   && git checkout "tags/${SEQRENAMER_TAG}" \
   && pip3 install --prefix="${SEQRENAMER_PREFIX}" . \
+  && add_python3_site "${SEQRENAMER_PREFIX}/lib/python3.7/site-packages" \
   && add_runtime_dep python3
 
 
@@ -53,9 +54,9 @@ ENV SEQRENAMER_PREFIX="${SEQRENAMER_PREFIX_ARG}"
 LABEL seqrenamer.version="${SEQRENAMER_TAG}"
 
 ENV PATH "${SEQRENAMER_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${SEQRENAMER_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=seqrenamer_builder "${SEQRENAMER_PREFIX}" "${SEQRENAMER_PREFIX}"
+COPY --from=seqrenamer_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/seqrenamer.pth"
 COPY --from=seqrenamer_builder "${APT_REQUIREMENTS_FILE}" /build/apt/seqrenamer.txt
 
 
@@ -65,9 +66,9 @@ ENV GFFPAL_PREFIX="${GFFPAL_PREFIX_ARG}"
 LABEL gffpal.version="${GFFPAL_TAG}"
 
 ENV PATH "${GFFPAL_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${GFFPAL_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=gffpal_builder "${GFFPAL_PREFIX}" "${GFFPAL_PREFIX}"
+COPY --from=gffpal_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/gffpal.pth"
 COPY --from=gffpal_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gffpal.txt
 
 
@@ -78,3 +79,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /

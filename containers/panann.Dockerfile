@@ -19,6 +19,7 @@ ARG HTSLIB_IMAGE
 ARG JELLYFISH_IMAGE
 ARG MMSEQS_IMAGE
 ARG PASA_IMAGE
+ARG PYTHON3_IMAGE
 ARG SALMON_IMAGE
 ARG SEQRENAMER_IMAGE
 ARG SPALN_IMAGE
@@ -46,6 +47,7 @@ FROM "${HTSLIB_IMAGE}" as htslib_builder
 FROM "${JELLYFISH_IMAGE}" as jellyfish_builder
 FROM "${MMSEQS_IMAGE}" as mmseqs_builder
 FROM "${PASA_IMAGE}" as pasa_builder
+FROM "${PYTHON3_IMAGE}" as python3_builder
 FROM "${SALMON_IMAGE}" as salmon_builder
 FROM "${SEQRENAMER_IMAGE}" as seqrenamer_builder
 FROM "${SPALN_IMAGE}" as spaln_builder
@@ -132,9 +134,9 @@ ARG BUSCO_PREFIX_ARG="/opt/busco/${BUSCO_COMMIT}"
 ENV BUSCO_PREFIX="${BUSCO_PREFIX_ARG}"
 
 ENV PATH="${BUSCO_PREFIX}/scripts:${PATH}"
-ENV PYTHONPATH="${PYTHONPATH}:${BUSCO_PREFIX}/lib/python3.5/site-packages"
 
 COPY --from=busco_builder "${BUSCO_PREFIX}" "${BUSCO_PREFIX}"
+COPY --from=busco_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/busco.pth"
 COPY --from=busco_builder "${APT_REQUIREMENTS_FILE}" /build/apt/busco.txt
 
 
@@ -169,12 +171,11 @@ LABEL keras.version="KERAS_VERSION"
 
 ENV PATH="${DEEPSIG_PREFIX}:${PATH}"
 ENV PATH="${TENSORFLOW_PREFIX}:${PATH}"
-ENV PYTHONPATH="${TENSORFLOW_PREFIX}/lib/python2.7/site-packages:${PYTHONPATH:-}"
-ENV PYTHONPATH="${KERAS_PREFIX}/lib/python2.7/site-packages:${PYTHONPATH:-}"
 
 COPY --from=deepsig_builder "${DEEPSIG_PREFIX}" "${DEEPSIG_PREFIX}"
 COPY --from=deepsig_builder "${TENSORFLOW_PREFIX}" "${TENSORFLOW_PREFIX}"
 COPY --from=deepsig_builder "${KERAS_PREFIX}" "${KERAS_PREFIX}"
+COPY --from=deepsig_builder "${PYTHON2_SITE_PTH_FILE}" "${PYTHON2_SITE_DIR}/deepsig.pth"
 COPY --from=deepsig_builder "${APT_REQUIREMENTS_FILE}" /build/apt/deepsig.txt
 
 
@@ -246,9 +247,9 @@ ENV GFFPAL_PREFIX="${GFFPAL_PREFIX_ARG}"
 LABEL gffpal.version="${GFFPAL_TAG}"
 
 ENV PATH "${GFFPAL_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${GFFPAL_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=gffpal_builder "${GFFPAL_PREFIX}" "${GFFPAL_PREFIX}"
+COPY --from=gffpal_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/gffpal.pth"
 COPY --from=gffpal_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gffpal.txt
 
 
@@ -317,6 +318,9 @@ COPY --from=pasa_builder "${PASA_PREFIX}" "${PASA_PREFIX}"
 COPY --from=pasa_builder "${APT_REQUIREMENTS_FILE}" /build/apt/pasa.txt
 
 
+COPY --from=python3_builder "${APT_REQUIREMENTS_FILE}" /build/apt/python3.txt
+
+
 ARG SALMON_TAG
 ARG SALMON_PREFIX_ARG="/opt/salmon/${SALMON_TAG}"
 ENV SALMON_PREFIX="${SALMON_PREFIX_ARG}"
@@ -334,9 +338,9 @@ ENV SEQRENAMER_PREFIX="${SEQRENAMER_PREFIX_ARG}"
 LABEL seqrenamer.version="${SEQRENAMER_TAG}"
 
 ENV PATH "${SEQRENAMER_PREFIX}/bin:${PATH}"
-ENV PYTHONPATH "${SEQRENAMER_PREFIX}/lib/python3.7/site-packages:${PYTHONPATH}"
 
 COPY --from=seqrenamer_builder "${SEQRENAMER_PREFIX}" "${SEQRENAMER_PREFIX}"
+COPY --from=seqrenamer_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/seqrenamer.pth"
 COPY --from=seqrenamer_builder "${APT_REQUIREMENTS_FILE}" /build/apt/seqrenamer.txt
 
 
@@ -379,7 +383,6 @@ ENV PATH "${TRINITY_PREFIX}:${PATH}"
 COPY --from=trinity_builder "${TRINITY_PREFIX}" "${TRINITY_PREFIX}"
 COPY --from=trinity_builder "${APT_REQUIREMENTS_FILE}" /build/apt/trinity.txt
 
-ENV PYTHONPATH=""
 
 # liblogger-simple-perl is still in unstable.
 # needed for braker.
@@ -389,8 +392,6 @@ RUN  set -eu \
   && . /build/base.sh \
   && apt-get update \
   && apt-get upgrade \
-  && dpkg --configure -a \
-  && apt-get install --fix-broken -y --no-install-recommends python3-minimal \
   && apt_install_from_file /build/apt/*.txt \
   && apt-get install -y --no-install-recommends \
        cpanminus \

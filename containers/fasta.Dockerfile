@@ -1,6 +1,6 @@
 ARG IMAGE
 
-FROM "${IMAGE}" as builder
+FROM "${IMAGE}" as fasta_builder
 
 ARG FASTA_VERSION
 ARG FASTA_URL="http://faculty.virginia.edu/wrpearson/fasta/fasta36/fasta-36.3.8g.tar.gz"
@@ -41,8 +41,8 @@ LABEL fasta.version="${FASTA_VERSION}"
 
 ENV PATH="${FASTA_PREFIX}/bin:${FASTA_PREFIX}/psisearch2:${PATH}"
 
-COPY --from=builder "${FASTA_PREFIX}" "${FASTA_PREFIX}"
-COPY --from=builder "${APT_REQUIREMENTS_FILE}" /build/apt/fasta.txt
+COPY --from=fasta_builder "${FASTA_PREFIX}" "${FASTA_PREFIX}"
+COPY --from=fasta_builder "${APT_REQUIREMENTS_FILE}" /build/apt/fasta.txt
 
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
@@ -51,3 +51,5 @@ RUN  set -eu \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
+
+WORKDIR /
