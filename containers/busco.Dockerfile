@@ -77,6 +77,7 @@ RUN  set -eu \
   && apt-get update \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
+  && cat "${PYTHON3_SITE_DIR}/busco.pth" >> "${PYTHON3_SITE_PTH_FILE}" \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
 
 WORKDIR /

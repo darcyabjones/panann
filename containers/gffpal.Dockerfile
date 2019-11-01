@@ -45,12 +45,14 @@ COPY --from=gffpal_builder "${GFFPAL_PREFIX}" "${GFFPAL_PREFIX}"
 COPY --from=gffpal_builder "${PYTHON3_SITE_PTH_FILE}" "${PYTHON3_SITE_DIR}/gffpal.pth"
 COPY --from=gffpal_builder "${APT_REQUIREMENTS_FILE}" /build/apt/gffpal.txt
 
+
 RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
   && . /build/base.sh \
   && apt-get update \
   && apt_install_from_file /build/apt/*.txt \
   && rm -rf /var/lib/apt/lists/* \
+  && cat "${PYTHON3_SITE_DIR}/gffpal.pth" >> "${PYTHON3_SITE_PTH_FILE}" \
   && cat /build/apt/*.txt >> "${APT_REQUIREMENTS_FILE}"
 
 WORKDIR /
