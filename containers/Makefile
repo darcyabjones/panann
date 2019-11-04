@@ -119,7 +119,7 @@ SIGNALP5_VERSION=5.0
 SIGNALP5_PREFIX_ARG=$(INSTALL_BASE)/signalp/$(SIGNALP5_VERSION)
 SIGNALP5_TAR=sources/signalp-5.0.Linux.tar.gz
 
-SPALN_TAG=Ver.2.3.3f
+SPALN_TAG=Ver.2.3.3
 SPALN_REPO=https://github.com/ogotoh/spaln.git
 SPALN_PREFIX_ARG=$(INSTALL_BASE)/spaln/$(SPALN_TAG)
 
