@@ -181,6 +181,7 @@ params.augustus_gapfiller_weights = "data/extrinsic_gapfiller.cfg"
 // The config file for evidence modeller
 params.evm_config = "data/evm.cfg"
 
+params.min_contig_length = 500
 
 // RNAseq params
 
@@ -471,7 +472,12 @@ process getFaidx {
     script:
     """
     # braker panics if the genome has descriptions
-    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' orig.fa > "${name}.fasta"
+    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' orig.fa \
+    | fasta_to_tsv.sh \
+    | awk 'length(\$2) >= ${params.min_contig_length}' \
+    | tsv_to_fasta.sh \
+    > "${name}.fasta"
+
 
     samtools faidx "${name}.fasta"
     """
@@ -620,12 +626,12 @@ process getSpalnIndex {
 
     output:
     set val(name),
-        file("${genome.baseName}.bkn"),
-        file("${genome.baseName}.ent"),
-        file("${genome.baseName}.idx"),
-        file("${genome.baseName}.bkp"),
-        file("${genome.baseName}.grp"),
-        file("${genome.baseName}.seq") into spalnIndices
+        file("${name}.bkn"),
+        file("${name}.ent"),
+        file("${name}.idx"),
+        file("${name}.bkp"),
+        file("${name}.grp"),
+        file("${name}.seq") into spalnIndices
 
     script:
     """
@@ -1129,6 +1135,8 @@ process cleanTranscripts {
     label "small_task"
     time '2h'
 
+    publishDir "${params.outdir}/transcripts"
+
     input:
     file "transcripts.fasta" from combinedTranscripts
     file "univec.fasta" from univec
@@ -1529,7 +1537,7 @@ process matchRemoteProteinsToGenome {
 
     label "mmseqs"
     label "big_task"
-    time '1d'
+    time '6h'
 
     tag "${name}"
 
@@ -1657,7 +1665,7 @@ process alignRemoteProteinsToGenome {
 
     label "exonerate"
     label "big_task"
-    time '1d'
+    time '6h'
 
     tag "${name}"
 
@@ -1688,6 +1696,8 @@ process alignRemoteProteinsToGenome {
       -x "${params.max_intron_hard}" \
       -r "${params.trans_table}" \
       -o "${name}_remote_proteins_exonerate.gff"
+
+    rm -rf -- tmp
     """
 }
 
@@ -2045,7 +2055,7 @@ process extractAugustusRnaseqHints {
 
     label "braker"
     label "medium_task"
-    time '1d'
+    time '4h'
 
     publishDir "${params.outdir}/hints/${name}"
 
@@ -2119,7 +2129,7 @@ process runGenemark {
 
     label "genemarkes"
     label "medium_task"
-    time '1d'
+    time '12h'
 
     publishDir "${params.outdir}/annotations/${name}"
 
