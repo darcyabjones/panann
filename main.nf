@@ -256,6 +256,8 @@ params.nocqpm = false
 params.training = false
 
 
+params.pasa = false
+
 /*
  * Sanitise the input
  */
@@ -349,6 +351,22 @@ if ( params.evm_config ) {
         .fromPath(params.evm_config, checkIfExists: true, type: "file")
         .first()
         .set { evmConfig }
+}
+
+
+if ( params.pasa ) {
+    Channel
+        .fromPath(params.pasa, checkIfExists: true, type: "file")
+        .splitCsv(by: 1, sep: '\t', header: true)
+        .filter { (!is_null(it.name) && !is_null(it.pasa)) }
+        .map {[
+            it.name,
+            file(it.pasa, checkIfExists: true),
+        ]}
+        .set { userPasaPredictions }
+
+} else {
+    userPasaPredictions = Channel.empty()
 }
 
 
@@ -1821,6 +1839,9 @@ process runPASA {
 
     tag "${name}"
 
+    when:
+    !params.pasa
+
     input:
     set val(name),
         file(genome_fasta),
@@ -1834,7 +1855,7 @@ process runPASA {
             .combine(transcripts4RunPasa)
 
     output:
-    set val(name), file("${name}_pasa.gff3") into pasaPredictions
+    set val(name), file("${name}_pasa.gff3") into computedPasaPredictions
 
     script:
     def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
@@ -1878,6 +1899,12 @@ process runPASA {
 
     ln -s \${PWD}/pasa.sqlite.assemblies.fasta.transdecoder.genome.gff3 \${PWD}/${name}_pasa.gff3
     """
+}
+
+if (params.pasa) {
+    pasaPredictions = userPasaPredictions
+} else {
+    pasaPredictions = computedPasaPredictions
 }
 
 
