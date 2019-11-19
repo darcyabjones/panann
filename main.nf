@@ -479,6 +479,8 @@ process getFaidx {
     label "small_task"
     time '1h'
 
+    publishDir "${params.outdir}/processed"
+
     tag "${name}"
 
     input:
@@ -1572,6 +1574,7 @@ process matchRemoteProteinsToGenome {
     script:
     """
     mkdir genome result tmp
+    cp -rL proteins proteins_tmp
 
     # the "dont-split" bit is important for keeping the ids correct.
     mmseqs createdb \
@@ -1582,7 +1585,7 @@ process matchRemoteProteinsToGenome {
     # Searching with genome as query is ~3X faster
     mmseqs search \
       genome/db \
-      proteins/db \
+      proteins_tmp/db \
       result/db \
       tmp \
       --threads "${task.cpus}" \
@@ -1599,7 +1602,7 @@ process matchRemoteProteinsToGenome {
     # Extract match results.
     mmseqs convertalis \
       genome/db \
-      proteins/db \
+      proteins_tmp/db \
       result/db \
       results_unsorted.tsv \
       --threads "${task.cpus}" \
@@ -1618,7 +1621,7 @@ process matchRemoteProteinsToGenome {
 
     sed -i '1i query\ttarget\tqstart\tqend\tqlen\ttstart\ttend\ttlen\talnlen\tpident\tmismatch\tgapopen\tevalue\tbitscore' "${name}_remote_proteins.tsv"
 
-    rm -rf -- tmp genome result results_unsorted.tsv
+    rm -rf -- tmp genome result results_unsorted.tsv proteins_tmp
     """
 }
 
@@ -1703,10 +1706,11 @@ process alignRemoteProteinsToGenome {
     script:
     """
     mkdir -p tmp
+    cp -L proteins.tsv proteins_tmp.tsv
 
     exonerate_parallel.sh \
       -g "${fasta}" \
-      -q "proteins.tsv" \
+      -q "proteins_tmp.tsv" \
       -b "clustered.bed" \
       -n "${task.cpus}" \
       -t "tmp" \
@@ -1715,7 +1719,7 @@ process alignRemoteProteinsToGenome {
       -r "${params.trans_table}" \
       -o "${name}_remote_proteins_exonerate.gff"
 
-    rm -rf -- tmp
+    rm -rf -- tmp proteins_tmp.tsv
     """
 }
 
@@ -2328,8 +2332,10 @@ process extractGenemarkHints {
 process runCodingQuarry {
 
     label "codingquarry"
-    label "medium_task"
+    label "bigmem_task"
     time '1d'
+    errorStrategy "retry"
+    maxRetries 10
 
     publishDir "${params.outdir}/annotations/${name}"
 
