@@ -413,7 +413,6 @@ RUN  set -eu \
   && DEBIAN_FRONTEND=noninteractive \
   && . /build/base.sh \
   && apt-get update \
-  && apt-get upgrade \
   && apt_install_from_file /build/apt/*.txt \
   && apt-get install -y --no-install-recommends \
        cpanminus \
