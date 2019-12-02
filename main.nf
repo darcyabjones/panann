@@ -196,12 +196,17 @@ params.fastq = false
 // Should include a "name", and "cram" column.
 params.crams = false
 
+// Provide pre-assembled stringtie things.
+params.stringtie = false
+
 // RNAseq is FR stranded rather than RF
 // (typical Illumina stranded configuration).
 // This can be overwritten for individual fastq pairs or crams
 // by adding a "strand" column specifying "fr" or "rf".
 // This parameter sets a default for when that column is unspecified.
 params.fr = false
+
+params.augustus
 
 // GTTG and GAAG might also be valid.
 // https://www.biorxiv.org/content/10.1101/616565v1.full
@@ -265,6 +270,8 @@ params.pasa = false
 def stranded = params.fr ? "fr" : "rf"
 
 def is_null = { f -> (f == null || f == '') }
+run_stringtie = !params.stringtie
+
 
 if ( params.genomes ) {
     Channel
@@ -311,6 +318,19 @@ if ( params.proteins ) {
 
 } else {
     proteins = Channel.empty()
+}
+
+
+if ( params.stringtie ) {
+    Channel
+        .fromPath(params.stringtie, checkIfExists: true, type: 'file')
+        .splitCsv(by: 1, sep: '\t', header: true)
+        .filter { (!is_null(it.name) && !is_null(it.stringtie) }
+        .map {[it.name, file(it.stringtie, checkIfExists: true]}
+        .unique()
+        .set { userStringtie }
+} else {
+    userStringtie = Channel.empty()
 }
 
 
@@ -973,6 +993,9 @@ process assembleStringtie {
 
     tag "${name} - ${read_group}"
 
+    when:
+    run_stringtie
+
     input:
     set val(name),
         val(read_group),
@@ -1030,6 +1053,9 @@ process mergeStringtie {
 
     tag "${name}"
 
+    when:
+    run_stringtie
+
     input:
     set val(name), file("*gtf"), file(gff) from stringtieAssembledTranscripts
         .map { n, rg, f -> [n, f] }
@@ -1037,7 +1063,7 @@ process mergeStringtie {
         .join( genomes4MergeStringtie.map {n, f, i, g -> [n, g]}, by: 0 )
 
     output:
-    set val(name), file("${name}_stringtie.gtf") into stringtieMergedTranscripts
+    set val(name), file("${name}_stringtie.gtf") into computedStringtieMergedTranscripts
 
     script:
     def known = gff.name != 'WAS_NULL' ? "-G ${gff}" : ''
@@ -1051,6 +1077,13 @@ process mergeStringtie {
       *gtf
     """
 }
+
+if ( params.stringtie ) {
+    stringtieMergedTranscripts = userStringtie
+} else {
+    stringtieMergedTranscripts = computedStringtieMergedTranscripts
+}
+
 
 stringtieMergedTranscripts.into {
     stringtieMergedTranscripts4CodingQuarry;
