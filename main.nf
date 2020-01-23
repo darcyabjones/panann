@@ -1,11 +1,5 @@
 #!/usr/bin/env nextflow
 
-/*
-vim: syntax=groovy
--*- mode: groovy;-*-
-*/
-
-
 def helpMessage() {
     log.info"""
     # panann
@@ -3726,13 +3720,6 @@ process joinAugustusChunks {
     """
     for f in *chunks.gff
     do
-      awk -F '\\t' '
-        BEGIN {OFS="\\t"}
-        \$3 == "transcript" {\$3="mRNA"}
-        \$0 !~ /^#/ {print}
-      ' "\${f}" \
-      > "\${f}.tmp"
-
       if [ -s "\${f}.tmp" ]
       then
         gt gff3 -tidy -sort -setsource "augustus" -o "\${f}_tidied.gff3" "\${f}.tmp"
