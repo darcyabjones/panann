@@ -4,18 +4,45 @@ process get_augustus_config {
 
     label "augustus"
     label "small_task"
-    
+
     time '1h'
-    
+
     output:
     path "config"
-    
+
     script:
     """
     cp -r \${AUGUSTUS_CONFIG_PATH} ./config
     """
 }
 
+
+process tidy_genome {
+
+    label "posix"
+    label "small_task"
+
+    time '1h'
+
+    tag "${name}"
+
+    input:
+    val min_contig_length
+    tuple val(name), path("in.fa")
+
+    output:
+    tuple val(name), path("${name}.fasta")
+
+    script:
+    """
+    # braker panics if the genome has descriptions
+    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' in.fa \
+    | fasta_to_tsv.sh \
+    | awk 'length(\$2) >= ${min_contig_length}' \
+    | tsv_to_fasta.sh \
+    > "${name}.fasta"
+    """
+}
 
 process get_faidx {
 
@@ -27,23 +54,16 @@ process get_faidx {
     tag "${name}"
 
     input:
-    val min_contig_length
     tuple val(name), path("orig.fa")
 
     output:
-    tuple val(name), path("${name}.fasta"), path("${name}.fasta.fai")
+    tuple val(name), path("${name}.fasta.fai")
 
     script:
     """
-    # braker panics if the genome has descriptions
-    sed -r 's/^(>[^[:space:]]*).*\$/\\1/' orig.fa \
-    | fasta_to_tsv.sh \
-    | awk 'length(\$2) >= ${min_contig_length}' \
-    | tsv_to_fasta.sh \
-    > "${name}.fasta"
+    samtools faidx "orig.fasta"
 
-
-    samtools faidx "${name}.fasta"
+    mv orig.fasta.fai "${name}.fasta.fai"
     """
 }
 
