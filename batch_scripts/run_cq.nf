@@ -36,8 +36,8 @@ workflow {
         stringtie = Channel
             .fromPath(params.stringtie, checkIfExists: true, type: 'file')
             .splitCsv(by: 1, sep: '\t', header: true)
-            .filter { (!is_null(it.name) && !is_null(it.stringtie) }
-            .map {[it.name, file(it.stringtie, checkIfExists: true]}
+            .filter { (!is_null(it.name) && !is_null(it.stringtie)) }
+            .map {[it.name, file(it.stringtie, checkIfExists: true)]}
             .unique()
 
     } else {
@@ -45,8 +45,8 @@ workflow {
         exit 1
     }
 
-    (cq_gff3, cq_faa, cq_fna, cq_dubious, cq_fusions, cq_overlap) = codingquarry(
-        stringtie.join(genome, by: 0)
+    (cq_fixed_gff3, cq_gff3, cq_faa, cq_fna, cq_dubious, cq_fusions, cq_overlap) = codingquarry(
+        stringtie.join(genomes)
     )
 
     if (params.signalp) {
@@ -56,14 +56,14 @@ workflow {
     }
 
     (cqpm_gff3, cqpm_fusions, cqpm_overlap) = codingquarrypm(
-        stringtie.join(genome, by: 0).join(cq_gff3, cq_secreted)
+        stringtie.join(genomes).join(cq_gff3).join(cq_secreted)
     )
 
 
     cq_gff3_tidied = tidy_codingquarry_gff3(
         "codingquarry",
         "codingquarry",
-        cq_gff3
+        cq_fixed_gff3
     )
 
     cqpm_gff3_tidied = tidy_codingquarrypm_gff3(

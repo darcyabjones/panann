@@ -119,7 +119,7 @@ process pasa {
 process codingquarry {
 
     label "codingquarry"
-    label "bigmem_task"
+    label "big_task"
     time '1d'
 
     errorStrategy "retry"
@@ -133,7 +133,8 @@ process codingquarry {
         path("genome.fasta")
 
     output:
-    tuple val(name), path("${name}_codingquarry.gff3")
+    tuple val(name), path("${name}_codingquarry_fixed.gff3")
+    tuple val(name), path("${name}_codingquarry.gff3") // We need to hold onto this because cqpm doesn't like the fixed versions.
     tuple val(name), path("${name}_codingquarry.faa")
     path "${name}_codingquarry.fna"
     path "${name}_codingquarry_dubiousset.gff3"
@@ -172,7 +173,9 @@ process codingquarry {
             print
         }
       ' \
-    > "${name}_codingquarry.gff3"
+    > "${name}_codingquarry_fixed.gff3"
+
+    mv out/PredictedPass.gff3 "${name}_codingquarry.gff3"
 
     mv out/DubiousSet.gff3 "${name}_codingquarry_dubiousset.gff3"
     mv out/Predicted_CDS.fa "${name}_codingquarry.fna"
@@ -278,7 +281,7 @@ process deepsig {
 process codingquarrypm {
 
     label "codingquarry"
-    label "bigmem_task"
+    label "big_task"
     time '1d'
 
     errorStrategy "retry"
@@ -323,7 +326,7 @@ process codingquarrypm {
     # Tidy some of the CQ weirdness.
     # Sometimes you can get a -ve cds phase for unknown reasons.
     # CQ puts the CDS directly on the gene, which breaks some tools.
-    awk -F '\t' 'BEGIN {OFS="\\t"} \$8 = "-1" {\$8="0"} {print}' out/PGNPredictedPass.gff3 \
+    awk -F '\t' 'BEGIN {OFS="\\t"} \$8 = "-1" {\$8="0"} {print}' out/PGN_predictedPass.gff3 \
     | awk -F '\t' \
       '
         BEGIN {OFS="\\t"}

@@ -2,19 +2,18 @@
 
 process get_augustus_config {
 
-        label "augustus"
-        label "small_task"
-
-        time '1h'
-
-        output:
-        path "config"
-
-        script:
-        """
-        cp -r \${AUGUSTUS_CONFIG_PATH} ./config
-        """
-    }
+    label "augustus"
+    label "small_task"
+    
+    time '1h'
+    
+    output:
+    path "config"
+    
+    script:
+    """
+    cp -r \${AUGUSTUS_CONFIG_PATH} ./config
+    """
 }
 
 
