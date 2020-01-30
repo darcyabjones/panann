@@ -481,7 +481,6 @@ process get_star_index {
     input:
     tuple val(name),
         path(fasta),
-        path(faidx),
         path(gff)
 
     output:
@@ -578,18 +577,16 @@ process star_align_reads {
     val max_intron_len
     val extra_params
     tuple val(name),
-        path("index"),
         val(read_group),
+        path("index"),
         path(r1s),
         path(r2s),
-        val(strand),
         path("*SJ.out.tab")
 
     output:
     tuple val(name),
         val(read_group),
-        path("${name}_${read_group}.cram"),
-        val(strand)
+        path("${name}_${read_group}.cram")
 
     script:
     // todo assert all strand is same?

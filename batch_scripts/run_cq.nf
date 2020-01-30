@@ -2,13 +2,7 @@
 
 nextflow.preview.dsl=2
 
-include codingquarry from './modules/predictors'
-include codingquarrypm from './modules/predictors'
-include signalp from './modules/predictors'
-include deepsig from './modules/predictors'
-
-include tidy_gff3 as tidy_codingquarry_gff3 from './modules/utils'
-include tidy_gff3 as tidy_codingquarrypm_gff3 from './modules/utils'
+include run_codingquarry from './modules/workflows'
 
 params.genomes = false
 params.stringtie = false
@@ -45,43 +39,18 @@ workflow {
         exit 1
     }
 
-    (cq_fixed_gff3, cq_gff3, cq_faa, cq_fna, cq_dubious, cq_fusions, cq_overlap) = codingquarry(
-        stringtie.join(genomes)
-    )
-
-    if (params.signalp) {
-        cq_secreted = signalp(cq_faa)
-    } else {
-        cq_secreted = deepsig(cq_faa)
-    }
-
-    (cqpm_gff3, cqpm_fusions, cqpm_overlap) = codingquarrypm(
-        stringtie.join(genomes).join(cq_gff3).join(cq_secreted)
-    )
-
-
-    cq_gff3_tidied = tidy_codingquarry_gff3(
-        "codingquarry",
-        "codingquarry",
-        cq_fixed_gff3
-    )
-
-    cqpm_gff3_tidied = tidy_codingquarrypm_gff3(
-        "codingquarrypm",
-        "codingquarrypm",
-        cqpm_gff3
-    )
+    cq = run_codingquarry(params.signalp, genomes, stringtie)
 
     publish:
-    cq_gff3          to: "${params.outdir}/annotations"
-    cq_faa           to: "${params.outdir}/annotations"
-    cq_fna           to: "${params.outdir}/annotations"
-    cq_dubious       to: "${params.outdir}/annotations"
-    cq_fusions       to: "${params.outdir}/annotations"
-    cq_overlap       to: "${params.outdir}/annotations"
-    cqpm_gff3        to: "${params.outdir}/annotations"
-    cqpm_fusions     to: "${params.outdir}/annotations"
-    cqpm_overlap     to: "${params.outdir}/annotations"
-    cq_gff3_tidied   to: "${params.outdir}/annotations"
-    cqpm_gff3_tidied to: "${params.outdir}/annotations"
+    cq.cq_gff3          to: "${params.outdir}/annotations"
+    cq.cq_faa           to: "${params.outdir}/annotations"
+    cq.cq_fna           to: "${params.outdir}/annotations"
+    cq.cq_dubious       to: "${params.outdir}/annotations"
+    cq.cq_fusions       to: "${params.outdir}/annotations"
+    cq.cq_overlap       to: "${params.outdir}/annotations"
+    cq.cqpm_gff3        to: "${params.outdir}/annotations"
+    cq.cqpm_fusions     to: "${params.outdir}/annotations"
+    cq.cqpm_overlap     to: "${params.outdir}/annotations"
+    cq.cq_gff3_tidied   to: "${params.outdir}/annotations"
+    cq.cqpm_gff3_tidied to: "${params.outdir}/annotations"
 }

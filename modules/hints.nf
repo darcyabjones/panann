@@ -293,7 +293,6 @@ process extract_augustus_rnaseq_hints {
     tuple val(name),
         val(read_group),
         path(fasta),
-        path(faidx),
         path(cram)
 
     output:

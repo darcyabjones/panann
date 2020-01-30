@@ -602,9 +602,7 @@ process gemoma {
         path("assignment.tabular"),
         path("proteins.fasta"),
         path("matches.tsv"),
-        path("introns.gff"),
-        path("coverage_forward.bedgraph"),
-        path("coverage_reverse.bedgraph")
+        path("introns.gff")
 
     output:
     tuple val(target_name),
@@ -624,10 +622,7 @@ process gemoma {
       outdir=out \
       sort=true \
       i=introns.gff \
-      r=2 \
-      coverage=STRANDED \
-      coverage_forward=coverage_forward.bedgraph \
-      coverage_reverse=coverage_reverse.bedgraph
+      r=2
 
     mv out/predicted_annotation.gff "${target_name}_${ref_name}_gemoma.gff3"
 
@@ -649,14 +644,11 @@ process gemoma_combine {
     tag "${name}"
 
     input:
-    val not_fungus
     tuple val(name),
         val(ref_names),
         path(pred_gffs),
         path(fasta),
         path("introns.gff"),
-        path("coverage_forward.bedgraph"),
-        path("coverage_reverse.bedgraph")
 
     output:
     tuple val(name),
@@ -674,32 +666,32 @@ process gemoma_combine {
         .collect { rn, pred -> "p=${rn} g=${pred.name}" }
         .join(' ')
 
-    get_utr = not_fungus ? "true": "false"
-
     """
     mkdir -p gaf
     java -jar \${GEMOMA_JAR} CLI GAF \
       ${preds} \
       outdir=gaf
 
-    if ${get_utr}
-    then
-      mkdir -p finalised
-      java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
-        g=${fasta} \
-        a=gaf/filtered_predictions.gff \
-        i=introns.gff \
-        u=YES \
-        c=STRANDED \
-        coverage_forward=coverage_forward.bedgraph \
-        coverage_reverse=coverage_reverse.bedgraph \
-        outdir=finalised \
-        rename=NO
+    # if ${get_utr}
+    # then
+    #   mkdir -p finalised
+    #   java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
+    #     g=${fasta} \
+    #     a=gaf/filtered_predictions.gff \
+    #     i=introns.gff \
+    #     u=YES \
+    #     c=STRANDED \
+    #     coverage_forward=coverage_forward.bedgraph \
+    #     coverage_reverse=coverage_reverse.bedgraph \
+    #     outdir=finalised \
+    #     rename=NO
 
-      mv finalised/final_annotation.gff gemoma_tmp.gff3
-    else
-      mv gaf/filtered_predictions.gff gemoma_tmp.gff3
-    fi
+    #   mv finalised/final_annotation.gff gemoma_tmp.gff3
+    # else
+    #   mv gaf/filtered_predictions.gff gemoma_tmp.gff3
+    # fi
+
+    mv gaf/filtered_predictions.gff gemoma_tmp.gff3
 
     awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
       gemoma_tmp.gff3 > "${name}_gemoma_combined.gff3"
