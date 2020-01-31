@@ -14,8 +14,10 @@ RUN  set -eu \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
        build-essential \
+       ca-certificates \
        wget \
   && rm -rf /var/lib/apt/lists/* \
+  && update-ca-certificates \
   && wget -O fasta.tar.gz "${FASTA_URL}" \
   && tar -zxf fasta.tar.gz \
   && cd fasta*/src \
