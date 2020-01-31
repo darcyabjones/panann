@@ -20,6 +20,11 @@ include tidy_gff3 as tidy_gemoma_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
 
+include extract_augustus_rnaseq_hints from './hints'
+include extract_gemoma_rnaseq_hints from './hints'
+include get_star_index from './aligners'
+include star_find_splicesites from './aligners'
+include star_align_reads from './aligners'
 
 is_null = { f -> (f == null || f == '') }
 
@@ -286,8 +291,8 @@ workflow align_rnaseq_reads {
         .map { rg, n, c, s -> [n, rg, c, s] }
 
     augustus_rnaseq_hints = extract_augustus_rnaseq_hints(
-        min_intron_hard,
-        max_intron_hard,
+        min_intron_len,
+        max_intron_len,
         valid_splicesites,
         genomes.combine(aligned, by: 0).map { n, f, rg, c -> [n, rg, f, c] }
     )

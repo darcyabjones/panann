@@ -33,8 +33,6 @@ workflow {
         exit 1
     }
 
-    input_channels.genomes.view()
-    input_channels.fastq.view()
     (crams, aug_hints, gemoma_hints) = align_rnaseq_reads(
         params.min_intron_hard,
         params.max_intron_hard,
@@ -42,7 +40,7 @@ workflow {
         params.star_align_params,
         params.valid_splicesites,
         input_channels.genomes,
-        input_channels.gffs,
+        input_channels.known,
         input_channels.fastq
     )
 }

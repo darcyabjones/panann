@@ -493,7 +493,7 @@ process get_star_index {
     def exon_feature = "exon"
 
     """
-    mkdir -p index
+    mkdir -p "${name}_star_index"
     STAR \
       --runThreadN ${task.cpus} \
       --runMode genomeGenerate \
