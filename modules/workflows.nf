@@ -1,36 +1,36 @@
 #!/usr/bin/env nextflow
 
-include get_mmseqs_protein_db get_mmseqs_protein_db as get_mmseqs_remote_protein_db from './modules/aligners'
-include mmseqs_search_genome_against_proteins as mmseqs_search_genome_against_remote_proteins from './modules/aligners'
-include cluster_genome_vs_protein_matches as cluster_genome_vs_remote_protein_matches from './modules/aligners'
-include exonerate_regions as exonerate_remote_proteins from './modules/aligners'
+include get_mmseqs_protein_db as get_mmseqs_remote_protein_db from './aligners'
+include mmseqs_search_genome_against_proteins as mmseqs_search_genome_against_remote_proteins from './aligners'
+include cluster_genome_vs_protein_matches as cluster_genome_vs_remote_protein_matches from './aligners'
+include exonerate_regions as exonerate_remote_proteins from './aligners'
 
-include codingquarry from './modules/predictors'
-include codingquarrypm from './modules/predictors'
-include signalp from './modules/predictors'
-include deepsig from './modules/predictors'
+include codingquarry from './predictors'
+include codingquarrypm from './predictors'
+include signalp from './predictors'
+include deepsig from './predictors'
 
-include extract_gemoma_comparative_cds_parts from './modules/predictors'
-include cluster_gemoma_cds_parts from './modules/predictors'
-include gemoma as gemoma_comparative from './modules/predictors'
-include gemoma_combine as gemoma_comparative_combine from './modules/predictors'
+include extract_gemoma_comparative_cds_parts from './predictors'
+include cluster_gemoma_cds_parts from './predictors'
+include gemoma as gemoma_comparative from './predictors'
+include gemoma_combine as gemoma_comparative_combine from './predictors'
 
-include fasta_to_tsv as remote_proteins_fasta_to_tsv from './modules/utils'
-include tidy_gff3 as tidy_gemoma_gff3 from './modules/utils'
-include tidy_gff3 as tidy_codingquarry_gff3 from './modules/utils'
-include tidy_gff3 as tidy_codingquarrypm_gff3 from './modules/utils'
-
-
-def is_null = { f -> (f == null || f == '') }
+include fasta_to_tsv as remote_proteins_fasta_to_tsv from './utils'
+include tidy_gff3 as tidy_gemoma_gff3 from './utils'
+include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
+include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
 
 
-def valid_table_analyses = [
+is_null = { f -> (f == null || f == '') }
+
+
+valid_table_analyses = [
     "genome",
     "known",
     "fastq_forward",
     "fastq_reverse",
     "gmap",
-    "spaln_transcripts"
+    "spaln_transcripts",
     "spaln_proteins",
     "exonerate",
     "cram",
@@ -151,7 +151,7 @@ def handle_table(genomes, table) {
             // Name is required for all analyses except fastq files.
             if ( line.analysis in ["fastq_forward", "fastq_reverse"] ) {
                 line.name = it.name
-            else {
+            } else {
                 line.name = table_not_null(it.name, "name", it)
             }
 
@@ -239,7 +239,9 @@ def handle_table(genomes, table) {
     out_channels = ["genomes": table_genomes, "fastq": fastq, "cram": cram]
     valid_table_analyses.each { analysis ->
         if ( !(analysis in ["genomes", "fastq", "cram"]) ) {
-            out_channels[analysis] = branched[analysis].map { [it.name, it.file] }
+            out_channels[analysis] = branched
+                .getProperty(analysis)
+                .map { [it.name, it.file] }
         }
     }
 
@@ -252,7 +254,8 @@ workflow align_rnaseq_reads {
     get:
     min_intron_len  // integer, minimum allowed intron length
     max_intron_len  // integer, maximum allowed intron length
-    extra_params  // String of extra options to provide to STAR
+    novel_extra_params  // String of extra options to provide to STAR
+    align_extra_params  // String of extra options to provide to STAR
     valid_splicesites
     genomes  // tuple(val(name), path(fasta))
     gffs  // tuple(val(name), path(gff))
@@ -263,14 +266,14 @@ workflow align_rnaseq_reads {
     splice_sites = star_find_splicesites(
         min_intron_len,
         max_intron_len,
-        extra_params,
+        novel_extra_params,
         index.combine(fastq.map { rg, r1, r2, s -> [rg, r1, r2] })
     )
 
     aligned = star_align_reads(
         min_intron_len,
         max_intron_len,
-        extra_params,
+        align_extra_params,
         index
             .combine(fastq)
             .map {n, i, rg, r1, r2, s -> [n, rg, i, r1, r2] }

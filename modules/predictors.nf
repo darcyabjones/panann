@@ -648,7 +648,7 @@ process gemoma_combine {
         val(ref_names),
         path(pred_gffs),
         path(fasta),
-        path("introns.gff"),
+        path("introns.gff")
 
     output:
     tuple val(name),
