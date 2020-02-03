@@ -42,15 +42,17 @@ workflow {
     )
 
     publish:
-    cq.cq_gff3          to: "${params.outdir}/annotations"
-    cq.cq_faa           to: "${params.outdir}/annotations"
-    cq.cq_fna           to: "${params.outdir}/annotations"
-    cq.cq_dubious       to: "${params.outdir}/annotations"
-    cq.cq_fusions       to: "${params.outdir}/annotations"
-    cq.cq_overlap       to: "${params.outdir}/annotations"
-    cq.cqpm_gff3        to: "${params.outdir}/annotations"
-    cq.cqpm_fusions     to: "${params.outdir}/annotations"
-    cq.cqpm_overlap     to: "${params.outdir}/annotations"
-    cq.cq_gff3_tidied   to: "${params.outdir}/annotations"
-    cq.cqpm_gff3_tidied to: "${params.outdir}/annotations"
+    cq.cq_gff3             to: "${params.outdir}/annotations"
+    cq.cq_faa              to: "${params.outdir}/annotations"
+    cq.cq_fna              to: "${params.outdir}/annotations"
+    cq.cq_dubious          to: "${params.outdir}/annotations"
+    cq.cq_fusions          to: "${params.outdir}/annotations"
+    cq.cq_overlap          to: "${params.outdir}/annotations"
+    cq.cqpm_gff3           to: "${params.outdir}/annotations"
+    cq.cqpm_fusions        to: "${params.outdir}/annotations"
+    cq.cqpm_overlap        to: "${params.outdir}/annotations"
+    cq.cq_gff3_tidied      to: "${params.outdir}/annotations"
+    cq.cqpm_gff3_tidied    to: "${params.outdir}/annotations"
+    cq.cq_augustus_hints   to: "${params.outdir}/hints"
+    cq.cqpm_augustus_hints to: "${params.outdir}/hints"
 }

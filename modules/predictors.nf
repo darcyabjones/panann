@@ -73,8 +73,8 @@ process pasa {
     // Don't use stringtie if it is fungus
     // Stringtie and cufflinks tend to merge overlapping features,
     // which doesn't work well for organisms with high gene density.
-    def use_stringtie = (stringtie_gtf.name == "SGT_WAS_NULL" || !not_fungus) ? '' : "--trans_gtf ${stringtie_gtf} "
-    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
+    def use_stringtie = (stringtie_gtf.name == "STRINTIE_WAS_NULL" || !not_fungus) ? '' : "--trans_gtf ${stringtie_gtf} "
+    def use_known = known_sites.name == "KNOWN_WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
     // Transdecoder doesn't support standard integer based table access.
     def gen_code = "Universal"

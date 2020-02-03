@@ -1,5 +1,26 @@
 #!/usr/bin/env nextflow
 
+
+def symmetric_difference(a, b) {
+    return (a + b) - a.intersect(b)
+}
+
+process get_univec {
+
+    label "download"
+    label "small_task"
+
+    time '3h'
+
+    output:
+    path "univec.fasta"
+
+    script:
+    """
+    wget -O univec.fasta ftp://ftp.ncbi.nlm.nih.gov/pub/UniVec/UniVec_Core
+    """
+}
+
 process get_augustus_config {
 
     label "augustus"
@@ -13,6 +34,30 @@ process get_augustus_config {
     script:
     """
     cp -r \${AUGUSTUS_CONFIG_PATH} ./config
+    """
+}
+
+
+process clean_transcripts {
+
+    label "pasa"
+    label "small_task"
+    time '2h'
+
+    input:
+    path "transcripts.fasta"
+    path "univec.fasta"
+
+    output:
+    tuple path("transcripts.fasta"),
+          path("transcripts.fasta.cln"),
+          path("transcripts.fasta.clean")
+
+    script:
+    """
+    # this user thing is needed for seqclean. Unknown reasons
+    export USER="root"
+    seqclean "transcripts.fasta" -v "univec.fasta"
     """
 }
 
@@ -184,7 +229,8 @@ process combine_fastas {
     path "*fasta"
 
     output:
-    tuple path("combined.fasta"), path("combined.tsv")
+    path "combined.fasta"
+    path "combined.tsv"
 
     script:
     """
