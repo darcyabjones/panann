@@ -5,9 +5,11 @@ vim: syntax=groovy
 -*- mode: groovy;-*-
 */
 
-include tidy_genome from './modules/utils'
-include get_faidx from './modules/utils'
-include fasta_to_tsv from './modules/utils'
+include get_faidx from '../modules/utils'
+include fasta_to_tsv from '../modules/utils'
+include get_file from '../modules/cli'
+include handle_table from '../modules/cli'
+include align_remote_proteins from '../modules/workflows'
 
 def helpMessage() {
     log.info"""
@@ -27,21 +29,13 @@ if (params.help) {
 }
 
 
-// Target genomes to annotate as softmasked fasta files.
-// Note the file basename (filename up to but excluding the
-// last extension) is used to match genomes with other hints.
-params.min_contig_length = 500
-params.min_intron_soft = 20
 params.min_intron_hard = 5
 params.max_intron_hard = 15000
 params.max_gene_hard = 20000
-params.genomes = false
-
-// Remote proteins aligned to each genome with exonerate.
-// As a tsv file, with name and remote columns
-params.remote_alignments = false
-
 params.trans_table = 1
+
+params.table = false
+params.genomes = false
 
 
 workflow {
@@ -62,25 +56,40 @@ workflow {
         genomes = Channel
             .fromPath(params.genomes, checkIfExists: true, type: "file")
             .map { g -> [g.baseName, g] }
+
     } else {
-        log.error "Please provide some genomes to predict genes for with `--genomes`."
-        exit 1
+        genomes = Channel.empty()
     }
 
-    mmseqs_remote_index = get_mmseqs_protein_db(remote_proteins)
-    remote_proteins_tsv = fasta_to_tsv(
-        params.min_contig_length,
-        remote_proteins
+    if ( params.table ) {
+        table = get_file(params.table)
+        input_channels = handle_table(genomes, table)
+        in_genomes = input_channels.genomes
+    } else if ( !params.genomes ){
+        log.error "Please provide some genomes to align to."
+        exit 1
+    } else {
+        in_genomes = genomes
+    }
+
+    genomes_faidx = get_faidx(in_genomes)
+    mmseqs_genome_indices = get_mmseqs_genome_db(in_genomes)
+
+    remote = align_remote_proteins(
+        params.min_intron_hard,
+        params.max_intron_hard,
+        params.max_gene_hard,
+        params.trans_table,
+        remote_proteins,
+        in_genomes,
+        genomes_faidx,
+        mmseqs_genome_indices
     )
 
-    tidied_genomes = tidy_genome(params.min_contig_length, genomes)
-    genomes_faidx = get_faidx(tidied_genomes)
-
-    mmseqs_genome_indices = get_mmseqs_genome_db(tidied_genomes)
-
-
     publish:
-    remote_protein_matches
-    clustered_remote_protein_matches
-    exonerate_matches
+    remote.remote_protein_matches to: "${params.outdir}/alignments"
+    remote.clustered_remote_protein_matches to: "${params.outdir}/alignments"
+    remote.exonerate_matches to: "${params.outdir}/alignments"
+    remote.exonerate_augustus_hints to: "${params.outdir}/hints"
+    remote.exonerate_evm_hints to: "${params.outdir}/hints"
 }

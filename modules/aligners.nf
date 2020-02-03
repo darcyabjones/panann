@@ -176,7 +176,7 @@ process get_gmap_index {
     tag "${name}"
 
     input:
-    tuple val(name), path(genome), path(faidx)
+    tuple val(name), path(genome)
 
     output:
     tuple val(name), path("${name}_gmap_index")

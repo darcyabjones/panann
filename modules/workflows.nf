@@ -4,6 +4,8 @@ include get_mmseqs_protein_db as get_mmseqs_remote_protein_db from './aligners'
 include mmseqs_search_genome_against_proteins as mmseqs_search_genome_against_remote_proteins from './aligners'
 include cluster_genome_vs_protein_matches as cluster_genome_vs_remote_protein_matches from './aligners'
 include exonerate_regions as exonerate_remote_proteins from './aligners'
+include spaln_align_transcripts from './aligners'
+include gmap_align_transcripts from './aligners'
 
 include codingquarry from './predictors'
 include codingquarrypm from './predictors'
@@ -17,11 +19,22 @@ include gemoma_combine as gemoma_comparative_combine from './predictors'
 
 include fasta_to_tsv as remote_proteins_fasta_to_tsv from './utils'
 include tidy_gff3 as tidy_gemoma_gff3 from './utils'
+include tidy_gff3 as tidy_pasa_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
+include clean_transcripts from './utils'
+include combine_fastas from './utils'
+include symmetric_difference from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
+include extract_augustus_hints as extract_spaln_transcript_augustus_hints from './hints'
+include extract_augustus_hints as extract_codingquarry_augustus_hints from './hints'
+include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './hints'
+include extract_augustus_split_hints as extract_pasa_augustus_hints from './hints'
+include extract_spaln_transcript_evm_hints from './hints'
+include extract_gmap_evm_hints from './hints'
+
 include get_star_index from './aligners'
 include star_find_splicesites from './aligners'
 include star_align_reads from './aligners'
@@ -246,12 +259,179 @@ workflow align_remote_proteins {
             .combine(tsv.map { n, r -> r })
     )
 
+    exonerate_augustus_hints = extract_exonerate_hints(
+        min_intron_hard,
+        max_intron_hard,
+        exonerate_matches
+    )
+
+    exonerate_evm_hints = extract_exonerate_evm_hints(
+        min_intron_hard,
+        max_intron_hard,
+        exonerate_matches
+    )
+
     // Do hint extraction here?
 
     emit:
     mmseqs_matches
     clustered
     exonerate_matches
+    exonerate_augustus_hints
+    exonerate_evm_hints
+}
+
+
+/**
+ * Align transcripts to the genomes using spaln and gmap.
+ *
+ * @param species The "species" to specify for spaln splice site motifs.
+ * @param min_intron_soft The rough minimum length an intron should be,
+ *                        some introns may still be shorter than this.
+ * @param min_intron_hard The minimum length an intron should be.
+ * @param max_intron_hard The maximum length an intron should be.
+ * @param max_gene_hard The maximum length a gene should be.
+ * @param univec A value channel containing the univec fasta file.
+ * @param transcripts A channel containing transcript fasta files.
+ * @param spaln_indices Spaln formatted databases.
+ * @param gmap_indices gmap formatted databases.
+ */
+workflow align_transcripts {
+
+    get:
+    species
+    min_intron_soft
+    min_intron_hard
+    max_intron_hard
+    max_gene_hard
+    univec
+    transcripts
+    spaln_indices
+    gmap_indices
+
+    main:
+    (combined_fasta, combined_tsv) = combine_fastas(transcripts.collect())
+    cleaned_transcripts = clean_transcripts(combined_fasta)
+
+    spaln_aligned = spaln_align_transcripts(
+        species,
+        max_gene_hard,
+        min_intron_soft,
+        spaln_indices.combine(cleaned_transcripts.map { f, cln, clean -> clean })
+    )
+
+    spaln_augustus_hints = extract_spaln_transcript_augustus_hints(
+        "spaln_transcripts",
+        "spaln",
+        "E",
+        3,
+        6,
+        0,
+        0,
+        0,
+        false,
+        spaln_aligned
+    )
+
+    spaln_evm_hints = extract_spaln_transcript_evm_hints(spaln_aligned)
+
+    gmap_aligned = gmap_align_transcripts(
+        min_intron_hard,
+        max_intron_hard,
+        gmap_indices.combine(cleaned_transcripts.map { f, cln, clean -> clean })
+    )
+
+    gmap_evm_hints = extract_gmap_evm_hints(gmap_aligned)
+
+    emit:
+    combined_fasta
+    combined_tsv
+    cleaned_transcripts
+    spaln_aligned
+    spaln_augustus_hints
+    spaln_evm_hints
+    gmap_aligned
+    gmap_evm_hints
+}
+
+
+/**
+ * Run PASA/transdecoder
+ *
+ * @param not_fungus bool, don't use fungal optimised parameters.
+ * @param max_intron_hard the maximum length that an intron should be.
+ * @param transcripts the cleaned transcripts that were aligned with gmap.
+ *                    structure tuple("in.fasta", "in.fasta.cln", "in.fasta.clean")
+ * @param genomes The fasta genomes to predict genes in.
+ * @param known GFF3s for known sites in each genome (if any).
+ * @param stringtie Stringtie gtfs to use as evidence.
+ * @param gmap Gmap gff3 alignments to the genomes.
+ */
+workflow run_pasa {
+
+    get:
+    not_fungus
+    max_intron_hard
+    transcripts
+    genomes
+    known
+    stringtie
+    gmap
+
+    main:
+    known_with_null = genomes
+        .join(known, by: 0, remainder: true)
+        .map { n, f, g -> is_null(g) ? [n, file('KNOWN_WAS_NULL')]: [n, g] }
+
+    stringtie_with_null = genomes
+        .join(stringtie, by: 0, remainder: true)
+        .map { n, f, g -> is_null(g) ? [n, file('STRINGTIE_WAS_NULL')]: [n, g] }
+
+    genome_names = genomes.map { n, f -> n }.toList()
+    gmap_names = gmap.map { n, g -> n }.toList()
+    sym_diff = symmetric_difference(genome_names, gmap_names)
+    if ( sym_diff.length != 0 ) {
+        log.error "Some names in the genomes and gmap files don't match up."
+        log.error "They are: {sym_diff}"
+        exit 1
+    }
+
+    pasa_gff3 = pasa(
+        not_fungus,
+        max_intron_hard,
+        genomes
+            .join(known_with_null, by: 0)
+            .join(stringtie_with_null, by: 0)
+            .join(gmap_aligned, by: 0)
+            .combine(transcripts)
+    )
+
+    pasa_gff3_tidied = tidy_pasa_gff3(
+        "pasa",
+        "pasa",
+        pasa_gff3
+    )
+
+    pasa_augustus_hints = extract_pasa_augustus_hints(
+        "pasa",
+        "pasa",
+        "transdecoder",
+        "PASA",
+        "TD",
+        4, // exon_priority
+        3, // CDS priority
+        9, // exon_trim
+        9, // cds_trim
+        6, // utr_trim,
+        6, // gene_trim
+        false,
+        pasa_gff3_tidied
+    )
+
+    emit:
+    pasa_gff3
+    pasa_gff3_tidied
+    pasa_augustus_hints
 }
 
 
@@ -304,10 +484,36 @@ workflow run_codingquarry {
         cq_fixed_gff3
     )
 
+    cqpm_augustus_hints = extract_codingquarry_augustus_hints(
+        "codingquarry",
+        "codingquarry",
+        "CQ",
+        4, // priority
+        6, // exon_trim
+        6, // cds_trim
+        6, // utr trim
+        6, // gene trim
+        false,
+        cq_gff3_tidied
+    )
+
     cqpm_gff3_tidied = tidy_codingquarrypm_gff3(
         "codingquarrypm",
         "codingquarrypm",
         cqpm_gff3
+    )
+
+    cqpm_augustus_hints = extract_codingquarrypm_augustus_hints(
+        "codingquarrypm",
+        "codingquarrypm",
+        "CQPM",
+        4, // priority
+        6, // exon_trim
+        6, // cds_trim
+        6, // utr trim
+        6, // gene trim
+        false,
+        cqpm_gff3_tidied
     )
 
     emit:
@@ -322,6 +528,8 @@ workflow run_codingquarry {
     cqpm_overlap
     cq_gff3_tidied
     cqpm_gff3_tidied
+    cq_augustus_hints
+    cqpm_augustus_hints
 }
 
 
