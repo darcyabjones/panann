@@ -26,6 +26,7 @@ include get_star_index from './aligners'
 include star_find_splicesites from './aligners'
 include star_align_reads from './aligners'
 
+def is_null = { f -> (f == null || f == '') }
 
 /**
  * Aligns short-read RNASeq to genomes and get intron hints for
