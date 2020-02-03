@@ -280,8 +280,9 @@ workflow align_rnaseq_reads {
         max_intron_len,
         align_extra_params,
         index
+            .join(genomes, by: 0)
             .combine(fastq)
-            .map {n, i, rg, r1, r2, s -> [n, rg, i, r1, r2] }
+            .map {n, i, f, rg, r1, r2, s -> [n, rg, f, i, r1, r2] }
             .combine(splice_sites.groupTuple(by: [0, 1]), by: [0, 1])
     )
 

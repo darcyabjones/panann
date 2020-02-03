@@ -578,6 +578,7 @@ process star_align_reads {
     val extra_params
     tuple val(name),
         val(read_group),
+        path("genome.fasta"),
         path("index"),
         path(r1s),
         path(r2s),
@@ -589,7 +590,6 @@ process star_align_reads {
         path("${name}_${read_group}.cram")
 
     script:
-    // todo assert all strand is same?
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
@@ -624,7 +624,7 @@ process star_align_reads {
     samtools view \
         -u \
         -C \
-        -T "${fasta}" \
+        -T "genome.fasta" \
         "${name}_${read_group}.Aligned.out.bam" \
     | samtools sort \
         -O cram \
