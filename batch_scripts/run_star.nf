@@ -1,8 +1,8 @@
 nextflow.preview.dsl=2
 
 include align_rnaseq_reads from '../modules/workflows'
-include get_file from '../modules/workflows'
-include handle_table from '../modules/workflows'
+include get_file from '../modules/cli'
+include handle_table from '../modules/cli'
 
 params.genomes = false
 params.table = false

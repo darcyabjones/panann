@@ -1,8 +1,8 @@
 nextflow.preview.dsl=2
 
 include trinity_assemble_denovo from '../modules/assemblers'
-include get_file from '../modules/workflows'
-include handle_table from '../modules/workflows'
+include get_file from '../modules/cli'
+include handle_table from '../modules/cli'
 
 params.not_fungus = false
 params.table = false
