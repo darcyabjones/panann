@@ -5,8 +5,7 @@ include get_file from '../modules/workflows'
 include handle_table from '../modules/workflows'
 
 params.genomes = false
-params.stringtie = false
-params.signalp = false
+params.table = false
 
 def is_null = { f -> (f == null || f == '') }
 
@@ -43,4 +42,9 @@ workflow {
         input_channels.known,
         input_channels.fastq
     )
+
+    publish:
+    crams to: "${params.outdir}/alignments"
+    aug_hints to: "${params.outdir}/hints"
+    gemoma_hints to: "${params.outdir}/hints"
 }

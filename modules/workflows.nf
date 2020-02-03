@@ -202,7 +202,6 @@ workflow run_stringtie {
  */
 workflow align_remote_proteins {
 
-
     get:
     min_intron_hard
     max_intron_hard
@@ -254,12 +253,32 @@ workflow align_remote_proteins {
 }
 
 
+/**
+ * Run codingquarry and codingquarrypm.
+ *
+ * @param signalp A boolean value, whether to use signalp or not (deepsig).
+ * @param genomes A channel containing the genomes to predict genes for.
+ *                Should have the structure: tuple(val(name), path("genome.fasta"))
+ * @param stringtie A channel containing the stringtie assemblies.
+ *                  Should have the structure: tuple(val(name), path("str.gtf"))
+ * @return cq_gff3 The raw codingquarry gff3 file (warts and all).
+ * @return cq_faa The predicted proteins from cq.
+ * @return cq_fna " for CDSs
+ * @return cq_dubious A set of dubious gene predictions.
+ * @return cq_fusions A list of stringtie assemblies that were split by cq.
+ * @return cq_overlap The cq overlap report.
+ * @return cqpm_gff3 The raw codingquarrypm gff3 file (wards and all).
+ * @return cqpm_fusions
+ * @return cqpm_overlap
+ * @return cq_gff3_tidied A tidied gff3 of codingquarry predictions.
+ * @return cqpm_gff3_tidied
+ */
 workflow run_codingquarry {
 
     get:
-    signalp // bool
-    genomes // tuple(val(name), path(fasta))
-    stringtie // tuple(val(name), path(gtf))
+    signalp
+    genomes
+    stringtie
 
     main:
     (cq_fixed_gff3, cq_gff3, cq_faa, cq_fna, cq_dubious, cq_fusions, cq_overlap) = codingquarry(
@@ -304,6 +323,22 @@ workflow run_codingquarry {
 }
 
 
+/**
+ * Runs the comparative gemoma pipeline.
+ *
+ * @param trans_table The integer corresponding to the NCBI translation table.
+ * @param genomes A channel of genomes to run. Structure: tuple(val(name), path("in.fasta"))
+ * @param introns A channel of intron hints to use for gemoma.
+ *                Structure: tuple(val(name), path("hints.gff3"))
+ * @param pasa PASA/transdecoder predictions in gff3 format.
+ * @param cq Codingquarry predictions in gff3 format.
+ * @param cqpm CodingQuarryPM predictions in gff3 format.
+ * @param augustus Augustus predictions in gff3 format.
+ * @return gemoma_predictions The raw genoma predictions.
+ *         Structure tuple(val(name), path(gff3)).
+ * @return gemoma_predictions_tidied The tidied gemoma predictions.
+ *         Structure tuple(val(name), path(gff3)).
+ */
 workflow run_gemoma_comparative {
 
     get:
