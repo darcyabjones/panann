@@ -1,5 +1,7 @@
 #!/usr/bin/env nextflow
 
+include symmetric_difference from './utils'
+
 // Handy little utility that can replace some if statements in closures.
 is_null = { f -> (f == null || f == '') }
 
@@ -282,12 +284,12 @@ def handle_table(genomes, table) {
 
     // We'll return a hashmap of the channels to avoid crazy tuples.
     // It'll look like the output of .branch()
-    out_channels = ["genomes": table_genomes, "fastq": fastq, "cram": cram]
+    out_channels = ["genome": table_genomes, "fastq": fastq, "cram": cram]
 
     // The other analysis types are all the same so we can just exclude
     // the columns: `analysis`, `read_group`, `strand`
     valid_table_analyses.each { analysis ->
-        if ( !(analysis in ["genomes", "fastq", "cram"]) ) {
+        if ( !(analysis in ["genome", "fastq", "cram"]) ) {
             out_channels[analysis] = branched
                 .getProperty(analysis)
                 .map { [it.name, it.file] }
@@ -295,4 +297,52 @@ def handle_table(genomes, table) {
     }
 
     return out_channels
+}
+
+
+/**
+ * This checks if there are any values in either channel that are not present
+ * in either channel.
+ */
+def assert_same_names(ch1, ch2, ch1_name, ch2_name, msg) {
+    ch1.collect().toList().combine(ch2.collect().toList())
+        .map { c1, c2 ->
+            symdiff = symmetric_difference(c1, c2)
+            if ( symdiff.length != 0 ) {
+                log.error "Some names for the ${ch1_name} and ${ch2_name} " +
+                          "don't match up."
+                log.error "They are: ${symdiff}."
+
+                if (msg) {
+                    log.error msg
+                }
+
+                exit 1
+            }
+        }
+}
+
+
+/**
+ * Say you have a bunch of genomes, and you want to make sure you have
+ * all of the alignments for the genomes, but you don't care if there are a
+ * few extra alignment files that don't match.
+ */
+def assert_two_covers_one(ch1, ch2, ch1_name, ch2_name, msg) {
+
+    ch1.collect().toList().combine(ch2.collect().toList())
+        .map { c1, c2 ->
+            diff = c1 - c2
+            if ( symdiff.length != 0 ) {
+                log.error "Some names in the ${ch1_name} are not represented " +
+                          "in ${ch2_name}."
+                log.error "They are: ${diff}."
+
+                if ( msg ) {
+                    log.error msg
+                }
+
+                exit 1
+            }
+        }
 }

@@ -24,7 +24,6 @@ include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
 include clean_transcripts from './utils'
 include combine_fastas from './utils'
-include symmetric_difference from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
@@ -38,6 +37,10 @@ include extract_gmap_evm_hints from './hints'
 include get_star_index from './aligners'
 include star_find_splicesites from './aligners'
 include star_align_reads from './aligners'
+
+include assert_same_names from './cli'
+include assert_two_covers_one from './cli'
+
 
 def is_null = { f -> (f == null || f == '') }
 
@@ -167,13 +170,24 @@ workflow run_stringtie {
 
     main:
 
+    // Require that all genomes have a cram.
+    // This isn't perfect, because we don't check that each genome
+    // has all read_groups
+    assert_two_covers_one(
+        genomes.map { n, f -> n },
+        crams.map { n, rg, c, s -> n }
+        "genomes",
+        "crams",
+        "We really want to be able to assemble stringtie transcripts for all genomes!",
+    )
+
     known_with_null = genomes
         .join(known, by: 0, remainder: true)
         .map { n, f, g -> is_null(g) ? [n, file('WAS_NULL')]: [n, g] }
 
     individually_assembled = stringtie_assemble(
         genomes
-            .combine(aligned, by: 0)
+            .combine(crams, by: 0)
             .map { n, f, rg, c -> [n, rg, f, c, s]}
             .combine(known_with_null, by: 0)
     )
@@ -228,6 +242,24 @@ workflow align_remote_proteins {
     genome_mmseqs_indices
 
     main:
+    // Require that we have faidx for each genome
+    assert_two_covers_one(
+        genomes.map { n, f -> n },
+        genome_faidxs.map { n, f -> n },
+        "genome",
+        "fasta faidx",
+        "We really need faidx files for each genome."
+    )
+
+    // Require that we have mmseqs_index for each genome
+    assert_two_covers_one(
+        genomes.map { n, f -> n },
+        genome_mmseqs_indices.map { n, f -> n }
+        "genome",
+        "mmseqs index",
+        "We really need mmseqs indices for each genome."
+    )
+
     // Get the mmseqs index for the remote protein dataset.
     index = get_mmseqs_remote_protein_db(remote_proteins)
 
@@ -310,6 +342,16 @@ workflow align_transcripts {
     gmap_indices
 
     main:
+    // Require that we have the same indices for genomes.
+    // This is kind of hacky since we don't take `genomes` as a parameter.
+    assert_same_names(
+        spaln_indices.map { it.0 },
+        gmap_indices.map { it.0 },
+        "spaln index",
+        "gmap index",
+        "We really want to make sure you get all of the results you'd expect :)"
+    )
+
     (combined_fasta, combined_tsv) = combine_fastas(transcripts.collect())
     cleaned_transcripts = clean_transcripts(combined_fasta)
 
@@ -379,6 +421,15 @@ workflow run_pasa {
     gmap
 
     main:
+    // Require that we have gmap alignments for all genomes.
+    assert_two_covers_one(
+        genomes.map { n, f -> n },
+        gmap.map { n, g -> n },
+        "genomes",
+        "gmap alignments",
+        "We really want to make sure you get all of the results you'd expect :)"
+    )
+
     known_with_null = genomes
         .join(known, by: 0, remainder: true)
         .map { n, f, g -> is_null(g) ? [n, file('KNOWN_WAS_NULL')]: [n, g] }
@@ -386,15 +437,6 @@ workflow run_pasa {
     stringtie_with_null = genomes
         .join(stringtie, by: 0, remainder: true)
         .map { n, f, g -> is_null(g) ? [n, file('STRINGTIE_WAS_NULL')]: [n, g] }
-
-    genome_names = genomes.map { n, f -> n }.toList()
-    gmap_names = gmap.map { n, g -> n }.toList()
-    sym_diff = symmetric_difference(genome_names, gmap_names)
-    if ( sym_diff.length != 0 ) {
-        log.error "Some names in the genomes and gmap files don't match up."
-        log.error "They are: {sym_diff}"
-        exit 1
-    }
 
     pasa_gff3 = pasa(
         not_fungus,
@@ -463,6 +505,14 @@ workflow run_codingquarry {
     stringtie
 
     main:
+    assert_two_covers_one(
+        genomes.map { n, f -> n },
+        stringtie.map { n, g -> n },
+        "genomes",
+        "stringtie assemblies",
+        "We require assemblies for each genome."
+    )
+
     (cq_fixed_gff3, cq_gff3, cq_faa, cq_fna, cq_dubious, cq_fusions, cq_overlap) = codingquarry(
         stringtie.join(genomes)
     )
