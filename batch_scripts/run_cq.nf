@@ -37,7 +37,7 @@ workflow {
 
     cq = run_codingquarry(
         params.signalp,
-        input_channels.genomes,
+        input_channels.genome,
         input_channels.stringtie
     )
 

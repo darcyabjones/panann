@@ -535,7 +535,7 @@ workflow run_codingquarry {
         cq_fixed_gff3
     )
 
-    cqpm_augustus_hints = extract_codingquarry_augustus_hints(
+    cq_augustus_hints = extract_codingquarry_augustus_hints(
         "codingquarry",
         "codingquarry",
         "CQ",
