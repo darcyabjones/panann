@@ -12,7 +12,7 @@ process get_spaln_index {
     tag "${name}"
 
     input:
-    tuple val(name), path("in.fasta"), path("in.fasta.fai")
+    tuple val(name), path("in.fasta")
 
     output:
     tuple val(name),

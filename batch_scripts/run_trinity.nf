@@ -11,7 +11,6 @@ params.table = false
 workflow {
 
     main:
-
     genomes = Channel.empty()
 
     if ( params.table ) {

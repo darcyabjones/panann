@@ -46,6 +46,90 @@ include assert_two_covers_one from './cli'
 
 def is_null = { f -> (f == null || f == '') }
 
+
+/**
+ * Align transcripts to the genomes using spaln and gmap.
+ *
+ * @param species The "species" to specify for spaln splice site motifs.
+ * @param min_intron_soft The rough minimum length an intron should be,
+ *                        some introns may still be shorter than this.
+ * @param min_intron_hard The minimum length an intron should be.
+ * @param max_intron_hard The maximum length an intron should be.
+ * @param max_gene_hard The maximum length a gene should be.
+ * @param univec A value channel containing the univec fasta file.
+ * @param transcripts A channel containing transcript fasta files.
+ * @param spaln_indices Spaln formatted databases.
+ * @param gmap_indices gmap formatted databases.
+ */
+workflow align_transcripts {
+
+    get:
+    species
+    min_intron_soft
+    min_intron_hard
+    max_intron_hard
+    max_gene_hard
+    univec
+    transcripts
+    spaln_indices
+    gmap_indices
+
+    main:
+    // Require that we have the same indices for genomes.
+    // This is kind of hacky since we don't take `genomes` as a parameter.
+    assert_same_names(
+        spaln_indices.map { it[0] },
+        gmap_indices.map { it[0] },
+        "spaln index",
+        "gmap index",
+        "We really want to make sure you get all of the results you'd expect :)"
+    )
+
+    (combined_fasta, combined_tsv) = combine_fastas(transcripts.collect())
+    cleaned_transcripts = clean_transcripts(combined_fasta)
+
+    spaln_aligned = spaln_align_transcripts(
+        species,
+        max_gene_hard,
+        min_intron_soft,
+        spaln_indices.combine(cleaned_transcripts.map { f, cln, clean -> clean })
+    )
+
+    spaln_augustus_hints = extract_spaln_transcript_augustus_hints(
+        "spaln_transcripts",
+        "spaln",
+        "E",
+        3,
+        6,
+        0,
+        0,
+        0,
+        false,
+        spaln_aligned
+    )
+
+    spaln_evm_hints = extract_spaln_transcript_evm_hints(spaln_aligned)
+
+    gmap_aligned = gmap_align_transcripts(
+        min_intron_hard,
+        max_intron_hard,
+        gmap_indices.combine(cleaned_transcripts.map { f, cln, clean -> clean })
+    )
+
+    gmap_evm_hints = extract_gmap_evm_hints(gmap_aligned)
+
+    emit:
+    combined_fasta
+    combined_tsv
+    cleaned_transcripts
+    spaln_aligned
+    spaln_augustus_hints
+    spaln_evm_hints
+    gmap_aligned
+    gmap_evm_hints
+}
+
+
 /**
  * Aligns short-read RNASeq to genomes and get intron hints for
  * augustus and gemoma.
@@ -312,89 +396,6 @@ workflow align_remote_proteins {
     exonerate_matches
     exonerate_augustus_hints
     exonerate_evm_hints
-}
-
-
-/**
- * Align transcripts to the genomes using spaln and gmap.
- *
- * @param species The "species" to specify for spaln splice site motifs.
- * @param min_intron_soft The rough minimum length an intron should be,
- *                        some introns may still be shorter than this.
- * @param min_intron_hard The minimum length an intron should be.
- * @param max_intron_hard The maximum length an intron should be.
- * @param max_gene_hard The maximum length a gene should be.
- * @param univec A value channel containing the univec fasta file.
- * @param transcripts A channel containing transcript fasta files.
- * @param spaln_indices Spaln formatted databases.
- * @param gmap_indices gmap formatted databases.
- */
-workflow align_transcripts {
-
-    get:
-    species
-    min_intron_soft
-    min_intron_hard
-    max_intron_hard
-    max_gene_hard
-    univec
-    transcripts
-    spaln_indices
-    gmap_indices
-
-    main:
-    // Require that we have the same indices for genomes.
-    // This is kind of hacky since we don't take `genomes` as a parameter.
-    assert_same_names(
-        spaln_indices.map { it[0] },
-        gmap_indices.map { it[0] },
-        "spaln index",
-        "gmap index",
-        "We really want to make sure you get all of the results you'd expect :)"
-    )
-
-    (combined_fasta, combined_tsv) = combine_fastas(transcripts.collect())
-    cleaned_transcripts = clean_transcripts(combined_fasta)
-
-    spaln_aligned = spaln_align_transcripts(
-        species,
-        max_gene_hard,
-        min_intron_soft,
-        spaln_indices.combine(cleaned_transcripts.map { f, cln, clean -> clean })
-    )
-
-    spaln_augustus_hints = extract_spaln_transcript_augustus_hints(
-        "spaln_transcripts",
-        "spaln",
-        "E",
-        3,
-        6,
-        0,
-        0,
-        0,
-        false,
-        spaln_aligned
-    )
-
-    spaln_evm_hints = extract_spaln_transcript_evm_hints(spaln_aligned)
-
-    gmap_aligned = gmap_align_transcripts(
-        min_intron_hard,
-        max_intron_hard,
-        gmap_indices.combine(cleaned_transcripts.map { f, cln, clean -> clean })
-    )
-
-    gmap_evm_hints = extract_gmap_evm_hints(gmap_aligned)
-
-    emit:
-    combined_fasta
-    combined_tsv
-    cleaned_transcripts
-    spaln_aligned
-    spaln_augustus_hints
-    spaln_evm_hints
-    gmap_aligned
-    gmap_evm_hints
 }
 
 
