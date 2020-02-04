@@ -31,7 +31,7 @@ process extract_augustus_hints {
 
     script:
 
-    def use_part = is_final ? "Part": ""
+    def use_part = is_final ? "": "part"
     """
     gffpal hints \
         --source "${hint_source}" \
@@ -95,7 +95,7 @@ process extract_augustus_split_hints {
 
     script:
 
-    def use_part = is_final ? "Part": ""
+    def use_part = is_final ? "": "part"
     """
     awk -F '\t' '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' in.gff3 \
     | gffpal hints \
@@ -470,7 +470,7 @@ process extract_gmap_evm_hints {
         \$2="gmap";
         print
       }
-    ' gmap.gff3 \
+    ' in.gff3 \
     >> "${name}_gmap_evm_hints.gff3"
     """
 }

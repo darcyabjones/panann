@@ -68,7 +68,7 @@ process pasa {
     tuple val(name), path("${name}_pasa.gff3")
 
     script:
-    def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
+    def use_stringent = not_fungus ? '' : "--stringent_alignment_overlap 30.0 "
 
     // Don't use stringtie if it is fungus
     // Stringtie and cufflinks tend to merge overlapping features,

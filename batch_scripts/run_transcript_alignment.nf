@@ -37,7 +37,8 @@ workflow {
     }
 
     if ( params.transcripts ) {
-        transcripts = Channel.value(get_file(params.transcripts))
+        transcripts = Channel
+		.fromPath(params.transcripts, checkIfExists: true, type: "file")
     } else {
         log.error "Running transcript alignments requires the transcript fasta."
         exit 1

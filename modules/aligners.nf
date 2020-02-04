@@ -55,13 +55,13 @@ process spaln_align_transcripts {
     val max_gene_hard
     val min_intron_soft
     tuple val(name),
-        path(bkn),
-        path(ent),
-        path(idx),
-        path(bkp),
-        path(grp),
-        path(seq)
-        path(transcripts)
+        path("db.bkn"),
+        path("db.ent"),
+        path("db.idx"),
+        path("db.bkp"),
+        path("db.grp"),
+        path("db.seq"),
+        path("transcripts.fasta")
 
     output:
     tuple val(name), path("${name}_spaln_transcripts.gff3")
@@ -81,8 +81,8 @@ process spaln_align_transcripts {
       -XG ${max_gene_hard} \
       -yL${min_intron_soft} \
       -t ${task.cpus} \
-      -d "${name}" \
-      "${fasta_clean}" \
+      -d db \
+      "transcripts.fasta" \
     > "${name}_spaln_transcripts.gff3"
     """
 }
@@ -105,12 +105,12 @@ process spaln_align_proteins {
     val min_intron_soft
     val max_gene_hard
     tuple val(name),
-        path(bkn),
-        path(ent),
-        path(idx),
-        path(bkp),
-        path(grp),
-        path(seq),
+        path("db.bkn"),
+        path("db.ent"),
+        path("db.idx"),
+        path("db.bkp"),
+        path("db.grp"),
+        path("db.seq"),
         path("proteins.fasta")
 
     output:
@@ -214,7 +214,7 @@ process gmap_align_transcripts {
         path("transcripts.fasta")
 
     output:
-    set val(name), file("${name}_gmap_transcripts.gff3") into gmapAlignedTranscripts
+    tuple val(name), path("${name}_gmap_transcripts.gff3")
 
     script:
     def trim_end_exons = 12

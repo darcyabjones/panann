@@ -31,7 +31,7 @@ workflow {
     }
 
     if ( params.transcripts ) {
-        transcripts = get_file(params.transcripts)
+        transcripts = file(params.transcripts, checkIfExists: true, type: "file")
     } else {
         log.error "Running pasa requires the transcript fasta."
         log.error "This can be found in the output of the " +
@@ -40,7 +40,7 @@ workflow {
     }
 
     if ( params.transcripts_cln ) {
-        transcripts_cln = get_file(params.transcripts_cln)
+        transcripts_cln = file(params.transcripts_cln, checkIfExists: true, type: "file")
     } else {
         log.error "Running pasa requires the transcript cln fasta."
         log.error "This can be found in the output of the " +
@@ -49,7 +49,7 @@ workflow {
     }
 
     if ( params.transcripts_clean ) {
-        transcripts_clean = get_file(params.transcripts_clean)
+        transcripts_clean = file(params.transcripts_clean, checkIfExists: true, type: "file")
     } else {
         log.error "Running pasa requires the transcript clean fasta."
         log.error "This can be found in the output of the " +

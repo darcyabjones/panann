@@ -14,6 +14,7 @@ include codingquarry from './predictors'
 include codingquarrypm from './predictors'
 include signalp from './predictors'
 include deepsig from './predictors'
+include pasa from './predictors'
 
 include extract_gemoma_comparative_cds_parts from './predictors'
 include cluster_gemoma_cds_parts from './predictors'
@@ -86,7 +87,7 @@ workflow align_transcripts {
     )
 
     (combined_fasta, combined_tsv) = combine_fastas(transcripts.collect())
-    cleaned_transcripts = clean_transcripts(combined_fasta)
+    cleaned_transcripts = clean_transcripts(combined_fasta, univec)
 
     spaln_aligned = spaln_align_transcripts(
         species,
@@ -96,7 +97,7 @@ workflow align_transcripts {
     )
 
     spaln_augustus_hints = extract_spaln_transcript_augustus_hints(
-        "spaln_transcripts",
+        "spaln_transcript",
         "spaln",
         "E",
         3,
@@ -446,7 +447,7 @@ workflow run_pasa {
         genomes
             .join(known_with_null, by: 0)
             .join(stringtie_with_null, by: 0)
-            .join(gmap_aligned, by: 0)
+            .join(gmap, by: 0)
             .combine(transcripts)
     )
 
