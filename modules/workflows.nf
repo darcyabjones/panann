@@ -6,6 +6,9 @@ include cluster_genome_vs_protein_matches as cluster_genome_vs_remote_protein_ma
 include exonerate_regions as exonerate_remote_proteins from './aligners'
 include spaln_align_transcripts from './aligners'
 include gmap_align_transcripts from './aligners'
+include get_star_index from './aligners'
+include star_find_splicesites from './aligners'
+include star_align_reads from './aligners'
 
 include codingquarry from './predictors'
 include codingquarrypm from './predictors'
@@ -16,6 +19,9 @@ include extract_gemoma_comparative_cds_parts from './predictors'
 include cluster_gemoma_cds_parts from './predictors'
 include gemoma as gemoma_comparative from './predictors'
 include gemoma_combine as gemoma_comparative_combine from './predictors'
+
+include stringtie_assemble from './assemblers'
+include stringtie_merge from './assemblers'
 
 include fasta_to_tsv as remote_proteins_fasta_to_tsv from './utils'
 include tidy_gff3 as tidy_gemoma_gff3 from './utils'
@@ -33,10 +39,6 @@ include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './
 include extract_augustus_split_hints as extract_pasa_augustus_hints from './hints'
 include extract_spaln_transcript_evm_hints from './hints'
 include extract_gmap_evm_hints from './hints'
-
-include get_star_index from './aligners'
-include star_find_splicesites from './aligners'
-include star_align_reads from './aligners'
 
 include assert_same_names from './cli'
 include assert_two_covers_one from './cli'
@@ -169,13 +171,12 @@ workflow run_stringtie {
     crams
 
     main:
-
     // Require that all genomes have a cram.
     // This isn't perfect, because we don't check that each genome
     // has all read_groups
     assert_two_covers_one(
         genomes.map { n, f -> n },
-        crams.map { n, rg, c, s -> n }
+        crams.map { n, rg, c, s -> n },
         "genomes",
         "crams",
         "We really want to be able to assemble stringtie transcripts for all genomes!",
@@ -188,7 +189,7 @@ workflow run_stringtie {
     individually_assembled = stringtie_assemble(
         genomes
             .combine(crams, by: 0)
-            .map { n, f, rg, c -> [n, rg, f, c, s]}
+            .map { n, f, rg, c, s -> [n, rg, f, c, s]}
             .combine(known_with_null, by: 0)
     )
 
@@ -254,7 +255,7 @@ workflow align_remote_proteins {
     // Require that we have mmseqs_index for each genome
     assert_two_covers_one(
         genomes.map { n, f -> n },
-        genome_mmseqs_indices.map { n, f -> n }
+        genome_mmseqs_indices.map { n, f -> n },
         "genome",
         "mmseqs index",
         "We really need mmseqs indices for each genome."
@@ -345,8 +346,8 @@ workflow align_transcripts {
     // Require that we have the same indices for genomes.
     // This is kind of hacky since we don't take `genomes` as a parameter.
     assert_same_names(
-        spaln_indices.map { it.0 },
-        gmap_indices.map { it.0 },
+        spaln_indices.map { it[0] },
+        gmap_indices.map { it[0] },
         "spaln index",
         "gmap index",
         "We really want to make sure you get all of the results you'd expect :)"

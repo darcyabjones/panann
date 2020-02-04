@@ -308,7 +308,7 @@ def assert_same_names(ch1, ch2, ch1_name, ch2_name, msg) {
     ch1.collect().toList().combine(ch2.collect().toList())
         .map { c1, c2 ->
             symdiff = symmetric_difference(c1, c2)
-            if ( symdiff.length != 0 ) {
+            if ( symdiff.size() != 0 ) {
                 log.error "Some names for the ${ch1_name} and ${ch2_name} " +
                           "don't match up."
                 log.error "They are: ${symdiff}."
@@ -333,7 +333,7 @@ def assert_two_covers_one(ch1, ch2, ch1_name, ch2_name, msg) {
     ch1.collect().toList().combine(ch2.collect().toList())
         .map { c1, c2 ->
             diff = c1 - c2
-            if ( symdiff.length != 0 ) {
+            if ( diff.size() != 0 ) {
                 log.error "Some names in the ${ch1_name} are not represented " +
                           "in ${ch2_name}."
                 log.error "They are: ${diff}."

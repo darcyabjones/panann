@@ -33,9 +33,9 @@ workflow {
     }
 
     (combined, indiv) = run_stringtie(
-        input_channels.genomes,
+        input_channels.genome,
         input_channels.known,
-        input_channels.crams
+        input_channels.cram
     )
 
     publish:
