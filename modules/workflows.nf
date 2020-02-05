@@ -16,9 +16,14 @@ include signalp from './predictors'
 include deepsig from './predictors'
 include pasa from './predictors'
 
-include extract_gemoma_comparative_cds_parts from './predictors'
 include cluster_gemoma_cds_parts from './predictors'
+include extract_gemoma_cds_parts from './predictors'
+include extract_gemoma_comparative_cds_parts from './predictors'
+include mmseqs_search_gemoma_cds_parts from './predictors'
+include mmseqs_search_gemoma_comparative_cds_parts from './predictors'
+include gemoma from './predictors'
 include gemoma as gemoma_comparative from './predictors'
+include gemoma_combine from './predictors'
 include gemoma_combine as gemoma_comparative_combine from './predictors'
 
 include stringtie_assemble from './assemblers'
@@ -26,6 +31,7 @@ include stringtie_merge from './assemblers'
 
 include fasta_to_tsv as remote_proteins_fasta_to_tsv from './utils'
 include tidy_gff3 as tidy_gemoma_gff3 from './utils'
+include tidy_gff3 as tidy_gemoma_comparative_gff3 from './utils'
 include tidy_gff3 as tidy_pasa_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
@@ -34,10 +40,14 @@ include combine_fastas from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
+include combine_gemoma_rnaseq_hints from './hints'
 include extract_augustus_hints as extract_spaln_transcript_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarry_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_pasa_augustus_hints from './hints'
+include extract_augustus_split_hints as extract_gemoma_augustus_hints from './hints'
+include extract_augustus_split_hints as extract_gemoma_comparative_augustus_hints from './hints'
+
 include extract_spaln_transcript_evm_hints from './hints'
 include extract_gmap_evm_hints from './hints'
 
@@ -218,10 +228,14 @@ workflow align_rnaseq_reads {
     )
 
     // Get the intron and coverage hints for gemoma.
-    gemoma_rnaseq_hints = extract_gemoma_rnaseq_hints(
+    gemoma_rnaseq_hints_indiv = extract_gemoma_rnaseq_hints(
         genomes
             .combine(aligned_with_strand, by: 0)
             .map { n, f, rg, c, s -> [n, rg, f, c, s] }
+    )
+
+    gemoma_rnaseq_hints = combine_gemoma_rnaseq_hints(
+        gemoma_rnaseq_hints_indiv.groupTuple(by: 0)
     )
 
     emit:
@@ -587,10 +601,88 @@ workflow run_codingquarry {
 
 
 /**
+ * Runs the regular gemoma pipeline
+ *
+ * @param trans_table The integer corresponding to the NCBI translation table.
+ * @param genomes A channel of genomes to run. Structure: tuple(val(name), path("in.fasta"))
+ * @param genome_mmseqs_indices A channel of MMSeqs formatted genome databases.
+ * @param introns A channel of intron hints to use for gemoma.
+ *                Structure: tuple(val(name), path("hints.gff3"))
+ * @param known known loci in gff3 format.
+ */
+workflow run_gemoma {
+
+    get:
+    trans_table
+    genomes
+    genome_mmseqs_indices
+    introns
+    known
+
+    main:
+    cds_parts = extract_gemoma_cds_parts(
+        genomes.join(known, by: 0, remainder: false)
+    )
+
+    cds_matches = mmseqs_search_gemoma_cds_parts(
+        trans_table,
+        cds_parts
+            .combine(genome_mmseqs_indices)
+            .filter { rn, an, c, a, p, tn, g -> rn != tn }
+            .map { rn, an, c, a, p, tn, g -> [rn, c, a, p, tn, g] }
+    )
+
+    gemoma_indiv_preds = gemoma(
+        genomes
+            .combine(cds_matches, by: 0)
+            .map { tn, f, rn, m -> [rn, tn, f, m] }
+            .combine(cds_parts, by: 0)
+            .map { [rn, tn, f, m, an, c, a, p] -> [tn, rn, f, c, a, p, m] }
+            .combine(introns, by: 0)
+    )
+
+    gemoma_gff3 = gemoma_combine(
+        gemoma_indiv_preds
+            .groupTuple(by: 0)
+            .join(genomes, by: 0, remainder: false)
+            .combine(introns, by: 0)
+    )
+
+    gemoma_gff3_tidied = tidy_gemoma_gff3(
+        "gemoma",
+        "gemoma",
+        gemoma_gff3
+    )
+
+    gemoma_augustus_hints = extract_gemoma_augustus_hints(
+        "gemoma",
+        "gemoma_exon",
+        "gemoma_cds",
+        "GEMOMA",
+        "GEMOMA",
+        4, // exon_priority
+        3, // CDS priority
+        9, // exon_trim
+        6, // cds_trim
+        9, // utr_trim,
+        6, // gene_trim
+        false,
+        gemoma_gff3_tidied
+    )
+
+    emit:
+    gemoma_gff3
+    gemoma_gff3_tidied
+    gemoma_augustus_hints
+}
+
+
+/**
  * Runs the comparative gemoma pipeline.
  *
  * @param trans_table The integer corresponding to the NCBI translation table.
  * @param genomes A channel of genomes to run. Structure: tuple(val(name), path("in.fasta"))
+ * @param genome_mmseqs_indices A channel of MMSeqs formatted genome databases.
  * @param introns A channel of intron hints to use for gemoma.
  *                Structure: tuple(val(name), path("hints.gff3"))
  * @param pasa PASA/transdecoder predictions in gff3 format.
@@ -607,6 +699,7 @@ workflow run_gemoma_comparative {
     get:
     trans_table  // val, should be ncbi table integer.
     genomes // tuple(val(name), file(fasta))
+    genome_mmseqs_indices
     introns  // tuple(val(name), file(introns.gff))
     pasa
     cq
@@ -622,13 +715,11 @@ workflow run_gemoma_comparative {
             augustus.map {n, f -> [n, "augustus", f]}
         )
 
-
     cds_parts = extract_gemoma_comparative_cds_parts(
         genomes
             .combine(gffs, by: 0)
             .map { n, f, a, g -> [n, a, f, g] }
     )
-
 
     clustered_cds_parts = cluster_gemoma_cds_parts(
         cds_parts
@@ -636,14 +727,14 @@ workflow run_gemoma_comparative {
             .collect()
     )
 
-    mmseqs_search_gemoma_cds_parts(
+    mmseqs_matches = mmseqs_search_gemoma_comparative_cds_parts(
         trans_table,
         clustered_cds_parts
             .map { c, a, p -> ["comparative", c, a, p] }
-            .combine(genomes, by: 0)
+            .combine(genome_mmseqs_indices, by: 0)
     )
 
-    gemoma_matches = gemoma(
+    gemoma_matches = gemoma_comparative(
         genomes.combine(
             clustered_cds_parts.map {c, a, p -> ["comparative", c, a, p]},
             by: 0
@@ -653,20 +744,37 @@ workflow run_gemoma_comparative {
         .join(introns, by: 0)
     )
 
-    gemoma_predictions = gemoma_combine(
+    gemoma_gff3 = gemoma_comparative_combine(
         gemoma_matches
             .groupTuple(by: 0)
             .join(genomes, by: 0)
             .join(introns, by: 0)
     )
 
-    gemoma_predictions_tidied = tidy_gemoma(
+    gemoma_gff3_tidied = tidy_gemoma_comparative_gff3(
         "gemoma",
         "gemoma",
-        gemoma_predictions
+        gemoma_gff3
+    )
+
+    gemoma_augustus_hints = extract_gemoma_comparative_augustus_hints(
+        "gemoma_comparative",
+        "gemoma_comparative_exon",
+        "gemoma_comparative_cds",
+        "COMPGEMOMA",
+        "COMPGEMOMA",
+        4, // exon_priority
+        3, // CDS priority
+        9, // exon_trim
+        6, // cds_trim
+        9, // utr_trim,
+        6, // gene_trim
+        false,
+        gemoma_gff3_tidied
     )
 
     emit:
-    gemoma_predictions
-    gemoma_predictions_tidied
+    gemoma_gff3
+    gemoma_gff3_tidied
+    gemoma_augustus_hints
 }

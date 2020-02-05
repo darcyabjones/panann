@@ -849,7 +849,6 @@ process augustus_hints {
       --errfile=augustus.err \
       "${fasta}"
 
-
     awk -F '\\t' '
       BEGIN {OFS="\\t"}
       \$3 == "transcript" {\$3="mRNA"}
