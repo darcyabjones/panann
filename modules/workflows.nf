@@ -35,8 +35,11 @@ include tidy_gff3 as tidy_gemoma_comparative_gff3 from './utils'
 include tidy_gff3 as tidy_pasa_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
+include tidy_gff3 as tidy_known_gff3 from './utils'
+include combine_and_tidy_gff3 as combine_and_tidy_augustus_gff3 from './utils'
 include clean_transcripts from './utils'
 include combine_fastas from './utils'
+include chunkify_genomes from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
@@ -44,6 +47,8 @@ include combine_gemoma_rnaseq_hints from './hints'
 include extract_augustus_hints as extract_spaln_transcript_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarry_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './hints'
+include extract_augustus_hints as extract_known_augustus_hints from './hints'
+include extract_augustus_hints as extract_augustus_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_pasa_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_gemoma_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_gemoma_comparative_augustus_hints from './hints'
@@ -673,6 +678,109 @@ workflow run_gemoma {
     gemoma_gff3
     gemoma_gff3_tidied
     gemoma_augustus_hints
+}
+
+
+/**
+ * @param species The augustus species to use. Should be available in the config_dir
+ * @param predict_utrs Boolean, whether augustus should predict utrs.
+ * @param not_fungus Boolean, should we not use fungal specific parameters?
+ * @param min_intron_hard the minimum length an intron should be.
+ * @param valid_splicesites a comma separated list of valid splice sites e.g. "atac,gtag"
+ * @param genomes A channel containing the genomes to predict, tuple(val(name), path("in.fasta"))
+ * @param known A channel containing gffs with known sites. tuple(val(name), path("known.gff3"))
+ * @param config_dir A value channel containing the path to the augustus config directory.
+ * @param extrinsic the extrinsic config file, containing weights for hints.
+ * @param hints A channel of hints files for augustus. tuple(val(name), path("hint.gff3"))
+ *
+ * @return augustus_gff3_tidied The tidied augustue predictions.
+ * @return augustus_augustus_hints Hints to use for augustus during gapfiller stage.
+ */
+workflow run_augustus {
+
+    get:
+    species
+    predict_utrs
+    not_fungus
+    min_intron_hard
+    valid_splicesites
+    genomes
+    known
+    config_dir
+    extrinsic
+    hints
+
+    main:
+    genome_chunks = chunkify_genomes(16, genomes)
+
+    if ( predict_utrs && !not_fungus ) {
+        genome_chunks_with_strand = genome_chunks
+            .flatMap { n, fs -> fs.collect { f -> [n, f] } }
+            .flatMap { n, f -> [[n, "forward", f], [n, "reverse", f]] }
+    } else {
+        genome_chunks_with_strand = genome_chunks
+            .flatMap { n, fs -> fs.collect { f -> [n, "both", f] } }
+    }
+
+    known_gff3_tidied = tidy_known_gff3(
+        "known",
+        "known",
+        known
+    )
+
+    gemoma_augustus_hints = extract_gemoma_augustus_hints(
+        "known",
+        "known",
+        "M",
+        50, // priority
+        0, // exon_trim
+        0, // cds_trim
+        0, // utr_trim,
+        0, // gene_trim
+        false,
+        known_gff3_tidied
+    )
+
+    known_with_null = genomes
+        .join(known, by: 0, remainder: true)
+        .map { n, f, a, g -> is_null(g) ? [n, file('KNOWN_WAS_NULL')]: [n, g] }
+
+    augustus_gff3_chunks = augustus_hints(
+        species,
+        predict_utrs,
+        not_fungus,
+        min_intron_hard,
+        valid_splicesites,
+        genomes.combine(
+            hints.mix(known_with_null).groupTuple(by: 0),
+            by: 0
+        ),
+        config_dir,
+        extrinsic
+    )
+
+    augustus_gff3_tidied = combine_and_tidy_augustus_gff3(
+        "augustus",
+        "augustus",
+        augustus_gff3_chunks
+    )
+
+    augustus_augustus_hints = extract_augustus_augustus_hints(
+        "augustus",
+        "augustus",
+        "AUG",
+        4, // priority
+        6, // exon_trim
+        6, // cds_trim
+        6, // utr_trim,
+        6, // gene_trim
+        false,
+        augustus_gff3_tidied
+    )
+
+    emit:
+    augustus_gff3_tidied
+    augustus_augustus_hints
 }
 
 

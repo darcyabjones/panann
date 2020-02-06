@@ -2,6 +2,8 @@
 .nextflow*
 *.log*
 
+**.swp
+
 # Created during pipeline
 test/*.fai
 

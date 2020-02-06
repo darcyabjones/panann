@@ -30,7 +30,8 @@ valid_table_analyses = [
     "augustus",
     "gemoma_comparative",
     "evm",
-    "augustus_gapfiller"
+    "augustus_gapfiller",
+    "augustus_hints",
 ]
 
 
@@ -239,6 +240,7 @@ def handle_table(genomes, table) {
             gemoma_comparative: it.analysis == "gemoma_comparative"
             evm: it.analysis == "evm"
             augustus_gapfiller: it.analysis == "augustus_gapfiller"
+            augustus_hints: it.analysis == "augustus_hints"
         }
 
 
