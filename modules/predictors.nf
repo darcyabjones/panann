@@ -589,7 +589,7 @@ process mmseqs_search_gemoma_cds_parts {
 process gemoma {
 
     label "gemoma"
-    label "small_task"
+    label "medium_task"
     time '6h'
 
     tag "${target_name} - ${ref_name}"
@@ -672,7 +672,7 @@ process gemoma_combine {
       ${preds} \
       outdir=gaf
 
-    # if ${get_utr}
+    # if \${get_utr}
     # then
     #   mkdir -p finalised
     #   java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \

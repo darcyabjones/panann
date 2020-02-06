@@ -20,7 +20,7 @@ include cluster_gemoma_cds_parts from './predictors'
 include extract_gemoma_cds_parts from './predictors'
 include extract_gemoma_comparative_cds_parts from './predictors'
 include mmseqs_search_gemoma_cds_parts from './predictors'
-include mmseqs_search_gemoma_comparative_cds_parts from './predictors'
+include mmseqs_search_gemoma_cds_parts as mmseqs_search_gemoma_comparative_cds_parts from './predictors'
 include gemoma from './predictors'
 include gemoma as gemoma_comparative from './predictors'
 include gemoma_combine from './predictors'
@@ -628,8 +628,7 @@ workflow run_gemoma {
         trans_table,
         cds_parts
             .combine(genome_mmseqs_indices)
-            .filter { rn, an, c, a, p, tn, g -> rn != tn }
-            .map { rn, an, c, a, p, tn, g -> [rn, c, a, p, tn, g] }
+            .filter { rn, c, a, p, tn, g -> rn != tn }
     )
 
     gemoma_indiv_preds = gemoma(
@@ -637,7 +636,7 @@ workflow run_gemoma {
             .combine(cds_matches, by: 0)
             .map { tn, f, rn, m -> [rn, tn, f, m] }
             .combine(cds_parts, by: 0)
-            .map { [rn, tn, f, m, an, c, a, p] -> [tn, rn, f, c, a, p, m] }
+            .map { rn, tn, f, m, c, a, p -> [tn, rn, f, c, a, p, m] }
             .combine(introns, by: 0)
     )
 

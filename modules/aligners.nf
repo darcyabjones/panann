@@ -292,7 +292,7 @@ process get_mmseqs_genome_db {
     script:
     """
     mkdir -p "${name}_mmseqs_genome_db"
-    mmseqs createdb seqs.fasta "${name}_mmseqs_genome_db/db" --dont-split-seqs-by-len
+    mmseqs createdb seqs.fasta "${name}_mmseqs_genome_db/db" --dont-split-seq-by-len
     """
 }
 
