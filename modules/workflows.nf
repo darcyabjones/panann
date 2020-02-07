@@ -552,14 +552,14 @@ workflow run_codingquarry {
 
 
     cq_gff3_tidied = tidy_codingquarry_gff3(
-        "codingquarry",
+        "codingquarrypm",
         "codingquarry",
         cq_fixed_gff3
     )
 
     cq_augustus_hints = extract_codingquarry_augustus_hints(
-        "codingquarry",
-        "codingquarry",
+        "codingquarrypm",
+        "codingquarrypm",
         "CQ",
         4, // priority
         6, // exon_trim
@@ -817,23 +817,25 @@ workflow run_gemoma_comparative {
     clustered_cds_parts = cluster_gemoma_cds_parts(
         cds_parts
             .map {n, an, c, a, p -> [c, a, p]}
+            .toList()
+            .map { l -> l.transpose() }
             .collect()
     )
+
 
     mmseqs_matches = mmseqs_search_gemoma_comparative_cds_parts(
         trans_table,
         clustered_cds_parts
             .map { c, a, p -> ["comparative", c, a, p] }
-            .combine(genome_mmseqs_indices, by: 0)
+            .combine(genome_mmseqs_indices)
     )
 
     gemoma_matches = gemoma_comparative(
         genomes.combine(
             clustered_cds_parts.map {c, a, p -> ["comparative", c, a, p]},
-            by: 0
         )
         .map { t, f, r, c, a, p -> [t, r, f, c, a, p] }
-        .join(mmseqs_matches, by: 0)
+        .join(mmseqs_matches.view(), by: [0, 1])
         .join(introns, by: 0)
     )
 

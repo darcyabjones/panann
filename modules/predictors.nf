@@ -403,17 +403,17 @@ process extract_gemoma_comparative_cds_parts {
     tag "${name} - ${analysis}"
 
     input:
-    set val(name),
+    tuple val(name),
         val(analysis),
-        file(fasta),
-        file(gff)
+        path(fasta),
+        path(gff)
 
     output:
-    set val(name),
+    tuple val(name),
         val(analysis),
-        file("${name}_${analysis}_cdsparts.fasta"),
-        file("${name}_${analysis}_assignment.tsv"),
-        file("${name}_${analysis}_proteins.fasta")
+        path("${name}_${analysis}_cdsparts.fasta"),
+        path("${name}_${analysis}_assignment.tsv"),
+        path("${name}_${analysis}_proteins.fasta")
 
     script:
     """
@@ -541,9 +541,9 @@ process mmseqs_search_gemoma_cds_parts {
         path("genome") // Should be mmseqs db
 
     output:
-    set val(target_name),
+    tuple val(target_name),
         val(ref_name),
-        file("${target_name}_${ref_name}_mmseqs_search_gemoma_cds_parts_matches.tsv")
+        path("${target_name}_${ref_name}_mmseqs_search_gemoma_cds_parts_matches.tsv")
 
     script:
     """
@@ -596,13 +596,13 @@ process gemoma {
 
     input:
     tuple val(target_name),
-        val(ref_name),
-        path(fasta),
-        path("cds-parts.fasta"),
-        path("assignment.tabular"),
-        path("proteins.fasta"),
-        path("matches.tsv"),
-        path("introns.gff")
+          val(ref_name),
+          path("genome.fasta"),
+          path("cds-parts.fasta"),
+          path("assignment.tabular"),
+          path("proteins.fasta"),
+          path("matches.tsv"),
+          path("introns.gff")
 
     output:
     tuple val(target_name),
@@ -615,7 +615,7 @@ process gemoma {
     mkdir -p out
     java -jar \${GEMOMA_JAR} CLI GeMoMa \
       s=matches.tsv \
-      t=${fasta} \
+      t=genome.fasta \
       c=cds-parts.fasta \
       a=assignment.tabular \
       q=proteins.fasta \
@@ -695,7 +695,7 @@ process gemoma_combine {
     mv gaf/filtered_predictions.gff gemoma_tmp.gff3
 
     awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
-      gemoma_tmp.gff3 > "${name}_gemoma_combined.gff3"
+      gemoma_tmp.gff3 > "${name}_${analysis}_combined.gff3"
 
     rm -rf -- gaf finalised GeMoMa_temp gemoma_tmp.gff3
     """
