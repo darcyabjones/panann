@@ -647,6 +647,7 @@ workflow run_gemoma {
     )
 
     gemoma_gff3 = gemoma_combine(
+        "gemoma",
         gemoma_indiv_preds
             .groupTuple(by: 0)
             .join(genomes, by: 0, remainder: false)
@@ -789,10 +790,8 @@ workflow run_augustus {
  * @param genome_mmseqs_indices A channel of MMSeqs formatted genome databases.
  * @param introns A channel of intron hints to use for gemoma.
  *                Structure: tuple(val(name), path("hints.gff3"))
- * @param pasa PASA/transdecoder predictions in gff3 format.
- * @param cq Codingquarry predictions in gff3 format.
- * @param cqpm CodingQuarryPM predictions in gff3 format.
- * @param augustus Augustus predictions in gff3 format.
+ * @param predictions A channel of predictions to transfer.
+ *                Structure tuple(val(name), val(analysis), path("in.gff3")
  * @return gemoma_predictions The raw genoma predictions.
  *         Structure tuple(val(name), path(gff3)).
  * @return gemoma_predictions_tidied The tidied gemoma predictions.
@@ -805,23 +804,13 @@ workflow run_gemoma_comparative {
     genomes // tuple(val(name), file(fasta))
     genome_mmseqs_indices
     introns  // tuple(val(name), file(introns.gff))
-    pasa
-    cq
-    cqpm
-    augustus
+    predictions // tuple(val(name), val(analysis), file(gff3))
 
     main:
-    gffs = pasa
-        .map {n, f -> [n, "pasa", f]}
-        .mix(
-            cq.map {n, f -> [n, "codingquarry", f]},
-            cqpm.map {n, f -> [n, "codingquarrypm", f]},
-            augustus.map {n, f -> [n, "augustus", f]}
-        )
 
     cds_parts = extract_gemoma_comparative_cds_parts(
         genomes
-            .combine(gffs, by: 0)
+            .combine(predictions, by: 0)
             .map { n, f, a, g -> [n, a, f, g] }
     )
 
@@ -849,6 +838,7 @@ workflow run_gemoma_comparative {
     )
 
     gemoma_gff3 = gemoma_comparative_combine(
+        "gemoma_comparative",
         gemoma_matches
             .groupTuple(by: 0)
             .join(genomes, by: 0)
@@ -856,7 +846,7 @@ workflow run_gemoma_comparative {
     )
 
     gemoma_gff3_tidied = tidy_gemoma_comparative_gff3(
-        "gemoma",
+        "gemoma_comparative",
         "gemoma",
         gemoma_gff3
     )

@@ -644,6 +644,7 @@ process gemoma_combine {
     tag "${name}"
 
     input:
+    val analysis
     tuple val(name),
         val(ref_names),
         path(pred_gffs),
@@ -652,7 +653,7 @@ process gemoma_combine {
 
     output:
     tuple val(name),
-        path("${name}_gemoma_combined.gff3")
+        path("${name}_${analysis}_combined.gff3")
 
     script:
     def ref_names_list = ref_names
