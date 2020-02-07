@@ -216,6 +216,28 @@ process combine_and_tidy_gff3 {
 }
 
 
+process merge_gffs {
+
+    label "genometools"
+    label "small_task"
+    time '2h'
+
+    tag "${name}"
+
+    input:
+    val analysis
+    tuple val(name), path("to_merge/*gff3")
+
+    output:
+    tuple val(name), path("${name}_${analysis}.gff3")
+
+    script:
+    """
+    gt merge -tidy to_merge/*gff3 > "${name}_${analysis}.gff3"
+    """
+}
+
+
 /*
  * Deduplicate identical user provided proteins and concat into single file.
  */

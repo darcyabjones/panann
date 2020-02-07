@@ -872,12 +872,10 @@ process evm {
     val min_intron_hard
     path "weights.txt"
     tuple val(name),
-        path(fasta),
-        path(faidx),
-        path("denovo.gff3"),
-        path("transcripts.gff3"),
-        path("proteins.gff3"),
-        path("other.gff3")
+        path("genome.fasta"),
+        path("transcripts/*"),
+        path("proteins/*"),
+        path("genes/*")
 
     output:
     tuple val(name),
@@ -885,9 +883,13 @@ process evm {
 
     script:
     """
+    grep --no-filename -v "^#" genes/* > genes.gff3
+    grep --no-filename -v "^#" transcripts/* > transcripts.gff3
+    grep --no-filename -v "^#" proteins/* > proteins.gff3
+
     partition_EVM_inputs.pl \
-      --genome "${fasta}" \
-      --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --genome genome.fasta \
+      --gene_predictions genes.gff3 \
       --protein_alignments proteins.gff3 \
       --transcript_alignments transcripts.gff3 \
       --segmentSize 500000 \
@@ -895,9 +897,9 @@ process evm {
       --partition partitions_list.out
 
     write_EVM_commands.pl \
-      --genome "${fasta}" \
+      --genome genome.fasta \
       --weights "\${PWD}/weights.txt" \
-      --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --gene_predictions genes.gff3 \
       --min_intron_length "${min_intron_hard}" \
       --protein_alignments proteins.gff3 \
       --transcript_alignments transcripts.gff3 \
@@ -914,7 +916,7 @@ process evm {
     convert_EVM_outputs_to_GFF3.pl \
       --partitions partitions_list.out \
       --output evm.out \
-      --genome "${fasta}"
+      --genome genome.fasta
 
     find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
     """
@@ -940,22 +942,24 @@ process find_missing_evm_predictions {
     input:
     tuple val(name),
         path("evm.gff3"),
-        path("denovo.gff3"),
-        path("transcripts.gff3"),
-        path("proteins.gff3"),
-        path("other.gff3"),
-        path(faidx)
+        path("genes/*"),
+        path("genome.faidx")
 
     output:
     tuple val(name), path("clustered.bed")
 
     script:
     """
+    grep --no-filename -v "^#" genes/* > genes.gff3
+    grep --no-filename -v "^#" transcripts/* > transcripts.gff3
+    grep --no-filename -v "^#" proteins/* > proteins.gff3
+    mkdir tmp
+
     awk -F'\\t' '
       BEGIN { OFS="\\t" }
       \$3 == "mRNA" {
         print \$1, \$4, \$5, ".", ".", \$7
-      }' other.gff3 \
+      }' genes.gff3 \
     | sort \
       -k1,1 -k2,2n -k3,3n \
       --temporary-directory=tmp \
@@ -965,8 +969,10 @@ process find_missing_evm_predictions {
         -s \
         -A \
     | bedtools merge -s -c 6 -o distinct -i - \
-    | bedtools slop -g "${faidx}" -b 5 -i - \
+    | bedtools slop -g genome.faidx -b 5 -i - \
     > clustered.bed
+
+    rm -rf -- tmp
     """
 }
 
@@ -1029,7 +1035,25 @@ process augustus_gap_filler {
       ${utr_flag} \
       -n "${task.cpus}" \
       -m "${min_intron_hard}" \
-      -o "augustus_gaps"
+      -o "augustus_gaps_tmp"
+
+    mkdir augustus_gaps
+    for f in augustus_gaps_tmp/*.gff3
+    do
+        BNAME=\$(basename f)
+        awk -F '\\t' '
+          BEGIN {OFS="\\t"}
+          \$3 == "transcript" {\$3="mRNA"}
+          \$0 !~ /^#/ {print}
+        ' "\${f}" \
+        > "augustus_gaps/\${BNAME}"
+
+        # Remove any empty files.
+        if [ ! -s "augustus_gaps/\${BNAME}" ]
+        then
+            rm "augustus_gaps/\${BNAME}"
+        fi
+    done
     """
 }
 

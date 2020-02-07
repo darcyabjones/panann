@@ -26,6 +26,8 @@ include gemoma as gemoma_comparative from './predictors'
 include gemoma_combine from './predictors'
 include gemoma_combine as gemoma_comparative_combine from './predictors'
 include augustus_hints from './predictors'
+include evm from './predictors'
+include augustus_gap_filler from './predictors'
 
 include stringtie_assemble from './assemblers'
 include stringtie_merge from './assemblers'
@@ -37,14 +39,16 @@ include tidy_gff3 as tidy_pasa_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarry_gff3 from './utils'
 include tidy_gff3 as tidy_codingquarrypm_gff3 from './utils'
 include tidy_gff3 as tidy_known_gff3 from './utils'
+include tidy_gff3 as tidy_evm_gff3 from './utils'
 include combine_and_tidy_gff3 as combine_and_tidy_augustus_gff3 from './utils'
 include clean_transcripts from './utils'
 include combine_fastas from './utils'
 include chunkify_genomes from './utils'
+include merge_gffs from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
-include combine_gemoma_rnaseq_hints from './hints'
+include combine_gemoma_rnaseq_hiknownnts from './hints'
 include extract_augustus_hints as extract_spaln_transcript_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarry_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './hints'
@@ -873,4 +877,101 @@ workflow run_gemoma_comparative {
     gemoma_gff3
     gemoma_gff3_tidied
     gemoma_augustus_hints
+}
+
+
+workflow run_evm {
+
+    get:
+    species
+    not_fungus
+    augustus_utr
+    valid_splicesites
+    min_intron_hard
+    augustus_config
+    augustus_hint_weights
+    evm_weights
+    genomes
+    genome_faidxs
+    transcripts
+    proteins
+    genes
+    known
+    hints
+
+    main:
+    // Config expects source to be "manual"
+    known_gff3_tidied = tidy_known_gff3(
+        "manual",
+        "manual",
+        known
+    )
+
+    evm_gff3 = evm(
+        min_intron_hard,
+        evm_weights,
+        genomes
+            .join(transcripts.groupTuple(by: 0), by: 0)
+            .join(proteins.groupTuple(by: 0), by: 0)
+            .join(genes.mix(known_gff3_tidied).groupTuple(by: 0), by: 0)
+    )
+
+    evm_gff3_tidied = tidy_evm_gff3(
+        "evm",
+        "evm",
+        evm_gff3
+    )
+
+    missing_preds = find_missing_evm_predictions(
+        evm_gff3_tidied
+            .join(genes.groupTuple(by: 0), by: 0)
+            .join(genome_faidxs, by: 0)
+    )
+
+    known_augustus_hints = extract_known_augustus_hints(
+        "known",
+        "known",
+        "M",
+        50, // priority
+        0, // exon_trim
+        0, // cds_trim
+        0, // utr_trim,
+        0, // gene_trim
+        false,
+        known_gff3_tidied
+    )
+
+    augustus_gff3s = augustus_gap_filler(
+        species,
+        not_fungus,
+        augustus_utr,
+        valid_splicesites,
+        min_intron_hard,
+        genomes
+            .join(missing_preds, by: 0)
+            .join(
+                hints
+                    .mix(known_augustus_hints.map { n, a, g -> [n, g] })
+                    .groupTuple(by: 0),
+                by: 0
+            ),
+        augustus_config,
+        augustus_hint_weights
+    )
+
+    augustus_gff3_tidied = combine_and_tidy_augustus_gff3(
+        "augustus_gapfiller",
+        "augustus",
+        augustus_gapfilled
+    )
+
+    final_gff3 = merge_gffs(
+        "final",
+        evm_gff3_tidied.mix(augustus_tidied).groupTuple(by: 0)
+    )
+
+    emit:
+    evm_gff3_tidied
+    augustus_gff3_tidied
+    final_gff3
 }
