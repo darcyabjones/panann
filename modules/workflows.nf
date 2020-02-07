@@ -25,6 +25,7 @@ include gemoma from './predictors'
 include gemoma as gemoma_comparative from './predictors'
 include gemoma_combine from './predictors'
 include gemoma_combine as gemoma_comparative_combine from './predictors'
+include augustus_hints from './predictors'
 
 include stringtie_assemble from './assemblers'
 include stringtie_merge from './assemblers'
@@ -728,7 +729,7 @@ workflow run_augustus {
         known
     )
 
-    gemoma_augustus_hints = extract_gemoma_augustus_hints(
+    known_augustus_hints = extract_known_augustus_hints(
         "known",
         "known",
         "M",
@@ -741,18 +742,14 @@ workflow run_augustus {
         known_gff3_tidied
     )
 
-    known_with_null = genomes
-        .join(known, by: 0, remainder: true)
-        .map { n, f, a, g -> is_null(g) ? [n, file('KNOWN_WAS_NULL')]: [n, g] }
-
     augustus_gff3_chunks = augustus_hints(
         species,
         predict_utrs,
         not_fungus,
         min_intron_hard,
         valid_splicesites,
-        genomes.combine(
-            hints.mix(known_with_null).groupTuple(by: 0),
+        genome_chunks_with_strand.combine(
+            hints.mix(known_augustus_hints.map { n, a, g -> [n, g] }).groupTuple(by: 0),
             by: 0
         ),
         config_dir,
@@ -762,7 +759,7 @@ workflow run_augustus {
     augustus_gff3_tidied = combine_and_tidy_augustus_gff3(
         "augustus",
         "augustus",
-        augustus_gff3_chunks
+        augustus_gff3_chunks.map { n, s, g -> [n, g] }.groupTuple(by: 0)
     )
 
     augustus_augustus_hints = extract_augustus_augustus_hints(

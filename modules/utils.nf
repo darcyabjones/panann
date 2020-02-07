@@ -189,7 +189,7 @@ process combine_and_tidy_gff3 {
     label "small_task"
     time '1h'
 
-    tag "${name} - ${paramset}"
+    tag "${name}"
 
     input:
     val analysis
@@ -203,9 +203,9 @@ process combine_and_tidy_gff3 {
     """
     for f in *chunks.gff
     do
-      if [ -s "\${f}.tmp" ]
+      if [ -s "\${f}" ]
       then
-        gt gff3 -tidy -sort -addintrons -setsource "${source}" -o "\${f}_tidied.gff3" "\${f}.tmp"
+        gt gff3 -tidy -sort -addintrons -setsource "${source}" -o "\${f}_tidied.gff3" "\${f}"
       fi
     done
 

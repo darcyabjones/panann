@@ -1,3 +1,7 @@
+#!/usr/bin/env nextflow
+
+nextflow.preview.dsl=2
+
 include run_augustus from '../modules/workflows'
 include get_file from '../modules/cli'
 include handle_table from '../modules/cli'
@@ -11,7 +15,6 @@ params.not_fungus = false
 params.min_intron_hard = false
 params.valid_splicesites = false
 params.genomes = false
-params.genomes = false
 params.table = false
 params.augustus_config = false
 params.augustus_hint_weights = "data/extrinsic_hints.cfg"
@@ -22,7 +25,6 @@ def is_null = { f -> (f == null || f == '') }
 workflow {
 
     main:
-
     if ( params.genomes ) {
         genomes = Channel
             .fromPath(params.genomes, checkIfExists: true, type: "file")
@@ -65,6 +67,7 @@ workflow {
         config_dir,
         hint_weights,
         input_channels.augustus_hints
+            .mix(input_channels.augustus_intron_hints)
     )
 
     publish:
