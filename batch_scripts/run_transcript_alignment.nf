@@ -69,7 +69,7 @@ workflow {
     aligned_transcripts.combined_fasta to: "${params.outdir}/assemblies"
     aligned_transcripts.combined_tsv to: "${params.outdir}/assemblies"
     aligned_transcripts.cleaned_transcripts to: "${params.outdir}/assemblies"
-    aligned_transcripts.spaln_aligned to: "${params.outdir}/alignments"
+    aligned_transcripts.spaln_aligned_tidied to: "${params.outdir}/alignments"
     aligned_transcripts.spaln_augustus_hints to: "${params.outdir}/hints"
     aligned_transcripts.spaln_evm_hints to: "${params.outdir}/hints"
     aligned_transcripts.gmap_aligned to: "${params.outdir}/alignments"
