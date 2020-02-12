@@ -130,7 +130,7 @@ process spaln_align_proteins {
       -yL${min_intron_soft} \
       -XG${max_gene_hard} \
       -t ${task.cpus} \
-      -d "${name}" \
+      -d db \
       "proteins.fasta" \
     > "${name}_spaln_proteins.gff3"
     """

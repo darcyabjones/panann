@@ -56,6 +56,7 @@ include extract_gemoma_rnaseq_hints from './hints'
 include combine_gemoma_rnaseq_hints from './hints'
 include extract_augustus_hints as extract_spaln_transcript_augustus_hints from './hints'
 include extract_augustus_hints as extract_spaln_protein_augustus_hints from './hints'
+include extract_augustus_hints as extract_genemark_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarry_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './hints'
 include extract_augustus_hints as extract_known_augustus_hints from './hints'
@@ -63,6 +64,7 @@ include extract_augustus_hints as extract_augustus_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_pasa_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_gemoma_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_gemoma_comparative_augustus_hints from './hints'
+include extract_exonerate_hints from './hints'
 
 include extract_spaln_transcript_evm_hints from './hints'
 include extract_spaln_protein_evm_hints from './hints'
@@ -183,14 +185,14 @@ workflow align_proteins {
         trans_table,
         min_intron_soft,
         max_gene_hard,
-        spaln_indices.combine(combined_proteins)
+        spaln_indices.combine(combined_fasta)
     )
 
     spaln_aligned_fixed = fix_spaln_proteins_stop(spaln_aligned)
-    spaln_aligned_tidied = tidy_spaln_protein_gff3(
+    spaln_aligned_tidied = tidy_spaln_proteins_gff3(
         "spaln_proteins",
         "spaln",
-        spaln_aligned
+        spaln_aligned_fixed
     )
 
     spaln_augustus_hints = extract_spaln_protein_augustus_hints(
@@ -758,6 +760,8 @@ workflow run_gemoma {
 workflow get_augustus_hints {
 
     get:
+    min_intron_hard
+    max_intron_hard
     known
     spaln_transcripts
     spaln_proteins
@@ -772,7 +776,7 @@ workflow get_augustus_hints {
 
     main:
     spaln_transcripts_augustus_hints = extract_spaln_transcript_augustus_hints(
-        "spaln_transcript",
+        "spaln_transcripts",
         "spaln",
         "E",
         3,
@@ -803,6 +807,19 @@ workflow get_augustus_hints {
         exonerate
     )
 
+    genemark_augustus_hints = extract_genemark_augustus_hints(
+        "genemark",
+        "genemark",
+        "GM",
+        3, // priority
+        9, // exon_trim
+        9, // cds_trim
+        9, // utr trim
+        9, // gene trim
+        false,
+        genemark
+    )
+
     pasa_augustus_hints = extract_pasa_augustus_hints(
         "pasa",
         "pasa",
@@ -820,8 +837,8 @@ workflow get_augustus_hints {
     )
 
     cq_augustus_hints = extract_codingquarry_augustus_hints(
-        "codingquarrypm",
-        "codingquarrypm",
+        "codingquarry",
+        "codingquarry",
         "CQ",
         4, // priority
         6, // exon_trim
@@ -894,6 +911,7 @@ workflow get_augustus_hints {
     spaln_transcripts_augustus_hints
     spaln_proteins_augustus_hints
     exonerate_augustus_hints
+    genemark_augustus_hints
     pasa_augustus_hints
     cq_augustus_hints
     cqpm_augustus_hints

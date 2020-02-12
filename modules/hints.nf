@@ -160,14 +160,14 @@ process extract_exonerate_hints {
     input:
     val min_intron_hard
     val max_intron_hard
-    set val(genome_name),
-        val(protein_name),
-        file("exonerate.gff")
+    tuple val(genome_name),
+          val(protein_name),
+          path("exonerate.gff")
 
     output:
-    set val(genome_name),
-        val(protein_name),
-        file("${genome_name}_${protein_name}_exonerate_hints.gff3")
+    tuple val(genome_name),
+          val(protein_name),
+          path("${genome_name}_${protein_name}_exonerate_hints.gff3")
 
     script:
     """
