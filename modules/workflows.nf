@@ -27,6 +27,7 @@ include gemoma_combine from './predictors'
 include gemoma_combine as gemoma_comparative_combine from './predictors'
 include augustus_hints from './predictors'
 include evm from './predictors'
+include find_missing_evm_predictions from './predictors'
 include augustus_gap_filler from './predictors'
 
 include stringtie_assemble from './assemblers'
@@ -48,7 +49,7 @@ include merge_gffs from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
-include combine_gemoma_rnaseq_hiknownnts from './hints'
+include combine_gemoma_rnaseq_hints from './hints'
 include extract_augustus_hints as extract_spaln_transcript_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarry_augustus_hints from './hints'
 include extract_augustus_hints as extract_codingquarrypm_augustus_hints from './hints'
@@ -853,7 +854,7 @@ workflow run_gemoma_comparative {
 
     gemoma_gff3_tidied = tidy_gemoma_comparative_gff3(
         "gemoma_comparative",
-        "gemoma",
+        "gemoma_comparative",
         gemoma_gff3
     )
 
@@ -907,13 +908,27 @@ workflow run_evm {
         known
     )
 
+
+    transcripts_with_null = genomes
+        .join(transcripts.groupTuple(by: 0), by: 0, remainder: true)
+        .map { n, f, g -> is_null(g) ? [n, []]: [n, g] }
+
+    proteins_with_null = genomes
+        .join(proteins.groupTuple(by: 0), by: 0, remainder: true)
+        .map { n, f, g -> is_null(g) ? [n, []]: [n, g] }
+
+    genes_with_null = genomes
+        .join(genes.mix(known_gff3_tidied).groupTuple(by: 0), by: 0, remainder: true)
+        .map { n, f, g -> is_null(g) ? [n, []]: [n, g] }
+
+
     evm_gff3 = evm(
         min_intron_hard,
         evm_weights,
         genomes
-            .join(transcripts.groupTuple(by: 0), by: 0)
-            .join(proteins.groupTuple(by: 0), by: 0)
-            .join(genes.mix(known_gff3_tidied).groupTuple(by: 0), by: 0)
+            .join(transcripts_with_null, by: 0)
+            .join(proteins_with_null, by: 0)
+            .join(genes_with_null, by: 0)
     )
 
     evm_gff3_tidied = tidy_evm_gff3(
@@ -962,12 +977,12 @@ workflow run_evm {
     augustus_gff3_tidied = combine_and_tidy_augustus_gff3(
         "augustus_gapfiller",
         "augustus",
-        augustus_gapfilled
+        augustus_gff3s
     )
 
     final_gff3 = merge_gffs(
         "final",
-        evm_gff3_tidied.mix(augustus_tidied).groupTuple(by: 0)
+        evm_gff3_tidied.mix(augustus_gff3_tidied).groupTuple(by: 0)
     )
 
     emit:

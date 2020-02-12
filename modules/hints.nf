@@ -185,7 +185,7 @@ process extract_exonerate_hints {
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
         sub(/grp=/, "grp=${name}_exonerate_", \$9)
-        \$2 = "Exonerate";
+        \$2 = "exonerate";
         print
       }
       ' \
@@ -208,7 +208,7 @@ process extract_exonerate_hints {
       \$3 == "CDSpart" {
         id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
         \$9="ID=${name}_exonerate_"id;
-        \$2 = "Exonerate";
+        \$2 = "exonerate";
         \$3 = "nucleotide_to_protein_match";
         print
       }
@@ -260,7 +260,7 @@ process extract_exonerate_evm_hints {
       \$3 == "CDSpart" {
         id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
         \$9="ID=${name}_exonerate_"id;
-        \$2 = "Exonerate";
+        \$2 = "exonerate";
         \$3 = "nucleotide_to_protein_match";
         print
       }

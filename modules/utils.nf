@@ -106,9 +106,9 @@ process get_faidx {
 
     script:
     """
-    samtools faidx "orig.fasta"
+    samtools faidx "orig.fa"
 
-    mv orig.fasta.fai "${name}.fasta.fai"
+    mv orig.fa.fai "${name}.fasta.fai"
     """
 }
 

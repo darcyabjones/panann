@@ -4,6 +4,8 @@ include run_evm from '../modules/workflows'
 include get_file from '../modules/cli'
 include handle_table from '../modules/cli'
 include get_faidx from '../modules/utils'
+include get_augustus_config from '../modules/utils'
+include param_unexpected_error from '../modules/cli'
 
 
 params.augustus_species = false
@@ -14,10 +16,8 @@ params.valid_splicesites = false
 params.genomes = false
 params.table = false
 params.augustus_config = false
-params.augustus_hint_weights = "data/extrinsic_hints.cfg"
+params.augustus_gapfiller_weights = "data/extrinsic_gapfiller.cfg"
 params.evm_config = "data/evm.cfg"
-params.genomes = false
-params.table = false
 
 def is_null = { f -> (f == null || f == '') }
 
@@ -47,8 +47,8 @@ workflow {
         augustus_config_dir = get_augustus_config()
     }
 
-    if ( params.augustus_hint_weights ) {
-        augustus_hint_weights = get_file(params.augustus_hint_weights)
+    if ( params.augustus_gapfiller_weights ) {
+        augustus_hint_weights = get_file(params.augustus_gapfiller_weights)
     } else {
         param_unexpected_error()
     }

@@ -883,9 +883,28 @@ process evm {
 
     script:
     """
-    grep --no-filename -v "^#" genes/* > genes.gff3
-    grep --no-filename -v "^#" transcripts/* > transcripts.gff3
-    grep --no-filename -v "^#" proteins/* > proteins.gff3
+    mkdir -p genes transcripts proteins
+
+    if [ "\$(ls -A genes)" ]
+    then
+        grep --no-filename -v "^#" genes/* > genes.gff3
+    else
+        touch genes.gff3
+    fi
+
+    if [ "\$(ls -A transcripts)" ]
+    then
+        grep --no-filename -v "^#" transcripts/* > transcripts.gff3
+    else
+        touch transcripts.gff3
+    fi
+
+    if [ "\$(ls -A proteins)" ]
+    then
+        grep --no-filename -v "^#" proteins/* > proteins.gff3
+    else
+        touch proteins.gff3
+    fi
 
     partition_EVM_inputs.pl \
       --genome genome.fasta \
@@ -950,9 +969,27 @@ process find_missing_evm_predictions {
 
     script:
     """
-    grep --no-filename -v "^#" genes/* > genes.gff3
-    grep --no-filename -v "^#" transcripts/* > transcripts.gff3
-    grep --no-filename -v "^#" proteins/* > proteins.gff3
+    if [ -d genes ]
+    then
+        grep --no-filename -v "^#" genes/* > genes.gff3
+    else
+        touch genes.gff3
+    fi
+
+    if [ -d transcripts ]
+    then
+        grep --no-filename -v "^#" transcripts/* > transcripts.gff3
+    else
+        touch transcripts.gff3
+    fi
+
+    if [ -d proteins ]
+    then
+        grep --no-filename -v "^#" proteins/* > proteins.gff3
+    else
+        touch proteins.gff3
+    fi
+
     mkdir tmp
 
     awk -F'\\t' '
@@ -996,8 +1033,8 @@ process augustus_gap_filler {
         path("toredo.bed"),
         path("*hints")
 
-    path "augustus_config" from augustusConfig
-    path "extrinsic.cfg" from augustusGapFillerWeights
+    path "augustus_config"
+    path "extrinsic.cfg"
 
     output:
     tuple val(name), path("augustus_gaps/*.gff3")
@@ -1040,7 +1077,7 @@ process augustus_gap_filler {
     mkdir augustus_gaps
     for f in augustus_gaps_tmp/*.gff3
     do
-        BNAME=\$(basename f)
+        BNAME=\$(basename "\${f}")
         awk -F '\\t' '
           BEGIN {OFS="\\t"}
           \$3 == "transcript" {\$3="mRNA"}
