@@ -191,30 +191,6 @@ process extract_exonerate_hints {
       ' \
       hints.gff3 \
     > "${genome_name}_${protein_name}_exonerate_hints.gff3"
-
-
-    align2hints.pl \
-      --in=exonerate.gff \
-      --out=evm.gff3 \
-      --prg=exonerate \
-      --CDSpart_cutoff=0 \
-      --minintronlen="${min_intron_hard}" \
-      --maxintronlen="${max_intron_hard}" \
-      --priority=2 \
-      --source=T
-
-    awk -F '\\t' '
-      BEGIN {OFS="\\t"}
-      \$3 == "CDSpart" {
-        id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
-        \$9="ID=${name}_exonerate_"id;
-        \$2 = "exonerate";
-        \$3 = "nucleotide_to_protein_match";
-        print
-      }
-      ' \
-      evm.gff3 \
-    > "${name}_exonerate_remote_protein_evm.gff3"
     """
 }
 

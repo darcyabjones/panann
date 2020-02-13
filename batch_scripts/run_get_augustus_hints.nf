@@ -29,7 +29,7 @@ workflow {
         input_channels.known,
         input_channels.spaln_transcripts,
         input_channels.spaln_proteins,
-        input_channels.exonerate,
+        input_channels.exonerate.map { n, f -> [n, "remote", f] },
         input_channels.genemark,
         input_channels.pasa,
         input_channels.codingquarry,

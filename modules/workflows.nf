@@ -65,6 +65,7 @@ include extract_augustus_split_hints as extract_pasa_augustus_hints from './hint
 include extract_augustus_split_hints as extract_gemoma_augustus_hints from './hints'
 include extract_augustus_split_hints as extract_gemoma_comparative_augustus_hints from './hints'
 include extract_exonerate_hints from './hints'
+include extract_exonerate_evm_hints from './hints'
 
 include extract_spaln_transcript_evm_hints from './hints'
 include extract_spaln_protein_evm_hints from './hints'
@@ -765,7 +766,7 @@ workflow get_augustus_hints {
     known
     spaln_transcripts
     spaln_proteins
-    exonerate
+    exonerate  // tuple(val(name), val(protein_name), path("evm.gff3"))
     genemark
     pasa
     codingquarry
@@ -1111,6 +1112,35 @@ workflow run_gemoma_comparative {
     gemoma_gff3
     gemoma_gff3_tidied
     gemoma_augustus_hints
+}
+
+
+workflow get_evm_hints {
+
+    get:
+    min_intron_hard
+    max_intron_hard
+    spaln_transcripts
+    gmap
+    spaln_proteins
+    exonerate // tuple(val(name), val(protein_name), path(hints.gff3))
+
+    main:
+    spaln_transcript_evm_hints = extract_spaln_transcript_evm_hints(spaln_transcripts)
+    gmap_evm_hints = extract_gmap_evm_hints(gmap)
+    spaln_protein_evm_hints = extract_spaln_protein_evm_hints(spaln_proteins)
+
+    exonerate_evm_hints = extract_exonerate_evm_hints(
+        min_intron_hard,
+        max_intron_hard,
+        exonerate
+    )
+
+    emit:
+    spaln_transcript_evm_hints
+    gmap_evm_hints
+    spaln_protein_evm_hints
+    exonerate_evm_hints
 }
 
 
