@@ -50,6 +50,7 @@ include clean_transcripts from './utils'
 include combine_fastas from './utils'
 include chunkify_genomes from './utils'
 include merge_gffs from './utils'
+include extract_seqs from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
@@ -74,6 +75,10 @@ include extract_gmap_evm_hints from './hints'
 include assert_same_names from './cli'
 include assert_two_covers_one from './cli'
 
+include busco_proteins from './evaluation'
+include get_stats from './evaluation'
+include get_splice_site_info from './evaluation'
+include get_known_stats from './evaluation'
 
 def is_null = { f -> (f == null || f == '') }
 
@@ -1261,4 +1266,38 @@ workflow run_evm {
     evm_gff3_tidied
     augustus_gff3_tidied
     final_gff3
+}
+
+
+workflow run_stats {
+
+    get:
+    trans_table
+    genomes
+    gffs // tuple(val(name), val(analysis), path(gff))
+    known
+    busco_lineage
+    augustus_config
+
+    main:
+    (proteins, cdss) = extract_seqs(trans_table, gffs.combine(genomes, by: 0))
+
+    if (busco_lineage) {
+        busco_preds = busco_proteins(proteins, busco_lineage, augustus_config)
+    } else {
+        busco_preds = Channel.empty()
+    }
+
+    stats = get_stats(gffs)
+
+    splice_site_stats = get_splice_site_info(gffs.combine(genomes, by: 0))
+    known_stats = get_known_stats(gffs.join(known, by: 0))
+
+    emit:
+    proteins
+    cdss
+    busco_preds
+    stats
+    splice_site_stats
+    known_stats
 }

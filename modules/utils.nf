@@ -318,7 +318,7 @@ process extract_seqs {
         path(fasta)
 
     output:
-    set val(name),
+    tuple val(name),
         val(analysis),
         path("${name}_${analysis}.faa")
 
