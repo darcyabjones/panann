@@ -8,16 +8,16 @@ include get_augustus_config from '../modules/utils'
 include param_unexpected_error from '../modules/cli'
 
 
-params.augustus_species = false
-params.augustus_utr = false
-params.not_fungus = false
-params.min_intron_hard = false
-params.valid_splicesites = false
-params.genomes = false
-params.table = false
-params.augustus_config = false
-params.augustus_gapfiller_weights = "data/extrinsic_gapfiller.cfg"
-params.evm_config = "data/evm.cfg"
+//params.augustus_species = false
+//params.augustus_utr = false
+//params.not_fungus = false
+//params.min_intron_hard = false
+//params.valid_splicesites = false
+//params.genomes = false
+//params.table = false
+//params.augustus_config = false
+//params.augustus_gapfiller_weights = "data/extrinsic_gapfiller.cfg"
+//params.evm_config = "data/evm.cfg"
 
 def is_null = { f -> (f == null || f == '') }
 
@@ -73,7 +73,7 @@ workflow {
 
     evm = run_evm(
         params.augustus_species,
-        params.not_fungus,
+        params.notfungus,
         params.augustus_utr,
         params.valid_splicesites,
         params.min_intron_hard,
@@ -86,7 +86,9 @@ workflow {
         input_channels.evm_protein_hints,
         evm_gene_hints,
         input_channels.known,
-        input_channels.augustus_intron_hints.mix(input_channels.augustus_hints)
+        input_channels.augustus_intron_hints.mix(input_channels.augustus_hints),
+        input_channels.evm,
+        input_channels.augustus_gapfiller
     )
 
     publish:

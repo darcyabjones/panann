@@ -417,9 +417,11 @@ process extract_gemoma_comparative_cds_parts {
 
     script:
     """
+    # The length thing in awk is just to skip empty lines.
+
     awk -F'\\t' -v name="${name}" -v analysis="${analysis}" '
       BEGIN { OFS="\\t" }
-      !/^#/ {
+      !/^#/ && length {
         \$1=name"."\$1;
         \$9=gensub(/Parent=([^;]+)/, "Parent="name"."analysis".\\\\1", "g", \$9);
         \$9=gensub(/ID=([^;]+)/, "ID="name"."analysis".\\\\1", "g", \$9);
@@ -1045,6 +1047,9 @@ process augustus_gap_filler {
     utr_flag = augustus_utr ? "-u" : ""
 
     """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
     if ${is_utr} && ${is_fungus}
     then
       # Gemoma doesn't do fungal utrs well.
@@ -1061,10 +1066,13 @@ process augustus_gap_filler {
       > hints.gff
     fi
 
+    getLinesMatching.pl seqids.txt 1 < hints.gff > hints_filtered.gff
+    getLinesMatching.pl seqids.txt 1 < toredo.bed > toredo_filtered.bed
+
     augustus_region.sh \
       -f "${fasta}" \
-      -b "toredo.bed" \
-      -g "hints.gff" \
+      -b "toredo_filtered.bed" \
+      -g "hints_filtered.gff" \
       -s "${augustus_species}" \
       -c "extrinsic.cfg" \
       -a "\${PWD}/augustus_config" \
@@ -1091,6 +1099,8 @@ process augustus_gap_filler {
             rm "augustus_gaps/\${BNAME}"
         fi
     done
+
+    rm -rf -- augustus_gaps_tmp
     """
 }
 

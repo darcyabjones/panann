@@ -1162,6 +1162,8 @@ workflow run_evm {
     genes
     known
     hints
+    evm_done
+    augustus_gapfiller_done
 
     main:
     // Config expects source to be "manual"
@@ -1170,7 +1172,6 @@ workflow run_evm {
         "manual",
         known
     )
-
 
     transcripts_with_null = genomes
         .join(transcripts.groupTuple(by: 0), by: 0, remainder: true)
@@ -1189,6 +1190,9 @@ workflow run_evm {
         min_intron_hard,
         evm_weights,
         genomes
+            .join(evm_done, by: 0, remainder: true)
+            .filter { n, f, d -> is_null(d) }
+            .map { n, f, d -> [n, f] }
             .join(transcripts_with_null, by: 0)
             .join(proteins_with_null, by: 0)
             .join(genes_with_null, by: 0)
@@ -1201,7 +1205,7 @@ workflow run_evm {
     )
 
     missing_preds = find_missing_evm_predictions(
-        evm_gff3_tidied
+        evm_gff3_tidied.mix(evm_done)
             .join(genes.groupTuple(by: 0), by: 0)
             .join(genome_faidxs, by: 0)
     )
@@ -1226,6 +1230,9 @@ workflow run_evm {
         valid_splicesites,
         min_intron_hard,
         genomes
+            .join(augustus_gapfiller_done, by: 0, remainder: true)
+            .filter { n, f, d -> is_null(d) }
+            .map { n, f, d -> [n, f] }
             .join(missing_preds, by: 0)
             .join(
                 hints
@@ -1245,7 +1252,9 @@ workflow run_evm {
 
     final_gff3 = merge_gffs(
         "final",
-        evm_gff3_tidied.mix(augustus_gff3_tidied).groupTuple(by: 0)
+        evm_gff3_tidied
+            .mix(evm_done, augustus_gff3_tidied, augustus_gapfiller_done)
+            .groupTuple(by: 0)
     )
 
     emit:

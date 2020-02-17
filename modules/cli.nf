@@ -33,7 +33,7 @@ valid_table_analyses = [
     "augustus_gapfiller",
     "augustus_hints",
     "evm_transcript_hints",
-    "evm_protein_hints",
+    "evm_protein_hints"
 ]
 
 
@@ -243,8 +243,8 @@ def handle_table(genomes, table) {
             evm: it.analysis == "evm"
             augustus_gapfiller: it.analysis == "augustus_gapfiller"
             augustus_hints: it.analysis == "augustus_hints"
-            evm_transcript_hints: it.analysis = "evm_transcript_hints"
-            evm_protein_hints: it.analysis = "evm_protein_hints"
+            evm_transcript_hints: it.analysis == "evm_transcript_hints"
+            evm_protein_hints: it.analysis == "evm_protein_hints"
         }
 
 

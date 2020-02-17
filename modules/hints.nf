@@ -155,7 +155,7 @@ process extract_exonerate_hints {
     label "small_task"
     time '2h'
 
-    tag "${name}"
+    tag "${genome_name} - ${protein_name}"
 
     input:
     val min_intron_hard
@@ -176,7 +176,7 @@ process extract_exonerate_hints {
       --out=hints.gff3 \
       --prg=exonerate \
       --CDSpart_cutoff=15 \
-      --minintronlen="${min_intron_soft}" \
+      --minintronlen="${min_intron_hard}" \
       --maxintronlen="${max_intron_hard}" \
       --priority=2 \
       --source=T
@@ -184,7 +184,7 @@ process extract_exonerate_hints {
     awk -F '\\t' '
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
-        sub(/grp=/, "grp=${name}_exonerate_", \$9)
+        sub(/grp=/, "grp=${genome_name}_${protein_name}_exonerate_", \$9)
         \$2 = "exonerate";
         print
       }
@@ -205,7 +205,7 @@ process extract_exonerate_evm_hints {
     label "small_task"
     time '2h'
 
-    tag "${name}"
+    tag "${genome_name} - ${protein_name}"
 
     input:
     val min_intron_hard
@@ -235,7 +235,7 @@ process extract_exonerate_evm_hints {
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
         id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
-        \$9="ID=${name}_exonerate_"id;
+        \$9="ID=${genome_name}_${protein_name}_exonerate_"id;
         \$2 = "exonerate";
         \$3 = "nucleotide_to_protein_match";
         print
@@ -506,7 +506,7 @@ process extract_spaln_protein_evm_hints {
     """
     awk -F'\t' '
       BEGIN { OFS="\t" }
-      \$3 == "CDS" {
+      \$3 == "CDS" || \$3 == "cds" {
         parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
         target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
         \$9="ID=${name}_spaln_protein" parent ";Target=" target;
