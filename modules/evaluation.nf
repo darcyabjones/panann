@@ -120,7 +120,7 @@ process get_splice_site_info {
     tag "${name} - ${analysis}"
 
     input:
-    path val(name),
+    tuple val(name),
         val(analysis),
         path(preds),
         path(fasta)

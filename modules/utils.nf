@@ -328,6 +328,12 @@ process extract_seqs {
 
     script:
     """
+    gt gff3 \
+      -sort \
+      -retainids \
+      "${gff3}" \
+    > sorted.gff3
+
     gt extractfeat \
       -type CDS \
       -join \
@@ -336,7 +342,7 @@ process extract_seqs {
       -gcode "${trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
-      "${gff3}" \
+      "sorted.gff3" \
     > "${name}_${analysis}.faa"
 
     gt extractfeat \
@@ -346,7 +352,7 @@ process extract_seqs {
       -gcode "${trans_table}" \
       -matchdescstart \
       -seqfile "${fasta}" \
-      "${gff3}" \
+      "sorted.gff3" \
     > "${name}_${analysis}.fna"
     """
 }

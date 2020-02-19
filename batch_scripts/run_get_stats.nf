@@ -46,6 +46,12 @@ workflow {
         augustus_config_dir = get_augustus_config()
     }
 
+    if ( params.busco_lineage ) {
+        busco_lineage = get_file(params.busco_lineage)
+    } else {
+        busco_lineage = Channel.empty()
+    }
+
     gffs = input_channels.pasa.map { n, f -> [n, "pasa", f] } .mix(
         input_channels.genemark.map { n, f -> [n, "genemark", f] },
         input_channels.codingquarry.map { n, f -> [n, "codingquarry", f] },
@@ -55,7 +61,7 @@ workflow {
         input_channels.gemoma_comparative.map { n, f -> [n, "gemoma_comparative", f] },
         input_channels.evm.map { n, f -> [n, "evm", f] },
         input_channels.augustus_gapfiller.map { n, f -> [n, "augustus_gapfiller", f] },
-        input_channels.final.map { n, f -> [n, "final", f] },
+        input_channels.complete.map { n, f -> [n, "final", f] },
     )
 
     stats = run_stats(
@@ -63,10 +69,10 @@ workflow {
         input_channels.genome,
         gffs,
         input_channels.known,
-        params.busco_lineage,
+        busco_lineage,
         augustus_config_dir,
     )
 
     publish:
-
+    stats to: "${params.outdir}/stats"
 }

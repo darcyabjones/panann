@@ -34,7 +34,7 @@ valid_table_analyses = [
     "augustus_hints",
     "evm_transcript_hints",
     "evm_protein_hints",
-    "final"
+    "complete"
 ]
 
 
@@ -246,7 +246,7 @@ def handle_table(genomes, table) {
             augustus_hints: it.analysis == "augustus_hints"
             evm_transcript_hints: it.analysis == "evm_transcript_hints"
             evm_protein_hints: it.analysis == "evm_protein_hints"
-            final: it.analysis == "final"
+            complete: it.analysis == "complete"
         }
 
 
