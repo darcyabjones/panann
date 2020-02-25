@@ -100,7 +100,13 @@ get_gff3() {
       } else {
         line_source = source
       }
-      print $1, $4 - 1, $5, id, $6, $7, line_source
+
+      if ($4 < 1) {
+        start = 0
+      } else {
+        start = $4 - 1
+      }
+      print $1, start, $5, id, $6, $7, line_source
     }
   ' < "${FILE}"
 }
@@ -130,7 +136,14 @@ get_gff2() {
       } else {
         line_source = source
       }
-      print $1, $4 - 1, $5, id, $6, $7, line_source
+
+      if ($4 < 1) {
+        start = 0
+      } else {
+        start = $4 - 1
+      }
+
+      print $1, start, $5, id, $6, $7, line_source
     }
   ' < "${FILE}"
 }
