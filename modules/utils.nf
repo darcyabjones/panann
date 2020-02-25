@@ -327,7 +327,7 @@ process gff_to_bed {
       -f "${field}" \
       -t "${ftype}" \
       ${gff2} \
-      -s "${source}"
+      -s "${source}" \
       in.gff3
     """
 }
@@ -353,7 +353,7 @@ process get_hint_coverage {
     script:
     """
     mkdir tmp
-    get_hint_coverage -o out.gff3 -t "${ftype}" -m "./tmp" in.gff3 hints*.bed
+    get_hint_coverage.sh -o out.gff3 -t "${ftype}" -m "./tmp" in.gff3 hints*.bed
     """
 }
 
