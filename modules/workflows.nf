@@ -51,6 +51,19 @@ include combine_fastas from './utils'
 include chunkify_genomes from './utils'
 include merge_gffs from './utils'
 include extract_seqs from './utils'
+include exonerate_to_gff3 from './utils'
+include gff_to_bed as exonerate_gff_to_bed from './utils'
+include gff_to_bed as spaln_transcripts_gff_to_bed from './utils'
+include gff_to_bed as spaln_proteins_gff_to_bed from './utils'
+include gff_to_bed as gmap_transcripts_gff_to_bed from './utils'
+include gff_to_bed as pasa_gff_to_bed from './utils'
+include gff_to_bed as genemark_gff_to_bed from './utils'
+include gff_to_bed as cq_gff_to_bed from './utils'
+include gff_to_bed as cqpm_gff_to_bed from './utils'
+include gff_to_bed as gemoma_gff_to_bed from './utils'
+include gff_to_bed as augustus_gff_to_bed from './utils'
+include gff_to_bed as gemoma_comparative_gff_to_bed from './utils'
+include get_hint_coverage from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
@@ -1266,6 +1279,136 @@ workflow run_evm {
     evm_gff3_tidied
     augustus_gff3_tidied
     final_gff3
+}
+
+
+workflow filter_preds {
+
+    get:
+    predictions
+    spaln_transcripts
+    spaln_proteins
+    gmap_transcripts
+    exonerate
+    genemark
+    pasa
+    codingquarry
+    codingquarrypm
+    gemoma
+    augustus
+    gemoma_comparative
+
+    main:
+    spaln_transcripts_beds = spaln_transcripts_gff_to_bed(
+        "Target",
+        "exon",
+        "spaln_transcript",
+        false,
+        spaln_transcripts
+    )
+
+    spaln_proteins_beds = spaln_proteins_gff_to_bed(
+        "Target",
+        "CDS",
+        "spaln_protein",
+        false,
+        spaln_proteins
+    )
+
+    gmap_transcripts_beds = gmap_transcripts_gff_to_bed(
+        "Name",
+        "cDNA_match",
+        "gmap_transcript",
+        false,
+        gmap_transcripts
+    )
+
+    exonerate_gff3s = exonerate_to_gff3(exonerate)
+    exonerate_beds = exonerate_gff_to_bed(
+        "query",
+        "CDS",
+        "exonerate",
+        false,
+        exonerate_gff3s
+    )
+
+    genemark_beds = genemark_gff_to_bed(
+        "Parent",
+        "CDS",
+        "genemark",
+        false,
+        genemark
+    )
+
+    pasa_beds = pasa_gff_to_bed(
+        "Parent",
+        "CDS",
+        "pasa",
+        false,
+        pasa
+    )
+
+    cq_beds = cq_gff_to_bed(
+        "Parent",
+        "CDS",
+        "codingquarry",
+        false,
+        codingquarry
+    )
+
+    cqpm_beds = cqpm_gff_to_bed(
+        "Parent",
+        "CDS",
+        "codingquarrypm",
+        false,
+        codingquarrypm
+    )
+
+    gemoma_beds = gemoma_gff_to_bed(
+        "Parent",
+        "CDS",
+        "gemoma",
+        false,
+        gemoma
+    )
+
+    augustus_beds = augustus_gff_to_bed(
+        "Parent",
+        "CDS",
+        "augustus",
+        false,
+        augustus
+    )
+
+    gemoma_comparative_beds = gemoma_comparative_gff_to_bed(
+        "Parent",
+        "CDS",
+        "gemoma_comparative",
+        false,
+        gemoma_comparative
+    )
+
+    cov = get_hint_coverage(
+        "CDS",
+        predictions.join(
+            spaln_transcripts_beds.mix(
+                spaln_proteins_beds,
+                gmap_transcripts_beds,
+                exonerate_beds,
+                genemark_beds,
+                pasa_beds,
+                cq_beds,
+                cqpm_beds,
+                gemoma_beds,
+                augustus_beds,
+                gemoma_comparative_beds,
+            ).groupTuple(by: 0),
+            by: 0
+        )
+    )
+
+    emit:
+    cov
 }
 
 

@@ -299,6 +299,84 @@ process chunkify_genomes {
 }
 
 
+process gff_to_bed {
+
+    label "posix"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    val field
+    val ftype
+    val source
+    val is_gff2
+    tuple val(name),
+          path("in.gff3")
+
+    output:
+    tuple val(name),
+          path("out.bed")
+
+    script:
+    gff2 = is_gff2 ? "-2" : ""
+
+    """
+    gff2bed.sh \
+      -o out.bed \
+      -f "${field}" \
+      -t "${ftype}" \
+      ${gff2} \
+      -s "${source}"
+      in.gff3
+    """
+}
+
+
+process get_hint_coverage {
+
+    label "bedtools"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    val ftype
+    tuple val(name),
+          path("in.gff3"),
+          path("hints*.bed")
+
+    output:
+    tuple val(name),
+          path("out.gff3")
+
+    script:
+    """
+    mkdir tmp
+    get_hint_coverage -o out.gff3 -t "${ftype}" -m "./tmp" in.gff3 hints*.bed
+    """
+}
+
+
+process exonerate_to_gff3 {
+
+    label "gffpal"
+    label "small_task"
+
+    input:
+    tuple val(name),
+          path("in.gff2")
+
+    output:
+    tuple val(name),
+          path("out.gff3")
+
+    script:
+    """
+    gffpal exonerate2gff -o out.gff3 in.gff2
+    """
+}
+
 /*
  * Extracts protein and nucleotide sequences from predictions.
  */

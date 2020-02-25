@@ -84,11 +84,11 @@ get_gff3() {
   awk -F '\t' -v field="${FIELD}" -v type="${TYPE}" -v source="${SOURCE}" '
     BEGIN {
       OFS = "\t"
-      field_regex =  ".*"field"=([^;]+).*"
+      field_regex =  ".*"field"=([^;[:space:]]+).*"
     }
     $3 == type {
       if (match($9, field_regex)) {
-      	id=gensub(field_regex, "\\1", "g", $9);
+        id=gensub(field_regex, "\\1", "g", $9);
       } else {
         print "ERROR: Encountered a line without the chosen field." >> "/dev/stderr"
         print "The line was: "$0 >> "/dev/stderr"

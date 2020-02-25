@@ -8,7 +8,7 @@ TYPE="CDS"
 
 
 usage() {
-  echo 'USAGE: get_hint_coverage.sh -o out.bed ref.gff3 hints*.bed > results.gff
+  echo 'USAGE: get_hint_coverage.sh -o out.gff3 ref.gff3 hints*.bed
 
 Arguments:
 -o -- Where to write the output to [DEFAULT: stdout].
@@ -105,7 +105,7 @@ bedtools intersect \
   -s \
   -a "${TMPDIR}/ref_zero_based.gff3" \
   -b ${HINTS} \
-> "${TMPDIR}/ref_with_inter.tsv" 
+> "${TMPDIR}/ref_with_inter.tsv"
 
 
 awk -F '\t' -v extra_col="${EXTRA_COL}" '
