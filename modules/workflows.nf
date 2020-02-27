@@ -11,6 +11,7 @@ include fix_spaln_proteins_stop from './aligners'
 include get_star_index from './aligners'
 include star_find_splicesites from './aligners'
 include star_align_reads from './aligners'
+include search_hmm_vs_proteins from './aligners'
 
 include codingquarry from './predictors'
 include codingquarrypm from './predictors'
@@ -64,6 +65,7 @@ include gff_to_bed as gemoma_gff_to_bed from './utils'
 include gff_to_bed as augustus_gff_to_bed from './utils'
 include gff_to_bed as gemoma_comparative_gff_to_bed from './utils'
 include get_hint_coverage from './utils'
+include mark_genes_with_antifam from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
@@ -1285,6 +1287,9 @@ workflow run_evm {
 workflow filter_preds {
 
     get:
+    trans_table
+    antifam
+    genomes
     predictions
     spaln_transcripts
     spaln_proteins
@@ -1299,6 +1304,19 @@ workflow filter_preds {
     gemoma_comparative
 
     main:
+
+    (protein_seqs, transcript_seqs) = extract_seqs(
+        trans_table,
+        predictions
+            .map { n, g -> [n, "predictions", g]}
+            .join(genomes, by: 0)
+    )
+
+    antifam_matches = search_hmm_vs_proteins(antifam, protein_seqs)
+    antifam_marked = mark_genes_with_antifam(
+        predictions.join(antifam_matches, by: 0)
+    )
+
     spaln_transcripts_beds = spaln_transcripts_gff_to_bed(
         "Target",
         "exon",
@@ -1390,7 +1408,7 @@ workflow filter_preds {
 
     cov = get_hint_coverage(
         "CDS",
-        predictions.join(
+        antifam_marked.join(
             spaln_transcripts_beds.mix(
                 spaln_proteins_beds,
                 gmap_transcripts_beds,
@@ -1407,8 +1425,16 @@ workflow filter_preds {
         )
     )
 
+    filtered = filter_genes_by_hints(cov)
+    kept_tidied = tidy_gff3(
+        "hint_filtered",
+        null,
+        filtered.map { n, k, s -> [n, k] }
+    )
+
     emit:
-    cov
+    kept_tidied
+    filtered.map { n, k, s -> [n, s] }
 }
 
 

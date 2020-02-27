@@ -5,6 +5,27 @@ def symmetric_difference(a, b) {
     return (a + b) - a.intersect(b)
 }
 
+
+process download_database {
+
+    label "download"
+    label "small_task"
+
+    time '3h'
+
+    input:
+    val url
+
+    output:
+    path "download"
+
+    script:
+    """
+    wget -O ./download "${url}"
+    """
+}
+
+
 process get_univec {
 
     label "download"
@@ -20,6 +41,7 @@ process get_univec {
     wget -O univec.fasta ftp://ftp.ncbi.nlm.nih.gov/pub/UniVec/UniVec_Core
     """
 }
+
 
 process get_augustus_config {
 
@@ -166,6 +188,8 @@ process tidy_gff3 {
     tuple val(name), path("${name}_${analysis}_tidied.gff3")
 
     script:
+    setsource = (source == null || source == "") ? "" : "-setsource ${source} "
+
     """
     grep -v "^#" in.gff3 \
     | gt gff3 \
@@ -173,7 +197,7 @@ process tidy_gff3 {
       -sort \
       -retainids \
       -addintrons \
-      -setsource "${source}" \
+      "${setsource}" \
     | canon-gff3 -i - \
     > "${name}_${analysis}_tidied.gff3"
     """
@@ -354,6 +378,57 @@ process get_hint_coverage {
     """
     mkdir tmp
     get_hint_coverage.sh -o out.gff3 -t "${ftype}" -m "./tmp" in.gff3 hints*.bed
+    """
+}
+
+
+process filter_genes_by_hints {
+
+    label "gffpal"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    tuple val(name),
+          path("in.gff3")
+
+    output:
+    tuple val(name),
+          path("${name}_hint_filter_kept.gff3"),
+          path("${name}_hint_filter_stats.ldjson")
+
+    script:
+    """
+    filter_genes_by_hints.py \
+      -o "${name}_hint_filter_kept.gff3" \
+      -s "${name}_hint_filter_stats.ldjson" \
+      --exclude gemoma_comparative spaln_protein spaln_transcript gmap_transcript exonerate \
+      -- \
+      in.gff3
+    """
+}
+
+
+process mark_genes_with_antifam {
+
+    label "gffpal"
+    label "small_task"
+
+    tag "${name}"
+
+    input:
+    tuple val(name),
+          path("in.gff3"),
+          path("matches.domtbl")
+
+    output:
+    tuple val(name),
+        path("${name}_marked_antifam.gff3")
+
+    script:
+    """
+    gffpal add_antifam -o "${name}_marked_antifam.gff3" in.gff3 matches.domtbl
     """
 }
 

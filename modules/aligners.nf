@@ -637,3 +637,53 @@ process star_align_reads {
     rm -f *.bam
     """
 }
+
+
+process press_antifam_hmms {
+
+    label "hmmer"
+    label "medium_task"
+
+    input:
+    path "in.tar.gz"
+
+    output:
+    tuple path("AntiFam.hmm"),
+          path("AntiFam.hmm.h3f"),
+          path("AntiFam.hmm.h3i"),
+          path("AntiFam.hmm.h3m"),
+          path("AntiFam.hmm.h3p")
+
+    script:
+    """
+    tar -zxf in.tar.gz
+    hmmpress AntiFam.hmm
+    """
+}
+
+
+process search_hmm_vs_proteins {
+
+    label "hmmer"
+    label "medium_task"
+
+    tag "${name}"
+
+    input:
+    tuple path("db.hmm"),
+          path("db.hmm.h3f"),
+          path("db.hmm.h3i"),
+          path("db.hmm.h3m"),
+          path("db.hmm.h3p")
+    tuple val(name),
+          path("proteins.fasta")
+
+    output:
+    tuple val(name),
+          path("hmm_matches.domtbl")
+
+    script:
+    """
+    hmmsearch --domtblout hmm_matches.domtbl --cut_ga db.hmm proteins.fasta > /dev/null
+    """
+}
