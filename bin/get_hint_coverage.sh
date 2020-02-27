@@ -93,7 +93,6 @@ awk -F '\t' '
       $5=$4
       $4=tmp
     }
-    $4-=1
   }
   {print}
 ' "${REF}" \
@@ -111,7 +110,7 @@ bedtools intersect \
 awk -F '\t' -v extra_col="${EXTRA_COL}" '
   BEGIN {OFS="\t"}
   $3 == "CDS" {
-    gstart=$4
+    gstart=($4 > 0 ? $4 - 1 : 0)
     gend=$5
 
     if (extra_col=="0") {
@@ -145,9 +144,9 @@ awk -F '\t' -v extra_col="${EXTRA_COL}" '
     } else {
       hint=hsource" "hname" "hstart + 1" "hend" "hscore" "ninter
     }
-    print $1, $2, $3, $4 + 1, $5, $6, $7, $8, $9, hint
+    print $1, $2, $3, $4, $5, $6, $7, $8, $9, hint
   }
-  $3 != "CDS" { print $1, $2, $3, $4 + 1, $5, $6, $7, $8, $9, "." }
+  $3 != "CDS" { print $1, $2, $3, $4, $5, $6, $7, $8, $9, "." }
 ' < "${TMPDIR}/ref_with_inter.tsv" \
 > "${TMPDIR}/ref_with_inter_hints.tsv"
 

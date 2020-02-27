@@ -377,6 +377,39 @@ process exonerate_to_gff3 {
     """
 }
 
+
+process filter_by_hint_coverage {
+
+    label "gffpal"
+    label "small_task"
+
+    input:
+    tuple val(name),
+          path("in.gff3")
+
+    output:
+    tuple val(name),
+          path("${name}_passed_filter.gff3")
+
+    tuple val(name),
+          path("${name}_failed_filter.gff3")
+
+    tuple val(name),
+          path("${name}_filter_stats.ldjson")
+
+    script:
+    """
+    filter_genes_by_hints.py \
+      --filtered "${name}_failed_filter.gff3" \
+      --outfile "${name}_passed_filter.gff3" \
+      --stats "${name}_filter_stats.ldjson" \
+      --exclude gemoma_comparative spaln_protein spaln_transcript gmap_transcript exonerate \
+      -- \
+      in.gff3
+    """
+
+}
+
 /*
  * Extracts protein and nucleotide sequences from predictions.
  */
