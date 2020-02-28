@@ -37,6 +37,7 @@ include stringtie_assemble from './assemblers'
 include stringtie_merge from './assemblers'
 
 include fasta_to_tsv as remote_proteins_fasta_to_tsv from './utils'
+include tidy_gff3 from './utils'
 include tidy_gff3 as tidy_gemoma_gff3 from './utils'
 include tidy_gff3 as tidy_gemoma_comparative_gff3 from './utils'
 include tidy_gff3 as tidy_pasa_gff3 from './utils'
@@ -66,6 +67,7 @@ include gff_to_bed as augustus_gff_to_bed from './utils'
 include gff_to_bed as gemoma_comparative_gff_to_bed from './utils'
 include get_hint_coverage from './utils'
 include mark_genes_with_antifam from './utils'
+include filter_genes_by_hints from './utils'
 
 include extract_augustus_rnaseq_hints from './hints'
 include extract_gemoma_rnaseq_hints from './hints'
@@ -1312,7 +1314,7 @@ workflow filter_preds {
             .join(genomes, by: 0)
     )
 
-    antifam_matches = search_hmm_vs_proteins(antifam, protein_seqs)
+    antifam_matches = search_hmm_vs_proteins(antifam, protein_seqs.map { n, a, g -> [n, g] })
     antifam_marked = mark_genes_with_antifam(
         predictions.join(antifam_matches, by: 0)
     )
@@ -1428,7 +1430,7 @@ workflow filter_preds {
     filtered = filter_genes_by_hints(cov)
     kept_tidied = tidy_gff3(
         "hint_filtered",
-        null,
+        "",
         filtered.map { n, k, s -> [n, k] }
     )
 

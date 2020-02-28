@@ -19,7 +19,7 @@ def cli(prog, args):
     parser.add_argument(
         "infile",
         type=argparse.FileType('r'),
-        help="Input gff files. Use '-' for stdin.",
+        help="The input gff file. Use '-' for stdin.",
     )
 
     parser.add_argument(

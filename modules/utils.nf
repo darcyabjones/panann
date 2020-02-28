@@ -192,12 +192,13 @@ process tidy_gff3 {
 
     """
     grep -v "^#" in.gff3 \
+    | awk '\$3 != "intron"' \
     | gt gff3 \
       -tidy \
       -sort \
       -retainids \
       -addintrons \
-      "${setsource}" \
+      ${setsource} \
     | canon-gff3 -i - \
     > "${name}_${analysis}_tidied.gff3"
     """
@@ -224,12 +225,14 @@ process combine_and_tidy_gff3 {
     tuple val(name), path("${name}_${analysis}_tidied.gff3")
 
     script:
+    setsource = (source == null || source == "") ? "" : "-setsource ${source} "
+
     """
     for f in *chunks.gff
     do
       if [ -s "\${f}" ]
       then
-        gt gff3 -tidy -sort -addintrons -setsource "${source}" -o "\${f}_tidied.gff3" "\${f}"
+        gt gff3 -tidy -sort -addintrons ${setsource} -o "\${f}_tidied.gff3" "\${f}"
       fi
     done
 
@@ -378,6 +381,7 @@ process get_hint_coverage {
     """
     mkdir tmp
     get_hint_coverage.sh -o out.gff3 -t "${ftype}" -m "./tmp" in.gff3 hints*.bed
+    rm -rf -- tmp
     """
 }
 
@@ -395,13 +399,13 @@ process filter_genes_by_hints {
 
     output:
     tuple val(name),
-          path("${name}_hint_filter_kept.gff3"),
+          path("${name}_hint_filter.gff3"),
           path("${name}_hint_filter_stats.ldjson")
 
     script:
     """
     filter_genes_by_hints.py \
-      -o "${name}_hint_filter_kept.gff3" \
+      -o "${name}_hint_filter.gff3" \
       -s "${name}_hint_filter_stats.ldjson" \
       --exclude gemoma_comparative spaln_protein spaln_transcript gmap_transcript exonerate \
       -- \
@@ -482,8 +486,8 @@ process filter_by_hint_coverage {
       -- \
       in.gff3
     """
-
 }
+
 
 /*
  * Extracts protein and nucleotide sequences from predictions.

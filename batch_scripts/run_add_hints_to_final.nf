@@ -52,7 +52,7 @@ workflow {
     (filtered, filtered_stats) = filter_preds(
         params.trans_table,
         antifam,
-        input_channels.genomes,
+        input_channels.genome,
         input_channels.complete,
         input_channels.spaln_transcripts,
         input_channels.spaln_proteins,
