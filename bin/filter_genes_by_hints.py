@@ -5,11 +5,20 @@ import sys
 import argparse
 from collections import namedtuple, defaultdict
 
-from gffpal.gff import GFF
+from intervaltree import Interval, IntervalTree
+
+from typing import List
+from typing import Optional
+from typing import TextIO
+from typing import Iterator
+from typing import Mapping, DefaultDict, Dict
+from typing import Tuple
+
+from gffpal.gff import GFF, GFF3Record
 from gffpal.attributes import GFF3Attributes
 
 
-def cli(prog, args):
+def cli(prog: str, args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog=prog,
         description=""" .
@@ -60,6 +69,20 @@ def cli(prog, args):
     )
 
     parser.add_argument(
+        "-f", "--filtered",
+        default=None,
+        type=argparse.FileType('w'),
+        help="Write the removed genes results to this file.",
+    )
+
+    parser.add_argument(
+        "-r", "--threshold",
+        default=0.3,
+        type=float,
+        help="The threshold to use when considering if a locus if new.",
+    )
+
+    parser.add_argument(
         "-o", "--outfile",
         default=sys.stdout,
         type=argparse.FileType('w'),
@@ -69,10 +92,10 @@ def cli(prog, args):
     return parser.parse_args(args)
 
 
-hint = namedtuple("hint", ["source", "name", "start", "end", "score", "naln"])
+Hint = namedtuple("Hint", ["source", "name", "start", "end", "score", "naln"])
 
 
-def parse_hint(string):
+def parse_hint(string: str) -> Hint:
     sstring = string.strip().split()
     assert len(sstring) == 6, string
 
@@ -88,10 +111,10 @@ def parse_hint(string):
 
     naln = int(sstring[5])
 
-    return hint(source, name, start, end, score, naln)
+    return Hint(source, name, start, end, score, naln)
 
 
-def all_children_failed(parent):
+def all_children_unreliable(parent: GFF3Record) -> bool:
     for child in parent.traverse_children():
         if child == parent:
             continue
@@ -103,7 +126,25 @@ def all_children_failed(parent):
     return True
 
 
-def deal_with_kids(children, is_unreliable, type_, length, aligned):
+def all_children_excluded(parent: GFF3Record) -> bool:
+    for child in parent.traverse_children():
+        if child == parent:
+            continue
+        # As soon as we hit one that didn't fail, do early exit.
+        elif ((child.attributes is not None) and
+                ("should_exclude" not in child.attributes.custom)):
+            return False
+
+    return True
+
+
+def deal_with_kids(
+    children: Iterator[GFF3Record],
+    is_unreliable: bool,
+    type_: str,
+    length: int,
+    aligned: DefaultDict[str, int],
+) -> Tuple[int, DefaultDict[str, int]]:
     for child in children:
 
         if child.attributes is None:
@@ -117,7 +158,7 @@ def deal_with_kids(children, is_unreliable, type_, length, aligned):
 
         length += child.length()
 
-        best_hints = dict()
+        best_hints: Dict[str, Hint] = dict()
         hints = child.attributes.custom.get("hint", None)
         if hints is None:
             continue
@@ -135,7 +176,10 @@ def deal_with_kids(children, is_unreliable, type_, length, aligned):
     return length, aligned
 
 
-def find_coverages(aligned, length):
+def find_coverages(
+    aligned: Mapping[str, int],
+    length: int
+) -> Dict[str, float]:
     return {
         k: (v / length)
         for k, v
@@ -143,9 +187,87 @@ def find_coverages(aligned, length):
     }
 
 
+def gff_to_itree(records: Iterator[GFF3Record]) -> Dict[str, IntervalTree]:
+    intervals: DefaultDict[str, List[Interval]] = defaultdict(list)
+
+    for mrna in records:
+        intervals[mrna.seqid].append(Interval(mrna.start, mrna.end, mrna))
+
+    itree: Dict[str, IntervalTree] = {
+        k: IntervalTree(v)
+        for k, v
+        in intervals.items()
+    }
+    return itree
+
+
+def nintersection(lstart, lend, rstart, rend) -> int:
+    assert lstart < lend
+    assert rstart < rend
+    return min([lend, rend]) - max([lstart, rstart])
+
+
+def is_novel_locus(
+    record: GFF3Record,
+    itree: Dict[str, IntervalTree],
+    threshold: float
+) -> bool:
+    overlaps = itree.overlaps(record.start, record.end)
+
+    for overlap in overlaps:
+        if overlap.data == record:
+            continue
+
+        noverlap = nintersection(
+            record.start,
+            record.end,
+            overlap.begin,
+            overlap.end
+        )
+
+        if (noverlap / len(overlap)) > threshold:
+            return False
+
+    return True
+
+
+def write_results(
+    gff: GFF,
+    outfile: TextIO,
+    filtered_file: Optional[TextIO]
+) -> None:
+    seen = set()
+    for k in gff:
+        if k in seen:
+            continue
+
+        if (len(k.parents) == 0) and all_children_unreliable(k):
+            if k.attributes is None:
+                k.attributes = GFF3Attributes.empty()
+            k.attributes.custom["is_unreliable"] = "true"
+
+        if (len(k.parents) == 0) and all_children_excluded(k):
+            if k.attributes is None:
+                k.attributes = GFF3Attributes.empty()
+            k.attributes.custom["should_exclude"] = "true"
+
+        if ((k.attributes is not None)
+                and ("should_exclude" in k.attributes.custom)):
+            if filtered_file is not None:
+                print(k, file=filtered_file)
+        else:
+            print(k, file=outfile)
+
+        seen.add(k)
+
+    return
+
+
 def main():
     args = cli(sys.argv[0], sys.argv[1:])
     gff = GFF.parse(args.infile)
+
+    itree = gff_to_itree(gff.select_type(args.group_level))
 
     for mrna in gff.select_type(args.group_level):
 
@@ -155,6 +277,7 @@ def main():
         failed_antifam = "antifam_match" in mrna.attributes.custom
         if failed_antifam:
             mrna.attributes.custom["is_unreliable"] = "true"
+            mrna.attributes.custom["should_exclude"] = "true"
 
         length, aligned = deal_with_kids(
             gff.traverse_children([mrna]),
@@ -166,40 +289,34 @@ def main():
 
         coverages = find_coverages(aligned, length)
         supported = [k for k, v in coverages.items() if v > args.min_cov]
+        not_supported = ((len(supported) == 0) or
+                         (all(s in args.exclude for s in supported)))
 
-        lineage = list(gff.traverse_children([mrna], sort=True))
+        is_novel = is_novel_locus(mrna, itree, args.threshold)
 
-        if ((len(supported) == 0) or
-                (all(s in args.exclude for s in supported))):
-            sup = True
+        if not_supported:
+            lineage = list(gff.traverse_children([mrna], sort=True))
             for f in lineage:
                 if f.attributes is None:
                     f.attributes = GFF3Attributes.empty()
 
                 f.attributes.custom["is_unreliable"] = "true"
-        else:
-            sup = False
+                if not is_novel:
+                    f.attributes.custom["should_exclude"] = "true"
 
         if args.stats:
             line = coverages
             line["id"] = mrna.attributes.id
             line["length"] = length
-            line["filtered"] = sup
+            line["is_supported"] = not_supported
+            line["is_novel_locus"] = is_novel
+            line["antifam_match"] = failed_antifam
+            line["excluded"] = (failed_antifam
+                                or (not_supported and not is_novel))
+
             print(json.dumps(line), file=args.stats)
 
-    seen = set()
-    for k in gff:
-        if (len(k.parents) == 0) and all_children_failed(k):
-            if k.attributes is None:
-                k.attributes = GFF3Attributes.empty()
-            k.attributes.custom["is_unreliable"] = "true"
-
-        if k in seen:
-            continue
-        else:
-            print(k, file=args.outfile)
-            seen.add(k)
-
+    write_results(gff, args.outfile, args.filtered_file)
     return
 
 

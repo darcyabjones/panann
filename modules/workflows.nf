@@ -1431,12 +1431,13 @@ workflow filter_preds {
     kept_tidied = tidy_gff3(
         "hint_filtered",
         "",
-        filtered.map { n, k, s -> [n, k] }
+        filtered.map { n, k, e, s -> [n, k] }
     )
 
     emit:
     kept_tidied
-    filtered.map { n, k, s -> [n, s] }
+    filtered.map { n, k, e, s -> [n, s] }
+    filtered.map { n, k, e, s -> [n, e] }
 }
 
 

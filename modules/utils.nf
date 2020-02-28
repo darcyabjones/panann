@@ -400,12 +400,14 @@ process filter_genes_by_hints {
     output:
     tuple val(name),
           path("${name}_hint_filter.gff3"),
+          path("${name}_hint_filter_excluded.gff3"),
           path("${name}_hint_filter_stats.ldjson")
 
     script:
     """
     filter_genes_by_hints.py \
       -o "${name}_hint_filter.gff3" \
+      --filtered "${name}_hint_filter_excluded.gff3" \
       -s "${name}_hint_filter_stats.ldjson" \
       --exclude gemoma_comparative spaln_protein spaln_transcript gmap_transcript exonerate \
       -- \

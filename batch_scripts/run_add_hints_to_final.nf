@@ -49,7 +49,7 @@ workflow {
 
     antifam = press_antifam_hmms(antifam_tarball)
 
-    (filtered, filtered_stats) = filter_preds(
+    (filtered, filtered_stats, filtered_excluded) = filter_preds(
         params.trans_table,
         antifam,
         input_channels.genome,
@@ -69,4 +69,6 @@ workflow {
 
     publish:
     filtered to: "${params.outdir}/filtered"
+    filtered_stats to: "${params.outdir}/filtered"
+    filtered_excluded to: "${params.outdir}/filtered"
 }

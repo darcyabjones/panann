@@ -21,6 +21,7 @@ RUN  set -eu \
        python3-setuptools \
        python3-wheel \
        python3-biopython \
+       python3-intervaltree \
        git \
   && rm -rf /var/lib/apt/lists/* \
   && update-ca-certificates \
