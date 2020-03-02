@@ -412,6 +412,7 @@ process filter_genes_by_hints {
       --exclude gemoma_comparative spaln_protein spaln_transcript gmap_transcript exonerate \
       -- \
       in.gff3
+
     """
 }
 
@@ -546,5 +547,8 @@ process extract_seqs {
       -seqfile "${fasta}" \
       "sorted.gff3" \
     > "${name}_${analysis}.fna"
+
+    gt clean
+    rm sorted.gff3
     """
 }

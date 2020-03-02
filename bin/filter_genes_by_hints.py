@@ -152,6 +152,7 @@ def deal_with_kids(
 
         if is_unreliable:
             child.attributes.custom["is_unreliable"] = "true"
+            child.attributes.custom["should_exclude"] = "true"
 
         if child.type != type_:
             continue
@@ -212,7 +213,7 @@ def is_novel_locus(
     itree: Dict[str, IntervalTree],
     threshold: float
 ) -> bool:
-    overlaps = itree.overlaps(record.start, record.end)
+    overlaps = itree[record.seqid].overlap(record.start, record.end)
 
     for overlap in overlaps:
         if overlap.data == record:
@@ -295,7 +296,7 @@ def main():
         is_novel = is_novel_locus(mrna, itree, args.threshold)
 
         if not_supported:
-            lineage = list(gff.traverse_children([mrna], sort=True))
+            lineage = gff.traverse_children([mrna], sort=True)
             for f in lineage:
                 if f.attributes is None:
                     f.attributes = GFF3Attributes.empty()
@@ -308,7 +309,7 @@ def main():
             line = coverages
             line["id"] = mrna.attributes.id
             line["length"] = length
-            line["is_supported"] = not_supported
+            line["is_supported"] = not not_supported
             line["is_novel_locus"] = is_novel
             line["antifam_match"] = failed_antifam
             line["excluded"] = (failed_antifam
@@ -316,7 +317,7 @@ def main():
 
             print(json.dumps(line), file=args.stats)
 
-    write_results(gff, args.outfile, args.filtered_file)
+    write_results(gff, args.outfile, args.filtered)
     return
 
 
