@@ -30,7 +30,7 @@ RUN  set -eu \
   && git checkout "${GFFPAL_TAG}" \
   && pip3 install --prefix="${GFFPAL_PREFIX}" . \
   && add_python3_site "${GFFPAL_PREFIX}/lib/python3.7/site-packages" \
-  && add_runtime_dep python3 python3-biopython
+  && add_runtime_dep python3 python3-biopython python3-intervaltree
 
 
 FROM "${IMAGE}"

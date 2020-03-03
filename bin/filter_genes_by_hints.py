@@ -9,7 +9,6 @@ from collections import namedtuple, defaultdict
 from intervaltree import Interval, IntervalTree
 
 from typing import List, Set
-from typing import Optional
 from typing import TextIO
 from typing import Iterator
 from typing import Mapping, DefaultDict, Dict
@@ -209,7 +208,7 @@ def is_novel_locus(
     itree: Dict[str, IntervalTree],
     threshold: float
 ) -> bool:
-    overlaps = itree.overlaps(record.start, record.end)
+    overlaps = itree[record.seqid].overlap(record.start, record.end)
 
     for overlap in overlaps:
         if overlap.data == record:
@@ -350,7 +349,7 @@ def main():
             line = coverages
             line["id"] = mrna.attributes.id
             line["length"] = length
-            line["is_supported"] = not_supported
+            line["is_supported"] = not not_supported
             line["is_novel_locus"] = is_novel
             line["antifam_match"] = failed_antifam
             line["excluded"] = (failed_antifam
