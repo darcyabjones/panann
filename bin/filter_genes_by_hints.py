@@ -3,12 +3,12 @@
 import json
 import sys
 import argparse
+from copy import deepcopy
 from collections import namedtuple, defaultdict
 
 from intervaltree import Interval, IntervalTree
 
-from typing import List
-from typing import Optional
+from typing import List, Set
 from typing import TextIO
 from typing import Iterator
 from typing import Mapping, DefaultDict, Dict
@@ -140,7 +140,6 @@ def all_children_excluded(parent: GFF3Record) -> bool:
 
 def deal_with_kids(
     children: Iterator[GFF3Record],
-    is_unreliable: bool,
     type_: str,
     length: int,
     aligned: DefaultDict[str, int],
@@ -149,10 +148,6 @@ def deal_with_kids(
 
         if child.attributes is None:
             child.attributes = GFF3Attributes()
-
-        if is_unreliable:
-            child.attributes.custom["is_unreliable"] = "true"
-            child.attributes.custom["should_exclude"] = "true"
 
         if child.type != type_:
             continue
@@ -232,36 +227,87 @@ def is_novel_locus(
     return True
 
 
-def write_results(
+def write_gff(
     gff: GFF,
     outfile: TextIO,
-    filtered_file: Optional[TextIO]
 ) -> None:
-    seen = set()
-    for k in gff:
-        if k in seen:
-            continue
-
-        if (len(k.parents) == 0) and all_children_unreliable(k):
-            if k.attributes is None:
-                k.attributes = GFF3Attributes.empty()
-            k.attributes.custom["is_unreliable"] = "true"
-
-        if (len(k.parents) == 0) and all_children_excluded(k):
-            if k.attributes is None:
-                k.attributes = GFF3Attributes.empty()
-            k.attributes.custom["should_exclude"] = "true"
-
-        if ((k.attributes is not None)
-                and ("should_exclude" in k.attributes.custom)):
-            if filtered_file is not None:
-                print(k, file=filtered_file)
-        else:
-            print(k, file=outfile)
-
-        seen.add(k)
-
+    print("#gff-version 3", file=outfile)
+    for feature in gff.traverse_children(sort=True, breadth=True):
+        print(feature, file=outfile)
     return
+
+
+def split_gffs(gff: GFF, group_level: str) -> Tuple[GFF, GFF]:
+    keep: Set[GFF3Record] = set()
+    drop: Set[GFF3Record] = set()
+
+    for mrna in gff.select_type(group_level):
+        if mrna.attributes is None:
+            should_keep = True
+        elif "should_exclude" in mrna.attributes.custom:
+            should_keep = False
+        else:
+            should_keep = True
+
+        if should_keep:
+            keep.update(gff.traverse_children([mrna]))
+            keep.update(gff.traverse_parents([mrna]))
+        else:
+            drop.update(gff.traverse_children([mrna]))
+            drop.update(gff.traverse_parents([mrna]))
+
+    kept = prune_gff(keep)
+    dropped = prune_gff(drop)
+    return kept, dropped
+
+
+def prune_gff(records: Set[GFF3Record]) -> GFF:
+
+    new_records: Dict[GFF3Record, GFF3Record] = dict()
+
+    # Create a mapping from old to new objects
+    # to preserve hashing/lookup capability
+    for record in records:
+        new_record = deepcopy(record)
+        new_record.children = []
+        new_record.parents = []
+
+        new_records[record] = new_record
+
+    for record in records:
+        new_record = new_records[record]
+
+        for parent in record.parents:
+            # Don't add parents that shouldn't be in this set
+            if parent not in records:
+                continue
+
+            new_parent = new_records[parent]
+            new_record.add_parent(new_parent)
+
+        for child in record.children:
+            # Don't add children that shouldn't be in this set
+            if child not in records:
+                continue
+
+            new_child = new_records[child]
+            new_record.add_child(new_child)
+
+        # Update the record parent IDS to reflect the new split set.
+        if new_record.attributes is not None:
+            new_record.attributes.parent = []
+            for parent in new_record.parents:
+                # This should always be true, as the ID is necessary
+                assert parent.attributes is not None
+                assert parent.attributes.id is not None
+                new_record.attributes.parent.append(parent.attributes.id)
+        else:
+            # This necessarily should be true, since attributes define parent
+            # child relationships.
+            assert len(new_record.children) == 0
+            assert len(new_record.parents) == 0
+
+    return GFF(new_records.values())
 
 
 def main():
@@ -282,7 +328,6 @@ def main():
 
         length, aligned = deal_with_kids(
             gff.traverse_children([mrna]),
-            failed_antifam,
             args.type,
             0,
             defaultdict(int)
@@ -296,14 +341,9 @@ def main():
         is_novel = is_novel_locus(mrna, itree, args.threshold)
 
         if not_supported:
-            lineage = gff.traverse_children([mrna], sort=True)
-            for f in lineage:
-                if f.attributes is None:
-                    f.attributes = GFF3Attributes.empty()
-
-                f.attributes.custom["is_unreliable"] = "true"
-                if not is_novel:
-                    f.attributes.custom["should_exclude"] = "true"
+            mrna.attributes.custom["is_unreliable"] = "true"
+            if not is_novel:
+                mrna.attributes.custom["should_exclude"] = "true"
 
         if args.stats:
             line = coverages
@@ -317,7 +357,12 @@ def main():
 
             print(json.dumps(line), file=args.stats)
 
-    write_results(gff, args.outfile, args.filtered)
+    kept, dropped = split_gffs(gff, args.group_level)
+
+    write_gff(kept, args.outfile)
+
+    if args.filtered is not None:
+        write_gff(dropped, args.filtered)
     return
 
 
