@@ -1452,12 +1452,15 @@ workflow run_stats {
     augustus_config
 
     main:
-    (proteins, cdss) = extract_seqs(trans_table, gffs.combine(genomes, by: 0))
 
-    if (busco_lineage) {
+    if ( busco_lineage ) {
+        println "Hey!"
+    	(proteins, cdss) = extract_seqs(trans_table, gffs.view().combine(genomes, by: 0))
         busco_preds = busco_proteins(proteins, busco_lineage, augustus_config)
     } else {
         busco_preds = Channel.empty()
+        proteins = Channel.empty()
+        cdss = Channel.empty()
     }
 
     stats = get_stats(gffs)

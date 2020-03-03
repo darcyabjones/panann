@@ -62,6 +62,8 @@ workflow {
         input_channels.evm.map { n, f -> [n, "evm", f] },
         input_channels.augustus_gapfiller.map { n, f -> [n, "augustus_gapfiller", f] },
         input_channels.complete.map { n, f -> [n, "final", f] },
+        input_channels.filtered.map { n, f -> [n, "filtered", f] },
+        input_channels.filtered_excluded.map { n, f -> [n, "filtered_excluded", f] },
     )
 
     stats = run_stats(
