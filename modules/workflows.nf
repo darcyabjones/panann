@@ -47,6 +47,7 @@ include tidy_gff3 as tidy_known_gff3 from './utils'
 include tidy_gff3 as tidy_evm_gff3 from './utils'
 include tidy_gff3 as tidy_spaln_transcripts_gff3 from './utils'
 include tidy_gff3 as tidy_spaln_proteins_gff3 from './utils'
+include tidy_gff3 as tidy_filtered_excluded_gff3 from './utils'
 include combine_and_tidy_gff3 as combine_and_tidy_augustus_gff3 from './utils'
 include clean_transcripts from './utils'
 include combine_fastas from './utils'
@@ -1434,10 +1435,16 @@ workflow filter_preds {
         filtered.map { n, k, e, s -> [n, k] }
     )
 
+    dropped_tidied = tidy_filtered_excluded_gff3(
+        "hint_filtered_excluded",
+        "",
+        filtered.map { n, k, e, s -> [n, e] }
+    )
+
     emit:
     kept_tidied
     filtered.map { n, k, e, s -> [n, s] }
-    filtered.map { n, k, e, s -> [n, e] }
+    dropped_tidied
 }
 
 
@@ -1448,13 +1455,13 @@ workflow run_stats {
     genomes
     gffs // tuple(val(name), val(analysis), path(gff))
     known
+    run_busco
     busco_lineage
     augustus_config
 
     main:
 
-    if ( busco_lineage ) {
-        println "Hey!"
+    if ( run_busco ) {
     	(proteins, cdss) = extract_seqs(trans_table, gffs.view().combine(genomes, by: 0))
         busco_preds = busco_proteins(proteins, busco_lineage, augustus_config)
     } else {

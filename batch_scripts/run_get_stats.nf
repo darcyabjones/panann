@@ -48,8 +48,10 @@ workflow {
 
     if ( params.busco_lineage ) {
         busco_lineage = get_file(params.busco_lineage)
+        run_busco = true
     } else {
         busco_lineage = Channel.empty()
+        run_busco = false
     }
 
     gffs = input_channels.pasa.map { n, f -> [n, "pasa", f] } .mix(
@@ -71,6 +73,7 @@ workflow {
         input_channels.genome,
         gffs,
         input_channels.known,
+        run_busco,
         busco_lineage,
         augustus_config_dir,
     )

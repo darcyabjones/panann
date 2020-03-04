@@ -57,7 +57,7 @@ process busco_proteins {
     path "augustus_config"
 
     output:
-    path "${analysis}_busco"
+    path "${name}_${analysis}_busco"
 
     script:
     """
@@ -70,7 +70,7 @@ process busco_proteins {
       --mode "proteins" \
       --lineage_path "lineage"
 
-    mv "run_${name}" "${analysis}_busco"
+    mv "run_${name}" "${name}_${analysis}_busco"
     """
 }
 
