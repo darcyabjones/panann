@@ -12,7 +12,7 @@ process get_spaln_index {
     tag "${name}"
 
     input:
-    tuple val(name), path("in.fasta"), path("in.fasta.fai")
+    tuple val(name), path("in.fasta")
 
     output:
     tuple val(name),
@@ -55,13 +55,13 @@ process spaln_align_transcripts {
     val max_gene_hard
     val min_intron_soft
     tuple val(name),
-        path(bkn),
-        path(ent),
-        path(idx),
-        path(bkp),
-        path(grp),
-        path(seq)
-        path(transcripts)
+        path("db.bkn"),
+        path("db.ent"),
+        path("db.idx"),
+        path("db.bkp"),
+        path("db.grp"),
+        path("db.seq"),
+        path("transcripts.fasta")
 
     output:
     tuple val(name), path("${name}_spaln_transcripts.gff3")
@@ -81,8 +81,8 @@ process spaln_align_transcripts {
       -XG ${max_gene_hard} \
       -yL${min_intron_soft} \
       -t ${task.cpus} \
-      -d "${name}" \
-      "${fasta_clean}" \
+      -d db \
+      "transcripts.fasta" \
     > "${name}_spaln_transcripts.gff3"
     """
 }
@@ -105,12 +105,12 @@ process spaln_align_proteins {
     val min_intron_soft
     val max_gene_hard
     tuple val(name),
-        path(bkn),
-        path(ent),
-        path(idx),
-        path(bkp),
-        path(grp),
-        path(seq),
+        path("db.bkn"),
+        path("db.ent"),
+        path("db.idx"),
+        path("db.bkp"),
+        path("db.grp"),
+        path("db.seq"),
         path("proteins.fasta")
 
     output:
@@ -130,7 +130,7 @@ process spaln_align_proteins {
       -yL${min_intron_soft} \
       -XG${max_gene_hard} \
       -t ${task.cpus} \
-      -d "${name}" \
+      -d db \
       "proteins.fasta" \
     > "${name}_spaln_proteins.gff3"
     """
@@ -176,7 +176,7 @@ process get_gmap_index {
     tag "${name}"
 
     input:
-    tuple val(name), path(genome), path(faidx)
+    tuple val(name), path(genome)
 
     output:
     tuple val(name), path("${name}_gmap_index")
@@ -214,7 +214,7 @@ process gmap_align_transcripts {
         path("transcripts.fasta")
 
     output:
-    set val(name), file("${name}_gmap_transcripts.gff3") into gmapAlignedTranscripts
+    tuple val(name), path("${name}_gmap_transcripts.gff3")
 
     script:
     def trim_end_exons = 12
@@ -292,7 +292,7 @@ process get_mmseqs_genome_db {
     script:
     """
     mkdir -p "${name}_mmseqs_genome_db"
-    mmseqs createdb seqs.fasta "${name}_mmseqs_genome_db/db" --dont-split-seqs-by-len
+    mmseqs createdb seqs.fasta "${name}_mmseqs_genome_db/db" --dont-split-seq-by-len
     """
 }
 
@@ -481,7 +481,6 @@ process get_star_index {
     input:
     tuple val(name),
         path(fasta),
-        path(faidx),
         path(gff)
 
     output:
@@ -494,7 +493,7 @@ process get_star_index {
     def exon_feature = "exon"
 
     """
-    mkdir -p index
+    mkdir -p "${name}_star_index"
     STAR \
       --runThreadN ${task.cpus} \
       --runMode genomeGenerate \
@@ -578,21 +577,19 @@ process star_align_reads {
     val max_intron_len
     val extra_params
     tuple val(name),
-        path("index"),
         val(read_group),
+        path("genome.fasta"),
+        path("index"),
         path(r1s),
         path(r2s),
-        val(strand),
         path("*SJ.out.tab")
 
     output:
     tuple val(name),
         val(read_group),
-        path("${name}_${read_group}.cram"),
-        val(strand)
+        path("${name}_${read_group}.cram")
 
     script:
-    // todo assert all strand is same?
     def r1_joined = r1s.join(',')
     def r2_joined = r2s.join(',')
 
@@ -627,7 +624,7 @@ process star_align_reads {
     samtools view \
         -u \
         -C \
-        -T "${fasta}" \
+        -T "genome.fasta" \
         "${name}_${read_group}.Aligned.out.bam" \
     | samtools sort \
         -O cram \
@@ -638,5 +635,55 @@ process star_align_reads {
 
     rm -rf -- tmp
     rm -f *.bam
+    """
+}
+
+
+process press_antifam_hmms {
+
+    label "hmmer"
+    label "medium_task"
+
+    input:
+    path "in.tar.gz"
+
+    output:
+    tuple path("AntiFam.hmm"),
+          path("AntiFam.hmm.h3f"),
+          path("AntiFam.hmm.h3i"),
+          path("AntiFam.hmm.h3m"),
+          path("AntiFam.hmm.h3p")
+
+    script:
+    """
+    tar -zxf in.tar.gz
+    hmmpress AntiFam.hmm
+    """
+}
+
+
+process search_hmm_vs_proteins {
+
+    label "hmmer"
+    label "medium_task"
+
+    tag "${name}"
+
+    input:
+    tuple path("db.hmm"),
+          path("db.hmm.h3f"),
+          path("db.hmm.h3i"),
+          path("db.hmm.h3m"),
+          path("db.hmm.h3p")
+    tuple val(name),
+          path("proteins.fasta")
+
+    output:
+    tuple val(name),
+          path("hmm_matches.domtbl")
+
+    script:
+    """
+    hmmsearch --domtblout hmm_matches.domtbl --cut_ga db.hmm proteins.fasta > /dev/null
     """
 }

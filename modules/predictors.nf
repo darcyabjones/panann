@@ -68,13 +68,13 @@ process pasa {
     tuple val(name), path("${name}_pasa.gff3")
 
     script:
-    def use_stringent = params.notfungus ? '' : "--stringent_alignment_overlap 30.0 "
+    def use_stringent = not_fungus ? '' : "--stringent_alignment_overlap 30.0 "
 
     // Don't use stringtie if it is fungus
     // Stringtie and cufflinks tend to merge overlapping features,
     // which doesn't work well for organisms with high gene density.
-    def use_stringtie = (stringtie_gtf.name == "SGT_WAS_NULL" || !not_fungus) ? '' : "--trans_gtf ${stringtie_gtf} "
-    def use_known = known_sites.name == "WAS_NULL" ? '' : "-L --annots ${known_sites} "
+    def use_stringtie = (stringtie_gtf.name == "STRINTIE_WAS_NULL" || !not_fungus) ? '' : "--trans_gtf ${stringtie_gtf} "
+    def use_known = known_sites.name == "KNOWN_WAS_NULL" ? '' : "-L --annots ${known_sites} "
 
     // Transdecoder doesn't support standard integer based table access.
     def gen_code = "Universal"
@@ -403,23 +403,25 @@ process extract_gemoma_comparative_cds_parts {
     tag "${name} - ${analysis}"
 
     input:
-    set val(name),
+    tuple val(name),
         val(analysis),
-        file(fasta),
-        file(gff)
+        path(fasta),
+        path(gff)
 
     output:
-    set val(name),
+    tuple val(name),
         val(analysis),
-        file("${name}_${analysis}_cdsparts.fasta"),
-        file("${name}_${analysis}_assignment.tsv"),
-        file("${name}_${analysis}_proteins.fasta")
+        path("${name}_${analysis}_cdsparts.fasta"),
+        path("${name}_${analysis}_assignment.tsv"),
+        path("${name}_${analysis}_proteins.fasta")
 
     script:
     """
+    # The length thing in awk is just to skip empty lines.
+
     awk -F'\\t' -v name="${name}" -v analysis="${analysis}" '
       BEGIN { OFS="\\t" }
-      !/^#/ {
+      !/^#/ && length {
         \$1=name"."\$1;
         \$9=gensub(/Parent=([^;]+)/, "Parent="name"."analysis".\\\\1", "g", \$9);
         \$9=gensub(/ID=([^;]+)/, "ID="name"."analysis".\\\\1", "g", \$9);
@@ -541,9 +543,9 @@ process mmseqs_search_gemoma_cds_parts {
         path("genome") // Should be mmseqs db
 
     output:
-    set val(target_name),
+    tuple val(target_name),
         val(ref_name),
-        file("${target_name}_${ref_name}_mmseqs_search_gemoma_cds_parts_matches.tsv")
+        path("${target_name}_${ref_name}_mmseqs_search_gemoma_cds_parts_matches.tsv")
 
     script:
     """
@@ -589,22 +591,20 @@ process mmseqs_search_gemoma_cds_parts {
 process gemoma {
 
     label "gemoma"
-    label "small_task"
+    label "medium_task"
     time '6h'
 
     tag "${target_name} - ${ref_name}"
 
     input:
     tuple val(target_name),
-        val(ref_name),
-        path(fasta),
-        path("cds-parts.fasta"),
-        path("assignment.tabular"),
-        path("proteins.fasta"),
-        path("matches.tsv"),
-        path("introns.gff"),
-        path("coverage_forward.bedgraph"),
-        path("coverage_reverse.bedgraph")
+          val(ref_name),
+          path("genome.fasta"),
+          path("cds-parts.fasta"),
+          path("assignment.tabular"),
+          path("proteins.fasta"),
+          path("matches.tsv"),
+          path("introns.gff")
 
     output:
     tuple val(target_name),
@@ -617,17 +617,14 @@ process gemoma {
     mkdir -p out
     java -jar \${GEMOMA_JAR} CLI GeMoMa \
       s=matches.tsv \
-      t=${fasta} \
+      t=genome.fasta \
       c=cds-parts.fasta \
       a=assignment.tabular \
       q=proteins.fasta \
       outdir=out \
       sort=true \
       i=introns.gff \
-      r=2 \
-      coverage=STRANDED \
-      coverage_forward=coverage_forward.bedgraph \
-      coverage_reverse=coverage_reverse.bedgraph
+      r=2
 
     mv out/predicted_annotation.gff "${target_name}_${ref_name}_gemoma.gff3"
 
@@ -649,18 +646,16 @@ process gemoma_combine {
     tag "${name}"
 
     input:
-    val not_fungus
+    val analysis
     tuple val(name),
         val(ref_names),
         path(pred_gffs),
         path(fasta),
-        path("introns.gff"),
-        path("coverage_forward.bedgraph"),
-        path("coverage_reverse.bedgraph")
+        path("introns.gff")
 
     output:
     tuple val(name),
-        path("${name}_gemoma_combined.gff3")
+        path("${name}_${analysis}_combined.gff3")
 
     script:
     def ref_names_list = ref_names
@@ -674,35 +669,35 @@ process gemoma_combine {
         .collect { rn, pred -> "p=${rn} g=${pred.name}" }
         .join(' ')
 
-    get_utr = not_fungus ? "true": "false"
-
     """
     mkdir -p gaf
     java -jar \${GEMOMA_JAR} CLI GAF \
       ${preds} \
       outdir=gaf
 
-    if ${get_utr}
-    then
-      mkdir -p finalised
-      java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
-        g=${fasta} \
-        a=gaf/filtered_predictions.gff \
-        i=introns.gff \
-        u=YES \
-        c=STRANDED \
-        coverage_forward=coverage_forward.bedgraph \
-        coverage_reverse=coverage_reverse.bedgraph \
-        outdir=finalised \
-        rename=NO
+    # if \${get_utr}
+    # then
+    #   mkdir -p finalised
+    #   java -jar \${GEMOMA_JAR} CLI AnnotationFinalizer \
+    #     g=${fasta} \
+    #     a=gaf/filtered_predictions.gff \
+    #     i=introns.gff \
+    #     u=YES \
+    #     c=STRANDED \
+    #     coverage_forward=coverage_forward.bedgraph \
+    #     coverage_reverse=coverage_reverse.bedgraph \
+    #     outdir=finalised \
+    #     rename=NO
 
-      mv finalised/final_annotation.gff gemoma_tmp.gff3
-    else
-      mv gaf/filtered_predictions.gff gemoma_tmp.gff3
-    fi
+    #   mv finalised/final_annotation.gff gemoma_tmp.gff3
+    # else
+    #   mv gaf/filtered_predictions.gff gemoma_tmp.gff3
+    # fi
+
+    mv gaf/filtered_predictions.gff gemoma_tmp.gff3
 
     awk 'BEGIN {OFS="\\t"} \$3 == "prediction" {\$3="mRNA"} {print}' \
-      gemoma_tmp.gff3 > "${name}_gemoma_combined.gff3"
+      gemoma_tmp.gff3 > "${name}_${analysis}_combined.gff3"
 
     rm -rf -- gaf finalised GeMoMa_temp gemoma_tmp.gff3
     """
@@ -857,7 +852,6 @@ process augustus_hints {
       --errfile=augustus.err \
       "${fasta}"
 
-
     awk -F '\\t' '
       BEGIN {OFS="\\t"}
       \$3 == "transcript" {\$3="mRNA"}
@@ -880,12 +874,10 @@ process evm {
     val min_intron_hard
     path "weights.txt"
     tuple val(name),
-        path(fasta),
-        path(faidx),
-        path("denovo.gff3"),
-        path("transcripts.gff3"),
-        path("proteins.gff3"),
-        path("other.gff3")
+        path("genome.fasta"),
+        path("transcripts/*"),
+        path("proteins/*"),
+        path("genes/*")
 
     output:
     tuple val(name),
@@ -893,9 +885,32 @@ process evm {
 
     script:
     """
+    mkdir -p genes transcripts proteins
+
+    if [ "\$(ls -A genes)" ]
+    then
+        grep --no-filename -v "^#" genes/* > genes.gff3
+    else
+        touch genes.gff3
+    fi
+
+    if [ "\$(ls -A transcripts)" ]
+    then
+        grep --no-filename -v "^#" transcripts/* > transcripts.gff3
+    else
+        touch transcripts.gff3
+    fi
+
+    if [ "\$(ls -A proteins)" ]
+    then
+        grep --no-filename -v "^#" proteins/* > proteins.gff3
+    else
+        touch proteins.gff3
+    fi
+
     partition_EVM_inputs.pl \
-      --genome "${fasta}" \
-      --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --genome genome.fasta \
+      --gene_predictions genes.gff3 \
       --protein_alignments proteins.gff3 \
       --transcript_alignments transcripts.gff3 \
       --segmentSize 500000 \
@@ -903,9 +918,9 @@ process evm {
       --partition partitions_list.out
 
     write_EVM_commands.pl \
-      --genome "${fasta}" \
+      --genome genome.fasta \
       --weights "\${PWD}/weights.txt" \
-      --gene_predictions <(cat denovo.gff3 other.gff3) \
+      --gene_predictions genes.gff3 \
       --min_intron_length "${min_intron_hard}" \
       --protein_alignments proteins.gff3 \
       --transcript_alignments transcripts.gff3 \
@@ -922,7 +937,7 @@ process evm {
     convert_EVM_outputs_to_GFF3.pl \
       --partitions partitions_list.out \
       --output evm.out \
-      --genome "${fasta}"
+      --genome genome.fasta
 
     find . -regex ".*evm.out.gff3" -exec cat {} \\; > "${name}_evm.gff3"
     """
@@ -948,22 +963,42 @@ process find_missing_evm_predictions {
     input:
     tuple val(name),
         path("evm.gff3"),
-        path("denovo.gff3"),
-        path("transcripts.gff3"),
-        path("proteins.gff3"),
-        path("other.gff3"),
-        path(faidx)
+        path("genes/*"),
+        path("genome.faidx")
 
     output:
     tuple val(name), path("clustered.bed")
 
     script:
     """
+    if [ -d genes ]
+    then
+        grep --no-filename -v "^#" genes/* > genes.gff3
+    else
+        touch genes.gff3
+    fi
+
+    if [ -d transcripts ]
+    then
+        grep --no-filename -v "^#" transcripts/* > transcripts.gff3
+    else
+        touch transcripts.gff3
+    fi
+
+    if [ -d proteins ]
+    then
+        grep --no-filename -v "^#" proteins/* > proteins.gff3
+    else
+        touch proteins.gff3
+    fi
+
+    mkdir tmp
+
     awk -F'\\t' '
       BEGIN { OFS="\\t" }
       \$3 == "mRNA" {
         print \$1, \$4, \$5, ".", ".", \$7
-      }' other.gff3 \
+      }' genes.gff3 \
     | sort \
       -k1,1 -k2,2n -k3,3n \
       --temporary-directory=tmp \
@@ -973,8 +1008,10 @@ process find_missing_evm_predictions {
         -s \
         -A \
     | bedtools merge -s -c 6 -o distinct -i - \
-    | bedtools slop -g "${faidx}" -b 5 -i - \
+    | bedtools slop -g genome.faidx -b 5 -i - \
     > clustered.bed
+
+    rm -rf -- tmp
     """
 }
 
@@ -998,8 +1035,8 @@ process augustus_gap_filler {
         path("toredo.bed"),
         path("*hints")
 
-    path "augustus_config" from augustusConfig
-    path "extrinsic.cfg" from augustusGapFillerWeights
+    path "augustus_config"
+    path "extrinsic.cfg"
 
     output:
     tuple val(name), path("augustus_gaps/*.gff3")
@@ -1010,6 +1047,9 @@ process augustus_gap_filler {
     utr_flag = augustus_utr ? "-u" : ""
 
     """
+    export AUGUSTUS_CONFIG_PATH="\${PWD}/augustus_config"
+    perl -n -e'/>(\\S+)/ && print \$1."\\n"' < "${fasta}" > seqids.txt
+
     if ${is_utr} && ${is_fungus}
     then
       # Gemoma doesn't do fungal utrs well.
@@ -1026,10 +1066,13 @@ process augustus_gap_filler {
       > hints.gff
     fi
 
+    getLinesMatching.pl seqids.txt 1 < hints.gff > hints_filtered.gff
+    getLinesMatching.pl seqids.txt 1 < toredo.bed > toredo_filtered.bed
+
     augustus_region.sh \
       -f "${fasta}" \
-      -b "toredo.bed" \
-      -g "hints.gff" \
+      -b "toredo_filtered.bed" \
+      -g "hints_filtered.gff" \
       -s "${augustus_species}" \
       -c "extrinsic.cfg" \
       -a "\${PWD}/augustus_config" \
@@ -1037,7 +1080,27 @@ process augustus_gap_filler {
       ${utr_flag} \
       -n "${task.cpus}" \
       -m "${min_intron_hard}" \
-      -o "augustus_gaps"
+      -o "augustus_gaps_tmp"
+
+    mkdir augustus_gaps
+    for f in augustus_gaps_tmp/*.gff3
+    do
+        BNAME=\$(basename "\${f}")
+        awk -F '\\t' '
+          BEGIN {OFS="\\t"}
+          \$3 == "transcript" {\$3="mRNA"}
+          \$0 !~ /^#/ {print}
+        ' "\${f}" \
+        > "augustus_gaps/\${BNAME}"
+
+        # Remove any empty files.
+        if [ ! -s "augustus_gaps/\${BNAME}" ]
+        then
+            rm "augustus_gaps/\${BNAME}"
+        fi
+    done
+
+    rm -rf -- augustus_gaps_tmp
     """
 }
 

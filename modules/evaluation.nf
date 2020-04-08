@@ -14,18 +14,13 @@ process busco {
 
     tag "${name}"
 
-    publishDir "${params.outdir}/qc/${name}"
-
-    when:
-    params.busco_lineage && params.busco_genomes
-
     input:
-    set val(name), file(fasta), file(faidx) from genomes4Busco
-    file "lineage" from buscoLineage
-    file "augustus_config" from augustusConfig
+    tuple val(name), file(fasta), file(faidx) from genomes4Busco
+    path "lineage" from buscoLineage
+    path "augustus_config" from augustusConfig
 
     output:
-    file "${name}" into buscoResults
+    path "${name}" into buscoResults
 
     script:
     """
@@ -46,7 +41,7 @@ process busco {
 /*
  * Evaluate gene predictions using protein comparisons with BUSCO sets.
  */
-process runBuscoProteins {
+process busco_proteins {
 
     label "busco"
     label "medium_task"
@@ -54,18 +49,15 @@ process runBuscoProteins {
 
     tag "${name} - ${analysis}"
 
-    publishDir "${params.outdir}/qc/${name}"
-
-    when:
-    params.busco_lineage
-
     input:
-    set val(name), val(analysis), file(fasta) from extractedProteins
-    file "lineage" from buscoLineage
-    file "augustus_config" from augustusConfig
+    tuple val(name),
+          val(analysis),
+          path(fasta)
+    path "lineage"
+    path "augustus_config"
 
     output:
-    file "${analysis}_busco" into buscoProteinsResults
+    path "${name}_${analysis}_busco"
 
     script:
     """
@@ -78,7 +70,7 @@ process runBuscoProteins {
       --mode "proteins" \
       --lineage_path "lineage"
 
-    mv "run_${name}" "${analysis}_busco"
+    mv "run_${name}" "${name}_${analysis}_busco"
     """
 }
 
@@ -86,7 +78,7 @@ process runBuscoProteins {
 /*
  * Get number of genes, exons, distributions of lengths etc.
  */
-process getStats {
+process get_stats {
 
     label "genometools"
     label "small_task"
@@ -94,13 +86,11 @@ process getStats {
 
     tag "${name} - ${analysis}"
 
-    publishDir "${params.outdir}/qc/${name}"
-
     input:
-    set val(name), val(analysis), file(preds) from predictions4Stats
+    tuple val(name), val(analysis), path(preds)
 
     output:
-    file "${name}_${analysis}_stats.txt"
+    path "${name}_${analysis}_stats.txt"
 
     script:
     """
@@ -121,7 +111,7 @@ process getStats {
 /*
  * Get distributions of splice site pairs.
  */
-process getSpliceSiteInfo {
+process get_splice_site_info {
 
     label "genometools"
     label "small_task"
@@ -129,18 +119,14 @@ process getSpliceSiteInfo {
 
     tag "${name} - ${analysis}"
 
-    publishDir "${params.outdir}/qc/${name}"
-
     input:
-    set val(name),
+    tuple val(name),
         val(analysis),
-        file(preds),
-        file(fasta),
-        file(faidx) from predictions4GetSpliceSiteInfo
-            .combine(genomes4GetSpliceSiteInfo, by: 0)
+        path(preds),
+        path(fasta)
 
     output:
-    file "${name}_${analysis}_splice_sites.txt"
+    path "${name}_${analysis}_splice_sites.txt"
 
     script:
     """
@@ -157,7 +143,7 @@ process getSpliceSiteInfo {
 /*
  * Get stats when we have known sites
  */
-process getKnownStats {
+process get_known_stats {
 
     label "aegean"
     label "small_task"
@@ -165,15 +151,14 @@ process getKnownStats {
 
     tag "${name} - ${analysis}"
 
-    publishDir "${params.outdir}/qc/${name}"
-
     input:
-    set val(name), val(analysis), file(preds), file(known) from predictions4KnownStats
-        .combine(genomes4GetKnownStats.map { n, f, i, g -> [n, g] }, by: 0)
-        .filter { n, a, p, k -> k.name != "WAS_NULL" }
+    tuple val(name),
+          val(analysis),
+          path(preds),
+          path(known)
 
     output:
-    file "${name}_${analysis}_parseval.txt"
+    path "${name}_${analysis}_parseval.txt"
 
     script:
     """

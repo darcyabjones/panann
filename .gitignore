@@ -2,8 +2,12 @@
 .nextflow*
 *.log*
 
+**.swp
+
 # Created during pipeline
 test/*.fai
+
+.mypy_cache
 
 work
 aligned

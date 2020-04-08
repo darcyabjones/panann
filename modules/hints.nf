@@ -31,7 +31,7 @@ process extract_augustus_hints {
 
     script:
 
-    def use_part = is_final ? "Part": ""
+    def use_part = is_final ? "": "part"
     """
     gffpal hints \
         --source "${hint_source}" \
@@ -95,7 +95,7 @@ process extract_augustus_split_hints {
 
     script:
 
-    def use_part = is_final ? "Part": ""
+    def use_part = is_final ? "": "part"
     """
     awk -F '\t' '\$3 == "exon" || \$3 == "intron" || \$3 == "mRNA"' in.gff3 \
     | gffpal hints \
@@ -155,19 +155,19 @@ process extract_exonerate_hints {
     label "small_task"
     time '2h'
 
-    tag "${name}"
+    tag "${genome_name} - ${protein_name}"
 
     input:
-    val min_intron_soft
+    val min_intron_hard
     val max_intron_hard
-    set val(genome_name),
-        val(protein_name),
-        file("exonerate.gff")
+    tuple val(genome_name),
+          val(protein_name),
+          path("exonerate.gff")
 
     output:
-    set val(genome_name),
-        val(protein_name),
-        file("${genome_name}_${protein_name}_exonerate_hints.gff3")
+    tuple val(genome_name),
+          val(protein_name),
+          path("${genome_name}_${protein_name}_exonerate_hints.gff3")
 
     script:
     """
@@ -176,7 +176,7 @@ process extract_exonerate_hints {
       --out=hints.gff3 \
       --prg=exonerate \
       --CDSpart_cutoff=15 \
-      --minintronlen="${min_intron_soft}" \
+      --minintronlen="${min_intron_hard}" \
       --maxintronlen="${max_intron_hard}" \
       --priority=2 \
       --source=T
@@ -184,37 +184,13 @@ process extract_exonerate_hints {
     awk -F '\\t' '
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
-        sub(/grp=/, "grp=${name}_exonerate_", \$9)
-        \$2 = "Exonerate";
+        sub(/grp=/, "grp=${genome_name}_${protein_name}_exonerate_", \$9)
+        \$2 = "exonerate";
         print
       }
       ' \
       hints.gff3 \
     > "${genome_name}_${protein_name}_exonerate_hints.gff3"
-
-
-    align2hints.pl \
-      --in=exonerate.gff \
-      --out=evm.gff3 \
-      --prg=exonerate \
-      --CDSpart_cutoff=0 \
-      --minintronlen="${params.min_intron_soft}" \
-      --maxintronlen="${params.max_intron_hard}" \
-      --priority=2 \
-      --source=T
-
-    awk -F '\\t' '
-      BEGIN {OFS="\\t"}
-      \$3 == "CDSpart" {
-        id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
-        \$9="ID=${name}_exonerate_"id;
-        \$2 = "Exonerate";
-        \$3 = "nucleotide_to_protein_match";
-        print
-      }
-      ' \
-      evm.gff3 \
-    > "${name}_exonerate_remote_protein_evm.gff3"
     """
 }
 
@@ -229,10 +205,10 @@ process extract_exonerate_evm_hints {
     label "small_task"
     time '2h'
 
-    tag "${name}"
+    tag "${genome_name} - ${protein_name}"
 
     input:
-    val min_intron_soft
+    val min_intron_hard
     val max_intron_hard
     set val(genome_name),
         val(protein_name),
@@ -250,7 +226,7 @@ process extract_exonerate_evm_hints {
       --out=evm.gff3 \
       --prg=exonerate \
       --CDSpart_cutoff=0 \
-      --minintronlen="${min_intron_soft}" \
+      --minintronlen="${min_intron_hard}" \
       --maxintronlen="${max_intron_hard}" \
       --priority=2 \
       --source=T
@@ -259,8 +235,8 @@ process extract_exonerate_evm_hints {
       BEGIN {OFS="\\t"}
       \$3 == "CDSpart" {
         id=gensub(/.*grp=([^;]+).*/, "\\\\1", "g", \$9);
-        \$9="ID=${name}_exonerate_"id;
-        \$2 = "Exonerate";
+        \$9="ID=${genome_name}_${protein_name}_exonerate_"id;
+        \$2 = "exonerate";
         \$3 = "nucleotide_to_protein_match";
         print
       }
@@ -293,7 +269,6 @@ process extract_augustus_rnaseq_hints {
     tuple val(name),
         val(read_group),
         path(fasta),
-        path(faidx),
         path(cram)
 
     output:
@@ -407,7 +382,7 @@ process extract_gemoma_rnaseq_hints {
  * Gemoma joins the rnaseq hints into one.
  * I think it's basically just a cat | sort.
  */
-process combineGemomaRnaseqHints {
+process combine_gemoma_rnaseq_hints {
 
     label "gemoma"
     label "small_task"
@@ -443,5 +418,103 @@ process combineGemomaRnaseqHints {
       projects.gemoma.CombineCoverageFiles \
       "${name}_gemoma_reverse.bedgraph" \
       *r.bedgraph
+    """
+}
+
+
+process extract_gmap_evm_hints {
+
+    label "posix"
+    label "small_task"
+    time "1h"
+
+    tag "${name}"
+
+    input:
+    tuple val(name),
+          path("in.gff3")
+
+    output:
+    tuple val(name),
+          path("${name}_gmap_evm_hints.gff3")
+
+    script:
+    """
+    awk -F'\t' '
+      BEGIN { OFS="\t" }
+      \$3 == "cDNA_match" {
+        \$2="gmap";
+        print
+      }
+    ' in.gff3 \
+    >> "${name}_gmap_evm_hints.gff3"
+    """
+}
+
+
+process extract_spaln_transcript_evm_hints {
+
+    label "posix"
+    label "small_task"
+    time "1h"
+
+    tag "${name}"
+
+    input:
+    tuple val(name),
+          path("in.gff3")
+
+    output:
+    tuple val(name),
+          path("${name}_spaln_transcript_evm_hints.gff3")
+
+    script:
+    """
+    awk -F'\t' '
+      BEGIN { OFS="\t" }
+      \$3 == "exon" {
+        parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
+        target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
+        \$9="ID=${name}_spaln_transcript" parent ";Target=" target;
+        \$2="spaln_transcript";
+        \$3="cDNA_match";
+        print
+      }
+    ' in.gff3 \
+    >> "${name}_spaln_transcript_evm_hints.gff3"
+    """
+}
+
+
+process extract_spaln_protein_evm_hints {
+
+    label "posix"
+    label "small_task"
+    time "1h"
+
+    tag "${name}"
+
+    input:
+    tuple val(name),
+          path("in.gff3")
+
+    output:
+    tuple val(name),
+          path("${name}_spaln_protein_evm_hints.gff3")
+
+    script:
+    """
+    awk -F'\t' '
+      BEGIN { OFS="\t" }
+      \$3 == "CDS" || \$3 == "cds" {
+        parent=gensub(/.*Parent=([^;]+).*/, "\\\\1", "g", \$9);
+        target=gensub(/.*Target=([^;]+).*/, "\\\\1", "g", \$9);
+        \$9="ID=${name}_spaln_protein" parent ";Target=" target;
+        \$2="spaln_protein";
+        \$3="nucleotide_to_protein_match";
+        print
+      }
+    ' in.gff3 \
+    >> "${name}_spaln_protein_evm_hints.gff3"
     """
 }

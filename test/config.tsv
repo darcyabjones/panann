@@ -1,5 +1,7 @@
-read_group	name	r1	r2	gff3
-rg1		test/SRR6163776_1.fastq.gz	test/SRR6163776_2.fastq.gz
-rg1		test/SRR6163911_1.fastq.gz	test/SRR6163911_2.fastq.gz
-	A_fumigatus_A1163_chr1_chr2			test/A_fumigatus_A1163_chr1_chr2.gff3
-	A_fumigatus_Af293_chr1_chr2			test/A_fumigatus_Af293_chr1_chr2.gff3
+name	analysis	file	read_group	strand
+	fastq_forward	test/SRR6163776_1.fastq.gz	rg1	fr
+	fastq_forward	test/SRR6163911_1.fastq.gz	rg1	fr
+	fastq_reverse	test/SRR6163776_2.fastq.gz	rg1	fr
+	fastq_reverse	test/SRR6163911_2.fastq.gz	rg1	fr
+A_fumigatus_A1163_chr1_chr2	known	test/A_fumigatus_A1163_chr1_chr2.gff3		
+A_fumigatus_Af293_chr1_chr2	known	test/A_fumigatus_Af293_chr1_chr2.gff3		

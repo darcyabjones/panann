@@ -19,7 +19,6 @@ process stringtie_assemble {
     tuple val(name),
         val(read_group),
         path(fasta),
-        path(faidx),
         path(cram),
         val(strand),
         path(gff)
