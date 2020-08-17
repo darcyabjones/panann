@@ -158,6 +158,8 @@ def deal_with_kids(
         hints = child.attributes.custom.get("hint", None)
         if hints is None:
             continue
+        else:
+            hints = hints.replace("%2C", ",")
 
         for h in hints.split(","):
             this_hint = parse_hint(h)
